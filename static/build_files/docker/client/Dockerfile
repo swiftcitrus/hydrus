@@ -28,7 +28,10 @@ COPY --chown=hydrus . /opt/hydrus
 COPY --chown=hydrus --from=suika/swftools:2013-04-09-1007 /swftools/swfrender /opt/hydrus/bin/swfrender_linux
 
 RUN mv /opt/hydrus/static/build_files/docker/client/supervisord.conf /etc/supervisord.conf && \
-    cp /opt/noVNC/vnc.html /opt/noVNC/index.html
+    mv /opt/hydrus/static/build_files/docker/client/novnc/index.html /opt/noVNC/index.html && \
+    mv /opt/hydrus/static/build_files/docker/client/novnc/icon.png /opt/noVNC/app/images/icons/icon.png && \
+    mkdir /usr/local/share/fvwm && \
+    mv /opt/hydrus/static/build_files/docker/client/config /usr/local/share/fvwm/config
 
 RUN ln -fs /usr/bin/python3 /usr/bin/python && ln -fs /usr/bin/pip3 /usr/bin/pip
 
@@ -45,7 +48,6 @@ ENV QT_SCALE_FACTOR=1.1 \
     XVFB_EXTRA="" \
     VNC_EXTRA="" \
     NOVNC_EXTRA="" \
-    HYDRUS_EXTRA="" \
-    FVWM_EXTRA=""
+    HYDRUS_EXTRA="" 
 
 EXPOSE 5800 5900
