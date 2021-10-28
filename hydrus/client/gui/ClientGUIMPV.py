@@ -67,6 +67,10 @@ def GetClientAPIVersionString():
         
     '''
 
+def log_handler( loglevel, component, message ):
+    
+    HydrusData.DebugPrint( '[{}] {}: {}'.format( loglevel, component, message ) )
+    
 #Not sure how well this works with hardware acceleration. This just renders to a QWidget. In my tests it seems fine, even with vdpau video out, but I'm not 100% sure it actually uses hardware acceleration.
 #Here is an example on how to render into a QOpenGLWidget instead: https://gist.github.com/cosven/b313de2acce1b7e15afda263779c0afc
 class mpvWidget( QW.QWidget ):
@@ -88,8 +92,10 @@ class mpvWidget( QW.QWidget ):
         self.setAttribute( QC.Qt.WA_DontCreateNativeAncestors )
         self.setAttribute( QC.Qt.WA_NativeWindow )
         
+        loglevel = 'debug' if HG.mpv_report_mode else 'fatal'
+        
         # loglevels: fatal, error, debug
-        self._player = mpv.MPV( wid = str( int( self.winId() ) ), log_handler = print, loglevel = 'fatal' )
+        self._player = mpv.MPV( wid = str( int( self.winId() ) ), log_handler = log_handler, loglevel = loglevel )
         
         # hydev notes on OSC:
         # OSC is by default off, default input bindings are by default off
@@ -130,6 +136,7 @@ class mpvWidget( QW.QWidget ):
         HG.client_controller.sub( self, 'UpdateAudioMute', 'new_audio_mute' )
         HG.client_controller.sub( self, 'UpdateAudioVolume', 'new_audio_volume' )
         HG.client_controller.sub( self, 'UpdateConf', 'notify_new_options' )
+        HG.client_controller.sub( self, 'SetLogLevel', 'set_mpv_log_level' )
         
         self._my_shortcut_handler = ClientGUIShortcuts.ShortcutsHandler( self, [], catch_mouse = True )
         
@@ -218,7 +225,9 @@ class mpvWidget( QW.QWidget ):
                 return
                 
             
-            if self._media is not None and self._player.time_pos <= 1.0:
+            current_timestamp_s = self._player.time_pos
+            
+            if self._media is not None and current_timestamp_s is not None and current_timestamp_s <= 1.0:
                 
                 self._current_seek_to_start_count += 1
                 
@@ -346,11 +355,9 @@ class mpvWidget( QW.QWidget ):
         
         command_processed = True
         
-        data = command.GetData()
-        
         if command.IsSimpleCommand():
             
-            action = data
+            action = command.GetSimpleAction()
             
             if action == CAC.SIMPLE_PAUSE_MEDIA:
                 
@@ -359,6 +366,12 @@ class mpvWidget( QW.QWidget ):
             elif action == CAC.SIMPLE_PAUSE_PLAY_MEDIA:
                 
                 self.PausePlay()
+                
+            elif action == CAC.SIMPLE_MEDIA_SEEK_DELTA:
+                
+                ( direction, duration_ms ) = command.GetSimpleData()
+                
+                self.SeekDelta( direction, duration_ms )
                 
             elif action == CAC.SIMPLE_OPEN_FILE_IN_EXTERNAL_PROGRAM:
                 
@@ -388,22 +401,6 @@ class mpvWidget( QW.QWidget ):
         return command_processed
         
     
-    def SetCanvasType( self, canvas_type ):
-        
-        self._canvas_type = canvas_type
-        
-        if self._canvas_type == ClientGUICommon.CANVAS_MEDIA_VIEWER:
-            
-            shortcut_set = 'media_viewer_media_window'
-            
-        else:
-            
-            shortcut_set = 'preview_media_window'
-            
-        
-        self._my_shortcut_handler.SetShortcuts( [ shortcut_set ] )
-        
-    
     def Seek( self, time_index_ms ):
         
         if not self._file_is_loaded:
@@ -429,6 +426,46 @@ class mpvWidget( QW.QWidget ):
             # on some files, this seems to fail with a SystemError lmaoooo
             # with the same elegance, we will just pass all errors
             
+        
+    
+    def SeekDelta( self, direction, duration_ms ):
+        
+        if not self._file_is_loaded:
+            
+            return
+            
+        
+        current_timestamp_s = self._player.time_pos
+        
+        new_timestamp_ms = max( 0, ( current_timestamp_s * 1000 ) + ( direction * duration_ms ) )
+        
+        if new_timestamp_ms > self._media.GetDuration():
+            
+            new_timestamp_ms = 0
+            
+        
+        self.Seek( new_timestamp_ms )
+        
+    
+    def SetCanvasType( self, canvas_type ):
+        
+        self._canvas_type = canvas_type
+        
+        if self._canvas_type == ClientGUICommon.CANVAS_MEDIA_VIEWER:
+            
+            shortcut_set = 'media_viewer_media_window'
+            
+        else:
+            
+            shortcut_set = 'preview_media_window'
+            
+        
+        self._my_shortcut_handler.SetShortcuts( [ shortcut_set ] )
+        
+    
+    def SetLogLevel( self, level: str ):
+        
+        self._player.set_loglevel( level )
         
     
     def SetMedia( self, media, start_paused = False ):

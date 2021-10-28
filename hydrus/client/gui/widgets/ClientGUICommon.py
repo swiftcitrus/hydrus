@@ -89,15 +89,15 @@ def WrapInGrid( parent, rows, expand_text = False, add_stretch_at_end = True ):
     
     return gridbox
     
-def WrapInText( control, parent, text, colour = None ):
+def WrapInText( control, parent, text, object_name = None ):
     
     hbox = QP.HBoxLayout()
     
     st = BetterStaticText( parent, text )
     
-    if colour is not None:
+    if object_name is not None:
         
-        QP.SetForegroundColour( st, colour )
+        st.setObjectName( object_name )
         
     
     QP.AddToLayout( hbox, st, CC.FLAGS_CENTER_PERPENDICULAR )
@@ -713,6 +713,11 @@ class CheckboxManagerOptions( CheckboxManager ):
         new_options = HG.client_controller.new_options
         
         new_options.InvertBoolean( self._boolean_name )
+        
+        if self._boolean_name == 'advanced_mode':
+            
+            HG.client_controller.pub( 'notify_advanced_mode' )
+            
         
         HG.client_controller.pub( 'checkbox_manager_inverted' )
         HG.client_controller.pub( 'notify_new_menu_option' )
@@ -1663,10 +1668,10 @@ class StaticBox( QW.QFrame ):
         
         title_font = QG.QFont( normal_font_family, int( normal_font_size ), QG.QFont.Bold )
         
-        title_text = QW.QLabel( title, self )
-        title_text.setFont( title_font )
+        self._title_st = BetterStaticText( self, label = title )
+        self._title_st.setFont( title_font )
         
-        QP.AddToLayout( self._sizer, title_text, CC.FLAGS_CENTER )
+        QP.AddToLayout( self._sizer, self._title_st, CC.FLAGS_CENTER )
         
         self.setLayout( self._sizer )
         
@@ -1680,6 +1685,11 @@ class StaticBox( QW.QFrame ):
         QP.AddToLayout( self._sizer, widget, flags )
 
         self.layout().addSpacerItem( self._spacer )
+        
+    
+    def SetTitle( self, title ):
+        
+        self._title_st.setText( title )
         
     
 class RadioBox( StaticBox ):

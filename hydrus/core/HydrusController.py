@@ -1,5 +1,4 @@
 import collections
-import gc
 import os
 import random
 import sys
@@ -13,6 +12,7 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusPubSub
 from hydrus.core import HydrusThreading
+from hydrus.core import HydrusTemp
 from hydrus.core.networking import HydrusNATPunch
 
 class HydrusController( object ):
@@ -161,7 +161,7 @@ class HydrusController( object ):
     
     def _InitTempDir( self ):
         
-        self.temp_dir = HydrusPaths.GetTempDir()
+        self.temp_dir = HydrusTemp.GetTempDir()
         
     
     def _MaintainCallToThreads( self ):
@@ -619,18 +619,16 @@ class HydrusController( object ):
     
     def MaintainMemorySlow( self ):
         
-        gc.collect()
-        
-        HydrusPaths.CleanUpOldTempPaths()
+        HydrusTemp.CleanUpOldTempPaths()
         
         self._MaintainCallToThreads()
         
     
-    def PrintProfile( self, summary, profile_text ):
+    def PrintProfile( self, summary, profile_text = None ):
         
-        boot_pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( self.GetBootTime() ) )
+        pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( HG.profile_start_time ) )
         
-        profile_log_filename = self._name + ' profile - ' + boot_pretty_timestamp + '.log'
+        profile_log_filename = '{} profile - {}.log'.format( self._name, pretty_timestamp )
         
         profile_log_path = os.path.join( self.db_dir, profile_log_filename )
         
@@ -639,8 +637,54 @@ class HydrusController( object ):
             prefix = time.strftime( '%Y/%m/%d %H:%M:%S: ' )
             
             f.write( prefix + summary )
+            
+            if profile_text is not None:
+                
+                f.write( os.linesep * 2 )
+                f.write( profile_text )
+                
+            
+        
+    
+    def PrintQueryPlan( self, query, plan_lines ):
+        
+        if query in HG.queries_planned:
+            
+            return
+            
+        
+        HG.queries_planned.add( query )
+        
+        pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( HG.query_planner_start_time ) )
+        
+        query_planner_log_filename = '{} query planner - {}.log'.format( self._name, pretty_timestamp )
+        
+        query_planner_log_path = os.path.join( self.db_dir, query_planner_log_filename )
+        
+        with open( query_planner_log_path, 'a', encoding = 'utf-8' ) as f:
+            
+            prefix = time.strftime( '%Y/%m/%d %H:%M:%S: ' )
+            
+            if ' ' in query:
+                
+                first_word = query.split( ' ', 1 )[0]
+                
+            else:
+                
+                first_word = 'unknown'
+                
+            
+            f.write( prefix + first_word )
+            f.write( os.linesep )
+            f.write( query )
+            
+            if len( plan_lines ) > 0:
+                
+                f.write( os.linesep )
+                f.write( os.linesep.join( ( str( p ) for p in plan_lines ) ) )
+                
+            
             f.write( os.linesep * 2 )
-            f.write( profile_text )
             
         
     
@@ -868,15 +912,11 @@ class HydrusController( object ):
     
     def WaitUntilPubSubsEmpty( self ):
         
-        while True:
+        while self.CurrentlyPubSubbing():
             
             if HG.model_shutdown:
                 
                 raise HydrusExceptions.ShutdownException( 'Application shutting down!' )
-                
-            elif not self.CurrentlyPubSubbing():
-                
-                return
                 
             else:
                 

@@ -67,6 +67,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         self._listbook.AddPage( 'system tray', 'system tray', self._SystemTrayPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'search', 'search', self._SearchPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'colours', 'colours', self._ColoursPanel( self._listbook ) )
+        self._listbook.AddPage( 'popups', 'popups', self._PopupPanel( self._listbook, self._new_options ) )
         self._listbook.AddPage( 'regex favourites', 'regex favourites', self._RegexPanel( self._listbook ) )
         self._listbook.AddPage( 'sort/collect', 'sort/collect', self._SortCollectPanel( self._listbook ) )
         self._listbook.AddPage( 'downloading', 'downloading', self._DownloadingPanel( self._listbook, self._new_options ) )
@@ -372,7 +373,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             text = 'Enter strings such as "http://ip:port" or "http://user:pass@ip:port" to use for http and https traffic. It should take effect immediately on dialog ok.'
             text += os.linesep * 2
-            text += 'no_proxy takes the form of comma-separated hosts/domains, just as in curl or the NO_PROXY environment variable. When http and/or https proxies are set, they will not be used for these.'
+            text += 'NO PROXY DOES NOT WORK UNLESS YOU HAVE A CUSTOM BUILD OF REQUESTS, SORRY! no_proxy takes the form of comma-separated hosts/domains, just as in curl or the NO_PROXY environment variable. When http and/or https proxies are set, they will not be used for these.'
             text += os.linesep * 2
             
             if ClientNetworkingSessions.SOCKS_PROXY_OK:
@@ -656,14 +657,17 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             weights_panel = ClientGUICommon.StaticBox( self, 'duplicate filter comparison score weights' )
             
-            self._duplicate_comparison_score_higher_jpeg_quality = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_much_higher_jpeg_quality = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_higher_filesize = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_much_higher_filesize = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_higher_resolution = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_much_higher_resolution = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_more_tags = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
-            self._duplicate_comparison_score_older = QP.MakeQSpinBox( weights_panel, min=0, max=100 )
+            self._duplicate_comparison_score_higher_jpeg_quality = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_much_higher_jpeg_quality = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_higher_filesize = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_much_higher_filesize = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_higher_resolution = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_much_higher_resolution = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_more_tags = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_older = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            self._duplicate_comparison_score_nicer_ratio = QP.MakeQSpinBox( weights_panel, min=-100, max=100 )
+            
+            self._duplicate_comparison_score_nicer_ratio.setToolTip( 'For instance, 16:9 vs 640:357.')
             
             self._duplicate_filter_max_batch_size = QP.MakeQSpinBox( self, min = 10, max = 1024 )
             
@@ -677,6 +681,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._duplicate_comparison_score_much_higher_resolution.setValue( self._new_options.GetInteger( 'duplicate_comparison_score_much_higher_resolution' ) )
             self._duplicate_comparison_score_more_tags.setValue( self._new_options.GetInteger( 'duplicate_comparison_score_more_tags' ) )
             self._duplicate_comparison_score_older.setValue( self._new_options.GetInteger( 'duplicate_comparison_score_older' ) )
+            self._duplicate_comparison_score_nicer_ratio.setValue( self._new_options.GetInteger( 'duplicate_comparison_score_nicer_ratio' ) )
             
             self._duplicate_filter_max_batch_size.setValue( self._new_options.GetInteger( 'duplicate_filter_max_batch_size' ) )
             
@@ -692,10 +697,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Score for file with significantly higher resolution (as num pixels):', self._duplicate_comparison_score_much_higher_resolution ) )
             rows.append( ( 'Score for file with more tags:', self._duplicate_comparison_score_more_tags ) )
             rows.append( ( 'Score for file with non-trivially earlier import time:', self._duplicate_comparison_score_older ) )
+            rows.append( ( 'Score for file with \'nicer\' resolution ratio:', self._duplicate_comparison_score_nicer_ratio ) )
             
             gridbox = ClientGUICommon.WrapInGrid( weights_panel, rows )
             
             label = 'When processing potential duplicate pairs in the duplicate filter, the client tries to present the \'best\' file first. It judges the two files on a variety of potential differences, each with a score. The file with the greatest total score is presented first. Here you can tinker with these scores.'
+            label += os.linesep * 2
+            label += 'I recommend you leave all these as positive numbers, but if you wish, you can set a negative number to reduce the score.'
             
             st = ClientGUICommon.BetterStaticText( weights_panel, label )
             st.setWordWrap( True )
@@ -731,6 +739,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetInteger( 'duplicate_comparison_score_much_higher_resolution', self._duplicate_comparison_score_much_higher_resolution.value() )
             self._new_options.SetInteger( 'duplicate_comparison_score_more_tags', self._duplicate_comparison_score_more_tags.value() )
             self._new_options.SetInteger( 'duplicate_comparison_score_older', self._duplicate_comparison_score_older.value() )
+            self._new_options.SetInteger( 'duplicate_comparison_score_nicer_ratio', self._duplicate_comparison_score_nicer_ratio.value() )
             
             self._new_options.SetInteger( 'duplicate_filter_max_batch_size', self._duplicate_filter_max_batch_size.value() )
             
@@ -948,6 +957,12 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._use_advanced_file_deletion_dialog = QW.QCheckBox( advanced_file_deletion_panel )
             self._use_advanced_file_deletion_dialog.setToolTip( 'If this is set, the client will present a more complicated file deletion confirmation dialog that will permit you to set your own deletion reason and perform \'clean\' deletes that leave no deletion record (making later re-import easier).' )
             
+            self._remember_last_advanced_file_deletion_special_action = QW.QCheckBox( advanced_file_deletion_panel )
+            self._remember_last_advanced_file_deletion_special_action.setToolTip( 'This will try to remember and restore the last action you set, whether that was trash, physical delete, or physical delete and clear history.')
+            
+            self._remember_last_advanced_file_deletion_reason = QW.QCheckBox( advanced_file_deletion_panel )
+            self._remember_last_advanced_file_deletion_reason.setToolTip( 'This will remember and restore the last reason you set for a delete.' )
+            
             self._advanced_file_deletion_reasons = ClientGUIListBoxes.QueueListBox( advanced_file_deletion_panel, 5, str, add_callable = self._AddAFDR, edit_callable = self._EditAFDR )
             
             #
@@ -980,6 +995,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._use_advanced_file_deletion_dialog.setChecked( self._new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ) )
             
             self._use_advanced_file_deletion_dialog.clicked.connect( self._UpdateAdvancedControls )
+            
+            self._remember_last_advanced_file_deletion_special_action.setChecked( HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_special_action' ) )
+            self._remember_last_advanced_file_deletion_reason.setChecked( HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ) )
             
             self._advanced_file_deletion_reasons.AddDatas( self._new_options.GetStringList( 'advanced_file_deletion_reasons' ) )
             
@@ -1026,6 +1044,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows = []
             
             rows.append( ( 'Use the advanced file deletion dialog: ', self._use_advanced_file_deletion_dialog ) )
+            rows.append( ( 'Remember the last action: ', self._remember_last_advanced_file_deletion_special_action ) )
+            rows.append( ( 'Remember the last reason: ', self._remember_last_advanced_file_deletion_reason ) )
             
             gridbox = ClientGUICommon.WrapInGrid( advanced_file_deletion_panel, rows )
             
@@ -1065,14 +1085,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         def _UpdateAdvancedControls( self ):
             
-            if self._use_advanced_file_deletion_dialog.isChecked():
-                
-                self._advanced_file_deletion_reasons.setEnabled( True )
-                
-            else:
-                
-                self._advanced_file_deletion_reasons.setEnabled( False )
-                
+            advanced_enabled = self._use_advanced_file_deletion_dialog.isChecked()
+            
+            self._remember_last_advanced_file_deletion_special_action.setEnabled( advanced_enabled )
+            self._remember_last_advanced_file_deletion_reason.setEnabled( advanced_enabled )
+            self._advanced_file_deletion_reasons.setEnabled( advanced_enabled )
             
         
         def UpdateOptions( self ):
@@ -1094,6 +1111,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetBoolean( 'use_advanced_file_deletion_dialog', self._use_advanced_file_deletion_dialog.isChecked() )
             
             self._new_options.SetStringList( 'advanced_file_deletion_reasons', self._advanced_file_deletion_reasons.GetData() )
+            
+            HG.client_controller.new_options.SetBoolean( 'remember_last_advanced_file_deletion_special_action', self._remember_last_advanced_file_deletion_special_action.isChecked() )
+            HG.client_controller.new_options.SetBoolean( 'remember_last_advanced_file_deletion_reason', self._remember_last_advanced_file_deletion_reason.isChecked() )
             
         
     
@@ -1175,7 +1195,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._main_gui_panel = ClientGUICommon.StaticBox( self, 'main window' )
             
-            self._main_gui_title = QW.QLineEdit( self._main_gui_panel )
+            self._app_display_name = QW.QLineEdit( self._main_gui_panel )
+            self._app_display_name.setToolTip( 'This is placed in every window title, with current version name. Rename if you want to personalise or differentiate.' )
             
             self._confirm_client_exit = QW.QCheckBox( self._main_gui_panel )
             
@@ -1187,25 +1208,14 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             #
             
-            self._popup_panel = ClientGUICommon.StaticBox( self, 'popup window toaster' )
-            
-            self._popup_message_character_width = QP.MakeQSpinBox( self._popup_panel, min = 16, max = 256 )
-            
-            self._popup_message_force_min_width = QW.QCheckBox( self._popup_panel )
-            
-            self._hide_message_manager_on_gui_iconise = QW.QCheckBox( self._popup_panel )
-            self._hide_message_manager_on_gui_iconise.setToolTip( 'If your message manager does not automatically minimise with your main gui, try this. It can lead to unusual show and positioning behaviour on window managers that do not support it, however.' )
-            
-            self._hide_message_manager_on_gui_deactive = QW.QCheckBox( self._popup_panel )
-            self._hide_message_manager_on_gui_deactive.setToolTip( 'If your message manager stays up after you minimise the program to the system tray using a custom window manager, try this out! It hides the popup messages as soon as the main gui loses focus.' )
-            
-            #
-            
             self._misc_panel = ClientGUICommon.StaticBox( self, 'misc' )
             
             self._always_show_iso_time = QW.QCheckBox( self._misc_panel )
             tt = 'In many places across the program (typically import status lists), the client will state a timestamp as "5 days ago". If you would prefer a standard ISO string, like "2018-03-01 12:40:23", check this.'
             self._always_show_iso_time.setToolTip( tt )
+            
+            self._human_bytes_sig_figs = QP.MakeQSpinBox( self._misc_panel, min = 1, max = 6 )
+            self._human_bytes_sig_figs.setToolTip( 'When the program presents a bytes size above 1KB, like 21.3KB or 4.11GB, how many total digits do we want in the number? 2 or 3 is best.')
             
             self._discord_dnd_fix = QW.QCheckBox( self._misc_panel )
             self._discord_dnd_fix.setToolTip( 'This makes small file drag-and-drops a little laggier in exchange for discord support.' )
@@ -1216,8 +1226,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._secret_discord_dnd_fix = QW.QCheckBox( self._misc_panel )
             self._secret_discord_dnd_fix.setToolTip( 'This saves the lag but is potentially dangerous, as it (may) treat the from-db-files-drag as a move rather than a copy and hence only works when the drop destination will not consume the files. It requires an additional secret Alternate key to unlock.' )
             
-            self._notify_client_api_cookies = QW.QCheckBox( self._misc_panel )
-            self._notify_client_api_cookies.setToolTip( 'This will make a short-lived popup message every time you get new cookie information over the Client API.' )
+            self._do_macos_debug_dialog_menus = QW.QCheckBox( self._misc_panel )
+            self._do_macos_debug_dialog_menus.setToolTip( 'There is a bug in Big Sur Qt regarding interacting with some menus in dialogs. The menus show but cannot be clicked. This shows the menu items in a debug dialog instead.' )
             
             self._use_qt_file_dialogs = QW.QCheckBox( self._misc_panel )
             self._use_qt_file_dialogs.setToolTip( 'If you get crashes opening file/directory dialogs, try this.' )
@@ -1235,7 +1245,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options = HG.client_controller.new_options
             
-            self._main_gui_title.setText( self._new_options.GetString( 'main_gui_title' ) )
+            self._app_display_name.setText( self._new_options.GetString( 'app_display_name' ) )
             
             self._confirm_client_exit.setChecked( HC.options[ 'confirm_client_exit' ] )
             
@@ -1243,9 +1253,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._always_show_iso_time.setChecked( self._new_options.GetBoolean( 'always_show_iso_time' ) )
             
-            self._popup_message_character_width.setValue( self._new_options.GetInteger( 'popup_message_character_width' ) )
-            
-            self._popup_message_force_min_width.setChecked( self._new_options.GetBoolean( 'popup_message_force_min_width' ) )
+            self._human_bytes_sig_figs.setValue( self._new_options.GetInteger( 'human_bytes_sig_figs' ) )
             
             self._discord_dnd_fix.setChecked( self._new_options.GetBoolean( 'discord_dnd_fix' ) )
             
@@ -1253,10 +1261,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._secret_discord_dnd_fix.setChecked( self._new_options.GetBoolean( 'secret_discord_dnd_fix' ) )
             
-            self._hide_message_manager_on_gui_iconise.setChecked( self._new_options.GetBoolean( 'hide_message_manager_on_gui_iconise' ) )
-            self._hide_message_manager_on_gui_deactive.setChecked( self._new_options.GetBoolean( 'hide_message_manager_on_gui_deactive' ) )
-            
-            self._notify_client_api_cookies.setChecked( self._new_options.GetBoolean( 'notify_client_api_cookies' ) )
+            self._do_macos_debug_dialog_menus.setChecked( self._new_options.GetBoolean( 'do_macos_debug_dialog_menus' ) )
             
             self._use_qt_file_dialogs.setChecked( self._new_options.GetBoolean( 'use_qt_file_dialogs' ) )
             
@@ -1273,7 +1278,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
-            rows.append( ( 'Main gui title: ', self._main_gui_title ) )
+            rows.append( ( 'Application display name: ', self._app_display_name ) )
             rows.append( ( 'Confirm client exit: ', self._confirm_client_exit ) )
             rows.append( ( 'Switch to main window when opening tag search page from media viewer: ', self._activate_window_on_tag_search_page_activation ) )
             
@@ -1283,23 +1288,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
-            rows.append( ( 'Approximate max width of popup messages (in characters): ', self._popup_message_character_width ) )
-            rows.append( ( 'Make a short-lived popup on cookie updates through the Client API: ', self._notify_client_api_cookies ) )
-            rows.append( ( 'BUGFIX: Hide the popup toaster when the main gui is minimised: ', self._hide_message_manager_on_gui_iconise ) )
-            rows.append( ( 'BUGFIX: Hide the popup toaster when the main gui loses focus: ', self._hide_message_manager_on_gui_deactive ) )
-            
-            gridbox = ClientGUICommon.WrapInGrid( self._popup_panel, rows )
-            
-            self._popup_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-            
-            rows = []
-            
             rows.append( ( 'Prefer ISO time ("2018-03-01 12:40:23") to "5 days ago": ', self._always_show_iso_time ) )
-            rows.append( ( 'BUGFIX: Force this width as the minimum width for all popup messages: ', self._popup_message_force_min_width ) )
             rows.append( ( 'BUGFIX: Discord file drag-and-drop fix (works for <=25, <200MB file DnDs): ', self._discord_dnd_fix ) )
             rows.append( ( 'Discord drag-and-drop filename pattern: ', self._discord_dnd_filename_pattern ) )
             rows.append( ( 'Export pattern shortcuts: ', ClientGUICommon.ExportPatternButton( self ) ) )
+            rows.append( ( 'EXPERIMENTAL: Bytes strings >1KB pseudo significant figures: ', self._human_bytes_sig_figs ) )
             rows.append( ( 'EXPERIMENTAL BUGFIX: Secret discord file drag-and-drop fix: ', self._secret_discord_dnd_fix ) )
+            rows.append( ( 'BUGFIX: If on macOS, show dialog menus in a debug menu: ', self._do_macos_debug_dialog_menus ) )
             rows.append( ( 'ANTI-CRASH BUGFIX: Use Qt file/directory selection dialogs, rather than OS native: ', self._use_qt_file_dialogs ) )
             
             gridbox = ClientGUICommon.WrapInGrid( self, rows )
@@ -1317,7 +1312,6 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             vbox = QP.VBoxLayout()
             
             QP.AddToLayout( vbox, self._main_gui_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-            QP.AddToLayout( vbox, self._popup_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
             QP.AddToLayout( vbox, self._misc_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
             QP.AddToLayout( vbox, frame_locations_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
             
@@ -1364,24 +1358,23 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._new_options.SetBoolean( 'always_show_iso_time', self._always_show_iso_time.isChecked() )
             
+            self._new_options.SetInteger( 'human_bytes_sig_figs', self._human_bytes_sig_figs.value() )
+            
             self._new_options.SetBoolean( 'activate_window_on_tag_search_page_activation', self._activate_window_on_tag_search_page_activation.isChecked() )
             
-            self._new_options.SetInteger( 'popup_message_character_width', self._popup_message_character_width.value() )
+            app_display_name = self._app_display_name.text()
             
-            self._new_options.SetBoolean( 'popup_message_force_min_width', self._popup_message_force_min_width.isChecked() )
+            if app_display_name == '':
+                
+                app_display_name = 'hydrus client'
+                
             
-            title = self._main_gui_title.text()
+            self._new_options.SetString( 'app_display_name', app_display_name )
             
-            self._new_options.SetString( 'main_gui_title', title )
-            
-            HG.client_controller.pub( 'main_gui_title', title )
-            
-            self._new_options.SetBoolean( 'notify_client_api_cookies', self._notify_client_api_cookies.isChecked() )
             self._new_options.SetBoolean( 'discord_dnd_fix', self._discord_dnd_fix.isChecked() )
             self._new_options.SetString( 'discord_dnd_filename_pattern', self._discord_dnd_filename_pattern.text() )
             self._new_options.SetBoolean( 'secret_discord_dnd_fix', self._secret_discord_dnd_fix.isChecked() )
-            self._new_options.SetBoolean( 'hide_message_manager_on_gui_iconise', self._hide_message_manager_on_gui_iconise.isChecked() )
-            self._new_options.SetBoolean( 'hide_message_manager_on_gui_deactive', self._hide_message_manager_on_gui_deactive.isChecked() )
+            self._new_options.SetBoolean( 'do_macos_debug_dialog_menus', self._do_macos_debug_dialog_menus.isChecked() )
             self._new_options.SetBoolean( 'use_qt_file_dialogs', self._use_qt_file_dialogs.isChecked() )
             
             for listctrl_list in self._frame_locations.GetData():
@@ -1486,9 +1479,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             gui_session_names = HG.client_controller.Read( 'serialisable_names', HydrusSerialisable.SERIALISABLE_TYPE_GUI_SESSION_CONTAINER )
             
-            if 'last session' not in gui_session_names:
+            if CC.LAST_SESSION_SESSION_NAME not in gui_session_names:
                 
-                gui_session_names.insert( 0, 'last session' )
+                gui_session_names.insert( 0, CC.LAST_SESSION_SESSION_NAME )
                 
             
             self._default_gui_session.addItem( 'just a blank page', None )
@@ -1732,7 +1725,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._idle_period = ClientGUICommon.NoneableSpinCtrl( self._idle_panel, '', min = 1, max = 1000, multiplier = 60, unit = 'minutes', none_phrase = 'ignore normal browsing' )
             self._idle_mouse_period = ClientGUICommon.NoneableSpinCtrl( self._idle_panel, '', min = 1, max = 1000, multiplier = 60, unit = 'minutes', none_phrase = 'ignore mouse movements' )
             self._idle_mode_client_api_timeout = ClientGUICommon.NoneableSpinCtrl( self._idle_panel, '', min = 1, max = 1000, multiplier = 60, unit = 'minutes', none_phrase = 'ignore client api' )
-            self._idle_cpu_max = ClientGUICommon.NoneableSpinCtrl( self._idle_panel, '', min = 5, max = 99, unit = '%', none_phrase = 'ignore cpu usage' )
+            self._system_busy_cpu_percent = QP.MakeQSpinBox( self._idle_panel, min = 5, max = 99 )
+            self._system_busy_cpu_count = ClientGUICommon.NoneableSpinCtrl( self._idle_panel, min = 1, max = 64, unit = 'cores', none_phrase = 'ignore cpu usage' )
             
             #
             
@@ -1775,7 +1769,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._idle_period.SetValue( HC.options['idle_period'] )
             self._idle_mouse_period.SetValue( HC.options['idle_mouse_period'] )
             self._idle_mode_client_api_timeout.SetValue( self._new_options.GetNoneableInteger( 'idle_mode_client_api_timeout' ) )
-            self._idle_cpu_max.SetValue( HC.options['idle_cpu_max'] )
+            self._system_busy_cpu_percent.setValue( self._new_options.GetInteger( 'system_busy_cpu_percent' ) )
+            self._system_busy_cpu_count.SetValue( self._new_options.GetNoneableInteger( 'system_busy_cpu_count' ) )
             
             self._idle_shutdown.SetValue( HC.options[ 'idle_shutdown' ] )
             self._idle_shutdown_max_minutes.setValue( HC.options['idle_shutdown_max_minutes'] )
@@ -1807,7 +1802,20 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Permit idle mode if no general browsing activity has occurred in the past: ', self._idle_period ) )
             rows.append( ( 'Permit idle mode if the mouse has not been moved in the past: ', self._idle_mouse_period ) )
             rows.append( ( 'Permit idle mode if no Client API requests in the past: ', self._idle_mode_client_api_timeout ) )
-            rows.append( ( 'Consider the system busy if any CPU core has recent average usage above: ', self._idle_cpu_max ) )
+            
+            hbox = QP.HBoxLayout()
+            
+            QP.AddToLayout( hbox, self._system_busy_cpu_percent, CC.FLAGS_CENTER )
+            QP.AddToLayout( hbox, ClientGUICommon.BetterStaticText( self._idle_panel, label = '% on ' ), CC.FLAGS_CENTER )
+            QP.AddToLayout( hbox, self._system_busy_cpu_count, CC.FLAGS_CENTER )
+            
+            import psutil
+            
+            num_cores = psutil.cpu_count()
+            
+            QP.AddToLayout( hbox, ClientGUICommon.BetterStaticText( self._idle_panel, label = '(you appear to have {} cores)'.format( num_cores ) ), CC.FLAGS_CENTER )
+            
+            rows.append( ( 'Consider the system busy if CPU usage is above: ', hbox ) )
             
             gridbox = ClientGUICommon.WrapInGrid( self._idle_panel, rows )
             
@@ -1878,6 +1886,15 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._EnableDisableIdleNormal()
             self._EnableDisableIdleShutdown()
             
+            self._system_busy_cpu_count.valueChanged.connect( self._EnableDisableCPUPercent )
+            
+        
+        def _EnableDisableCPUPercent( self ):
+            
+            enabled = self._system_busy_cpu_count.isEnabled() and self._system_busy_cpu_count.GetValue() is not None
+            
+            self._system_busy_cpu_percent.setEnabled( enabled )
+            
         
         def _EnableDisableIdleNormal( self ):
             
@@ -1886,7 +1903,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._idle_period.setEnabled( enabled )
             self._idle_mouse_period.setEnabled( enabled )
             self._idle_mode_client_api_timeout.setEnabled( enabled )
-            self._idle_cpu_max.setEnabled( enabled )
+            self._system_busy_cpu_count.setEnabled( enabled )
+            
+            self._EnableDisableCPUPercent()
             
         
         def _EnableDisableIdleShutdown( self ):
@@ -1904,7 +1923,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             HC.options[ 'idle_period' ] = self._idle_period.GetValue()
             HC.options[ 'idle_mouse_period' ] = self._idle_mouse_period.GetValue()
             self._new_options.SetNoneableInteger( 'idle_mode_client_api_timeout', self._idle_mode_client_api_timeout.GetValue() )
-            HC.options[ 'idle_cpu_max' ] = self._idle_cpu_max.GetValue()
+            
+            self._new_options.SetInteger( 'system_busy_cpu_percent', self._system_busy_cpu_percent.value() )
+            self._new_options.SetNoneableInteger( 'system_busy_cpu_count', self._system_busy_cpu_count.GetValue() )
             
             HC.options[ 'idle_shutdown' ] = self._idle_shutdown.GetValue()
             HC.options[ 'idle_shutdown_max_minutes' ] = self._idle_shutdown_max_minutes.value()
@@ -2246,7 +2267,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
                 media_zooms = [ float( media_zoom ) for media_zoom in self._media_zooms.text().split( ',' ) ]
                 
-                self._media_zooms.setProperty( 'hydrus_text', 'default' )
+                self._media_zooms.setObjectName( '' )
                 
             except ValueError:
                 
@@ -2323,6 +2344,91 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
             
             self._new_options.SetMediaViewOptions( mimes_to_media_view_options )
+            
+        
+    
+    class _PopupPanel( QW.QWidget ):
+        
+        def __init__( self, parent, new_options ):
+            
+            QW.QWidget.__init__( self, parent )
+            
+            self._new_options = new_options
+            
+            #
+            
+            self._popup_panel = ClientGUICommon.StaticBox( self, 'popup window toaster' )
+            
+            self._popup_message_character_width = QP.MakeQSpinBox( self._popup_panel, min = 16, max = 256 )
+            
+            self._popup_message_force_min_width = QW.QCheckBox( self._popup_panel )
+            
+            self._freeze_message_manager_when_mouse_on_other_monitor = QW.QCheckBox( self._popup_panel )
+            self._freeze_message_manager_when_mouse_on_other_monitor.setToolTip( 'This is useful if you have a virtual desktop and find the popup manager restores strangely when you hop back to the hydrus display.' )
+            
+            self._freeze_message_manager_when_main_gui_minimised = QW.QCheckBox( self._popup_panel )
+            self._freeze_message_manager_when_main_gui_minimised.setToolTip( 'This is useful if the popup toaster restores strangely after minimised changes.' )
+            
+            self._hide_message_manager_on_gui_iconise = QW.QCheckBox( self._popup_panel )
+            self._hide_message_manager_on_gui_iconise.setToolTip( 'If your message manager does not automatically minimise with your main gui, try this. It can lead to unusual show and positioning behaviour on window managers that do not support it, however.' )
+            
+            self._hide_message_manager_on_gui_deactive = QW.QCheckBox( self._popup_panel )
+            self._hide_message_manager_on_gui_deactive.setToolTip( 'If your message manager stays up after you minimise the program to the system tray using a custom window manager, try this out! It hides the popup messages as soon as the main gui loses focus.' )
+            
+            self._notify_client_api_cookies = QW.QCheckBox( self._popup_panel )
+            self._notify_client_api_cookies.setToolTip( 'This will make a short-lived popup message every time you get new cookie information over the Client API.' )
+            
+            #
+            
+            self._popup_message_character_width.setValue( self._new_options.GetInteger( 'popup_message_character_width' ) )
+            
+            self._popup_message_force_min_width.setChecked( self._new_options.GetBoolean( 'popup_message_force_min_width' ) )
+            
+            self._freeze_message_manager_when_mouse_on_other_monitor.setChecked( self._new_options.GetBoolean( 'freeze_message_manager_when_mouse_on_other_monitor' ) )
+            self._freeze_message_manager_when_main_gui_minimised.setChecked( self._new_options.GetBoolean( 'freeze_message_manager_when_main_gui_minimised' ) )
+            
+            self._hide_message_manager_on_gui_iconise.setChecked( self._new_options.GetBoolean( 'hide_message_manager_on_gui_iconise' ) )
+            self._hide_message_manager_on_gui_deactive.setChecked( self._new_options.GetBoolean( 'hide_message_manager_on_gui_deactive' ) )
+            
+            self._notify_client_api_cookies.setChecked( self._new_options.GetBoolean( 'notify_client_api_cookies' ) )
+            
+            #
+            
+            rows = []
+            
+            rows.append( ( 'Approximate max width of popup messages (in characters): ', self._popup_message_character_width ) )
+            rows.append( ( 'BUGFIX: Force this width as the minimum width for all popup messages: ', self._popup_message_force_min_width ) )
+            rows.append( ( 'Freeze the popup toaster when mouse is on another display: ', self._freeze_message_manager_when_mouse_on_other_monitor ) )
+            rows.append( ( 'Freeze the popup toaster when the main gui is minimised: ', self._freeze_message_manager_when_main_gui_minimised ) )
+            rows.append( ( 'BUGFIX: Hide the popup toaster when the main gui is minimised: ', self._hide_message_manager_on_gui_iconise ) )
+            rows.append( ( 'BUGFIX: Hide the popup toaster when the main gui loses focus: ', self._hide_message_manager_on_gui_deactive ) )
+            rows.append( ( 'Make a short-lived popup on cookie updates through the Client API: ', self._notify_client_api_cookies ) )
+            
+            gridbox = ClientGUICommon.WrapInGrid( self._popup_panel, rows )
+            
+            self._popup_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+            
+            vbox = QP.VBoxLayout()
+            
+            QP.AddToLayout( vbox, self._popup_panel, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+            vbox.addStretch( 1 )
+            
+            self.setLayout( vbox )
+            
+        
+        def UpdateOptions( self ):
+            
+            self._new_options.SetInteger( 'popup_message_character_width', self._popup_message_character_width.value() )
+            
+            self._new_options.SetBoolean( 'popup_message_force_min_width', self._popup_message_force_min_width.isChecked() )
+            
+            self._new_options.SetBoolean( 'freeze_message_manager_when_mouse_on_other_monitor', self._freeze_message_manager_when_mouse_on_other_monitor.isChecked() )
+            self._new_options.SetBoolean( 'freeze_message_manager_when_main_gui_minimised', self._freeze_message_manager_when_main_gui_minimised.isChecked() )
+            
+            self._new_options.SetBoolean( 'hide_message_manager_on_gui_iconise', self._hide_message_manager_on_gui_iconise.isChecked() )
+            self._new_options.SetBoolean( 'hide_message_manager_on_gui_deactive', self._hide_message_manager_on_gui_deactive.isChecked() )
+            
+            self._new_options.SetBoolean( 'notify_client_api_cookies', self._notify_client_api_cookies.isChecked() )
             
         
     
@@ -2514,6 +2620,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._image_tile_cache_timeout = ClientGUITime.TimeDeltaButton( image_tile_cache_panel, min = 300, hours = True, minutes = True )
             self._image_tile_cache_timeout.setToolTip( 'The amount of time after which a rendered image tile in the cache will naturally be removed, if it is not shunted out due to a new member exceeding the size limit.' )
             
+            self._ideal_tile_dimension = QP.MakeQSpinBox( image_tile_cache_panel, min = 256, max = 4096 )
+            self._ideal_tile_dimension.setToolTip( 'This is the square size the system will aim for. Smaller tiles are more memory efficient but prone to warping and other artifacts. Extreme values may waste CPU.' )
+            
             #
             
             buffer_panel = ClientGUICommon.StaticBox( self, 'video buffer' )
@@ -2540,6 +2649,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._thumbnail_cache_timeout.SetValue( self._new_options.GetInteger( 'thumbnail_cache_timeout' ) )
             self._image_cache_timeout.SetValue( self._new_options.GetInteger( 'image_cache_timeout' ) )
             self._image_tile_cache_timeout.SetValue( self._new_options.GetInteger( 'image_tile_cache_timeout' ) )
+            
+            self._ideal_tile_dimension.setValue( self._new_options.GetInteger( 'ideal_tile_dimension' ) )
             
             self._video_buffer_size_mb.setValue( self._new_options.GetInteger( 'video_buffer_size_mb' ) )
             
@@ -2653,6 +2764,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows.append( ( 'MB memory reserved for image tile cache:', image_tiles_sizer ) )
             rows.append( ( 'Image tile cache timeout:', self._image_tile_cache_timeout ) )
+            rows.append( ( 'Ideal tile width/height px:', self._ideal_tile_dimension ) )
             
             gridbox = ClientGUICommon.WrapInGrid( image_tile_cache_panel, rows )
             
@@ -2793,6 +2905,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetInteger( 'thumbnail_cache_timeout', self._thumbnail_cache_timeout.GetValue() )
             self._new_options.SetInteger( 'image_cache_timeout', self._image_cache_timeout.GetValue() )
             self._new_options.SetInteger( 'image_tile_cache_timeout', self._image_tile_cache_timeout.GetValue() )
+            
+            self._new_options.SetInteger( 'ideal_tile_dimension', self._ideal_tile_dimension.value() )
             
             self._new_options.SetInteger( 'media_viewer_prefetch_delay_base_ms', self._media_viewer_prefetch_delay_base_ms.value() )
             self._new_options.SetInteger( 'media_viewer_prefetch_num_previous', self._media_viewer_prefetch_num_previous.value() )
@@ -3968,11 +4082,9 @@ class ManageURLsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         command_processed = True
         
-        data = command.GetData()
-        
         if command.IsSimpleCommand():
             
-            action = data
+            action = command.GetSimpleAction()
             
             if action == CAC.SIMPLE_MANAGE_FILE_URLS:
                 

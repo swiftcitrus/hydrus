@@ -80,7 +80,7 @@ class MigrateDatabasePanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -1755,7 +1755,7 @@ class ReviewDownloaderImport( ClientGUIScrolledPanels.ReviewPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help -->', object_name = 'HydrusIndeterminate' )
         
         self._repo_link = ClientGUICommon.BetterHyperLink( self, 'get user-made downloaders here', 'https://github.com/CuddleBear92/Hydrus-Presets-and-Scripts/tree/master/Downloaders' )
         
@@ -2269,11 +2269,17 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         #
         
-        self._button_panel = ClientGUICommon.StaticBox( self._new_work_panel, 'select special files' )
+        self._button_panel = ClientGUICommon.StaticBox( self._new_work_panel, 'easy select' )
         
+        self._select_all_media_files = ClientGUICommon.BetterButton( self._button_panel, 'all media files', self._SelectAllMediaFiles )
         self._select_repo_files = ClientGUICommon.BetterButton( self._button_panel, 'all repository update files', self._SelectRepoUpdateFiles )
         
-        self._button_panel.Add( self._select_repo_files, CC.FLAGS_ON_RIGHT )
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._select_all_media_files, CC.FLAGS_CENTER )
+        QP.AddToLayout( hbox, self._select_repo_files, CC.FLAGS_CENTER )
+        
+        self._button_panel.Add( hbox, CC.FLAGS_ON_RIGHT )
         
         #
         
@@ -2336,27 +2342,6 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
     
     def _AddJob( self ):
         
-        def qt_done():
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            QW.QMessageBox.information( self, 'Information', 'Jobs added!' )
-            
-            self._add_new_job.setEnabled( True )
-            
-            self._RefreshWorkDue()
-            
-        
-        def do_it( hash_ids, job_type ):
-            
-            HG.client_controller.files_maintenance_manager.ScheduleJobHashIds( hash_ids, job_type )
-            
-            QP.CallAfter( qt_done )
-            
-        
         hash_ids = self._hash_ids
         job_type = self._action_selector.GetValue()
         
@@ -2374,7 +2359,25 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._add_new_job.setEnabled( False )
         
-        HG.client_controller.CallToThread( do_it, hash_ids, job_type )
+        def work_callable():
+            
+            HG.client_controller.files_maintenance_manager.ScheduleJobHashIds( hash_ids, job_type )
+            
+            return True
+            
+        
+        def publish_callable( result ):
+            
+            QW.QMessageBox.information( self, 'Information', 'Jobs added!' )
+            
+            self._add_new_job.setEnabled( True )
+            
+            self._RefreshWorkDue()
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
         
     
     def _ConvertJobTypeToListCtrlTuples( self, job_type ):
@@ -2401,26 +2404,6 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
     
     def _DeleteWork( self ):
         
-        def qt_done():
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            self._RefreshWorkDue()
-            
-        
-        def do_it( job_types ):
-            
-            for job_type in job_types:
-                
-                HG.client_controller.files_maintenance_manager.CancelJobs( job_type )
-                
-            
-            QP.CallAfter( qt_done )
-            
-        
         message = 'Clear all the selected scheduled work?'
         
         result = ClientGUIDialogsQuick.GetYesNo( self, message )
@@ -2432,7 +2415,24 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         job_types = self._jobs_listctrl.GetData( only_selected = True )
         
-        HG.client_controller.CallToThread( do_it, job_types )
+        def work_callable():
+            
+            for job_type in job_types:
+                
+                HG.client_controller.files_maintenance_manager.CancelJobs( job_type )
+                
+            
+            return True
+            
+        
+        def publish_callable( result ):
+            
+            self._RefreshWorkDue()
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
         
     
     def _DoAllWork( self ):
@@ -2454,12 +2454,14 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
     
     def _RefreshWorkDue( self ):
         
-        def qt_done( job_types_to_counts ):
+        def work_callable():
             
-            if not self or not QP.isValid( self ):
-                
-                return
-                
+            job_types_to_counts = HG.client_controller.Read( 'file_maintenance_get_job_counts' )
+            
+            return job_types_to_counts
+            
+        
+        def publish_callable( job_types_to_counts ):
             
             self._job_types_to_counts = job_types_to_counts
             
@@ -2468,38 +2470,12 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
             self._jobs_listctrl.SetData( job_types )
             
         
-        def do_it():
-            
-            job_types_to_counts = HG.client_controller.Read( 'file_maintenance_get_job_counts' )
-            
-            QP.CallAfter( qt_done, job_types_to_counts )
-            
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
-        HG.client_controller.CallToThread( do_it )
+        job.start()
         
     
     def _RunSearch( self ):
-        
-        def qt_done( hash_ids ):
-            
-            if not self or not QP.isValid( self ):
-                
-                return
-                
-            
-            self._run_search_st.setText( '{} files found'.format(HydrusData.ToHumanInt(len(hash_ids))) )
-            
-            self._run_search.setEnabled( True )
-            
-            self._SetHashIds( hash_ids )
-            
-        
-        def do_it( fsc ):
-            
-            query_hash_ids = HG.client_controller.Read( 'file_query_ids', fsc )
-            
-            QP.CallAfter( qt_done, query_hash_ids )
-            
         
         self._run_search_st.setText( 'loading\u2026' )
         
@@ -2507,7 +2483,25 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         file_search_context = self._tag_autocomplete.GetFileSearchContext()
         
-        HG.client_controller.CallToThread( do_it, file_search_context )
+        def work_callable():
+            
+            query_hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context )
+            
+            return query_hash_ids
+            
+        
+        def publish_callable( hash_ids ):
+            
+            self._run_search_st.setText( '{} files found'.format( HydrusData.ToHumanInt( len( hash_ids ) ) ) )
+            
+            self._run_search.setEnabled( True )
+            
+            self._SetHashIds( hash_ids )
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
         
     
     def _SeeDescription( self ):
@@ -2521,26 +2515,34 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         QW.QMessageBox.information( self, 'Information', message )
         
     
-    def _SelectRepoUpdateFiles( self ):
+    def _SelectAllMediaFiles( self ):
         
-        def qt_done( hash_ids ):
+        self._select_all_media_files.setEnabled( False )
+        
+        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] )
+        
+        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context )
+        
+        def work_callable():
             
-            if not self or not QP.isValid( self ):
-                
-                return
-                
+            query_hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context )
             
-            self._select_repo_files.setEnabled( True )
+            return query_hash_ids
+            
+        
+        def publish_callable( hash_ids ):
+            
+            self._select_all_media_files.setEnabled( True )
             
             self._SetHashIds( hash_ids )
             
         
-        def do_it( fsc ):
-            
-            query_hash_ids = HG.client_controller.Read( 'file_query_ids', fsc )
-            
-            QP.CallAfter( qt_done, query_hash_ids )
-            
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
+        
+    
+    def _SelectRepoUpdateFiles( self ):
         
         self._select_repo_files.setEnabled( False )
         
@@ -2548,7 +2550,23 @@ class ReviewFileMaintenance( ClientGUIScrolledPanels.ReviewPanel ):
         
         file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context )
         
-        HG.client_controller.CallToThread( do_it, file_search_context )
+        def work_callable():
+            
+            query_hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context )
+            
+            return query_hash_ids
+            
+        
+        def publish_callable( hash_ids ):
+            
+            self._select_repo_files.setEnabled( True )
+            
+            self._SetHashIds( hash_ids )
+            
+        
+        job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
+        
+        job.start()
         
     
     def _SetHashIds( self, hash_ids ):
@@ -2585,8 +2603,10 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
         
         num_inbox = boned_stats[ 'num_inbox' ]
         num_archive = boned_stats[ 'num_archive' ]
+        num_deleted = boned_stats[ 'num_deleted' ]
         size_inbox = boned_stats[ 'size_inbox' ]
         size_archive = boned_stats[ 'size_archive' ]
+        size_deleted = boned_stats[ 'size_deleted' ]
         total_viewtime = boned_stats[ 'total_viewtime' ]
         total_alternate_files = boned_stats[ 'total_alternate_files' ]
         total_duplicate_files = boned_stats[ 'total_duplicate_files' ]
@@ -2595,9 +2615,12 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
         num_total = num_archive + num_inbox
         size_total = size_archive + size_inbox
         
+        num_supertotal = num_total + num_deleted
+        size_supertotal = size_total + size_deleted
+        
         vbox = QP.VBoxLayout()
         
-        if num_total < 1000:
+        if num_supertotal < 1000:
             
             get_more = ClientGUICommon.BetterStaticText( self, label = 'I hope you enjoy my software. You might like to check out the downloaders! :^)' )
             
@@ -2605,7 +2628,7 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
             
         elif num_inbox <= num_archive / 100:
             
-            hooray = ClientGUICommon.BetterStaticText( self, label = 'CONGRATULATIONS, YOU APPEAR TO BE UNBONED, BUT REMAIN EVER VIGILANT' )
+            hooray = ClientGUICommon.BetterStaticText( self, label = 'CONGRATULATIONS. YOU APPEAR TO BE UNBONED, BUT REMAIN EVER VIGILANT' )
             
             QP.AddToLayout( vbox, hooray, CC.FLAGS_CENTER )
             
@@ -2620,7 +2643,7 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
             QP.AddToLayout( vbox, win, CC.FLAGS_CENTER )
             
         
-        if num_total == 0:
+        if num_supertotal == 0:
             
             nothing_label = 'You have yet to board the ride.'
             
@@ -2630,13 +2653,21 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
             
         else:
             
+            notebook = ClientGUICommon.BetterNotebook( self )
+            
+            #
+            
+            panel = QW.QWidget( notebook )
+            
+            panel_vbox = QP.VBoxLayout()
+            
             average_filesize = size_total // num_total
             
             summary_label = 'Total: {} files, totalling {}, averaging {}'.format( HydrusData.ToHumanInt( num_total ), HydrusData.ToHumanBytes( size_total ), HydrusData.ToHumanBytes( average_filesize ) )
             
-            summary_st = ClientGUICommon.BetterStaticText( self, label = summary_label )
+            summary_st = ClientGUICommon.BetterStaticText( panel, label = summary_label )
             
-            QP.AddToLayout( vbox, summary_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, summary_st, CC.FLAGS_CENTER )
             
             num_archive_percent = num_archive / num_total
             size_archive_percent = size_archive / size_total
@@ -2644,42 +2675,97 @@ class ReviewHowBonedAmI( ClientGUIScrolledPanels.ReviewPanel ):
             num_inbox_percent = num_inbox / num_total
             size_inbox_percent = size_inbox / size_total
             
-            archive_label = 'Archive: ' + HydrusData.ToHumanInt( num_archive ) + ' files (' + ClientData.ConvertZoomToPercentage( num_archive_percent ) + '), totalling ' + HydrusData.ToHumanBytes( size_archive ) + '(' + ClientData.ConvertZoomToPercentage( size_archive_percent ) + ')'
+            num_deleted_percent = num_deleted / num_supertotal
+            size_deleted_percent = size_deleted / size_supertotal
             
-            archive_st = ClientGUICommon.BetterStaticText( self, label = archive_label )
+            archive_label = 'Archive: {} files ({}), totalling {} ({})'.format( HydrusData.ToHumanInt( num_archive ), ClientData.ConvertZoomToPercentage( num_archive_percent ), HydrusData.ToHumanBytes( size_archive ), ClientData.ConvertZoomToPercentage( size_archive_percent ) )
             
-            inbox_label = 'Inbox: ' + HydrusData.ToHumanInt( num_inbox ) + ' files (' + ClientData.ConvertZoomToPercentage( num_inbox_percent ) + '), totalling ' + HydrusData.ToHumanBytes( size_inbox ) + '(' + ClientData.ConvertZoomToPercentage( size_inbox_percent ) + ')'
+            archive_st = ClientGUICommon.BetterStaticText( panel, label = archive_label )
             
-            inbox_st = ClientGUICommon.BetterStaticText( self, label = inbox_label )
+            inbox_label = 'Inbox: {} files ({}), totalling {} ({})'.format( HydrusData.ToHumanInt( num_inbox ), ClientData.ConvertZoomToPercentage( num_inbox_percent ), HydrusData.ToHumanBytes( size_inbox ), ClientData.ConvertZoomToPercentage( size_inbox_percent ) )
             
-            QP.AddToLayout( vbox, archive_st, CC.FLAGS_CENTER )
-            QP.AddToLayout( vbox, inbox_st, CC.FLAGS_CENTER )
+            inbox_st = ClientGUICommon.BetterStaticText( panel, label = inbox_label )
+            
+            deleted_label = 'Deleted: {} files ({}), totalling {} ({})'.format( HydrusData.ToHumanInt( num_deleted ), ClientData.ConvertZoomToPercentage( num_deleted_percent ), HydrusData.ToHumanBytes( size_deleted ), ClientData.ConvertZoomToPercentage( size_deleted_percent ) )
+            
+            deleted_st = ClientGUICommon.BetterStaticText( panel, label = deleted_label )
+            
+            QP.AddToLayout( panel_vbox, archive_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, inbox_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, deleted_st, CC.FLAGS_CENTER )
+            
+            if 'earliest_import_time' in boned_stats:
+                
+                eit = boned_stats[ 'earliest_import_time' ]
+                
+                eit_label = 'Earliest file import: {} ({})'.format( HydrusData.ConvertTimestampToPrettyTime( eit ), HydrusData.TimestampToPrettyTimeDelta( eit ) )
+                
+                eit_st = ClientGUICommon.BetterStaticText( panel, label = eit_label )
+                
+                QP.AddToLayout( panel_vbox, eit_st, CC.FLAGS_CENTER )
+                
+            
+            panel_vbox.addStretch( 1 )
+            
+            panel.setLayout( panel_vbox )
+            
+            notebook.addTab( panel, 'files' )
+            
+            #
+            
+            panel = QW.QWidget( notebook )
+            
+            panel_vbox = QP.VBoxLayout()
             
             ( media_views, media_viewtime, preview_views, preview_viewtime ) = total_viewtime
             
             media_label = 'Total media views: ' + HydrusData.ToHumanInt( media_views ) + ', totalling ' + HydrusData.TimeDeltaToPrettyTimeDelta( media_viewtime )
             
-            media_st = ClientGUICommon.BetterStaticText( self, label = media_label )
+            media_st = ClientGUICommon.BetterStaticText( panel, label = media_label )
             
             preview_label = 'Total preview views: ' + HydrusData.ToHumanInt( preview_views ) + ', totalling ' + HydrusData.TimeDeltaToPrettyTimeDelta( preview_viewtime )
             
-            preview_st = ClientGUICommon.BetterStaticText( self, label = preview_label )
+            preview_st = ClientGUICommon.BetterStaticText( panel, label = preview_label )
             
-            QP.AddToLayout( vbox, media_st, CC.FLAGS_CENTER )
-            QP.AddToLayout( vbox, preview_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, media_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, preview_st, CC.FLAGS_CENTER )
+            
+            panel_vbox.addStretch( 1 )
+            
+            panel.setLayout( panel_vbox )
+            
+            notebook.addTab( panel, 'views' )
+            
+            #
+            
+            panel = QW.QWidget( notebook )
+            
+            panel_vbox = QP.VBoxLayout()
             
             potentials_label = 'Total duplicate potential pairs: {}'.format( HydrusData.ToHumanInt( total_potential_pairs ) )
             duplicates_label = 'Total files set duplicate: {}'.format( HydrusData.ToHumanInt( total_duplicate_files ) )
             alternates_label = 'Total duplicate file groups set alternate: {}'.format( HydrusData.ToHumanInt( total_alternate_files ) )
             
-            potentials_st = ClientGUICommon.BetterStaticText( self, label = potentials_label )
-            duplicates_st = ClientGUICommon.BetterStaticText( self, label = duplicates_label )
-            alternates_st = ClientGUICommon.BetterStaticText( self, label = alternates_label )
+            potentials_st = ClientGUICommon.BetterStaticText( panel, label = potentials_label )
+            duplicates_st = ClientGUICommon.BetterStaticText( panel, label = duplicates_label )
+            alternates_st = ClientGUICommon.BetterStaticText( panel, label = alternates_label )
             
-            QP.AddToLayout( vbox, potentials_st, CC.FLAGS_CENTER )
-            QP.AddToLayout( vbox, duplicates_st, CC.FLAGS_CENTER )
-            QP.AddToLayout( vbox, alternates_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, potentials_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, duplicates_st, CC.FLAGS_CENTER )
+            QP.AddToLayout( panel_vbox, alternates_st, CC.FLAGS_CENTER )
             
+            panel_vbox.addStretch( 1 )
+            
+            panel.setLayout( panel_vbox )
+            
+            notebook.addTab( panel, 'duplicates' )
+            
+            #
+            
+            QP.AddToLayout( vbox, notebook, CC.FLAGS_EXPAND_PERPENDICULAR )
+            
+        
+        vbox.addStretch( 1 )
         
         self.widget().setLayout( vbox )
         
@@ -3411,5 +3497,176 @@ class ReviewThreads( ClientGUIScrolledPanels.ReviewPanel ):
         QP.AddToLayout( vbox, self._notebook, CC.FLAGS_EXPAND_BOTH_WAYS )
         
         self.widget().setLayout( vbox )
+        
+    
+class ReviewVacuumData( ClientGUIScrolledPanels.ReviewPanel ):
+    
+    def __init__( self, parent, controller, vacuum_data ):
+        
+        ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
+        
+        self._controller = controller
+        self._vacuum_data = vacuum_data
+        
+        self._currently_vacuuming = False
+        
+        #
+        
+        info_message = '''Vacuuming is essentially an aggressive defrag of a database file. The content of the database is copied to a new file, which then has tightly packed pages and no empty 'free' pages.
+
+Because the new database is tightly packed, it will generally be smaller than the original file. This is currently the only way to truncate a hydrus database file.
+
+Vacuuming is an expensive operation. It requires lots of free space on your drive(s), hydrus cannot operate while it is going on, and it tends to run quite slow, about 1-40MB/s. The main benefit is in truncating the database files after you delete a lot of data, so I recommend you only do it on files with a lot of free space.'''
+        
+        st = ClientGUICommon.BetterStaticText( self, label = info_message )
+        
+        st.setWordWrap( True )
+        
+        vacuum_listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
+        
+        self._vacuum_listctrl = ClientGUIListCtrl.BetterListCtrl( vacuum_listctrl_panel, CGLC.COLUMN_LIST_VACUUM_DATA.ID, 6, self._ConvertNameToListCtrlTuples )
+        
+        vacuum_listctrl_panel.SetListCtrl( self._vacuum_listctrl )
+        
+        vacuum_listctrl_panel.AddButton( 'vacuum', self._Vacuum, enabled_check_func = self._CanVacuum )
+        
+        #
+        
+        self._vacuum_listctrl.SetData( list( self._vacuum_data.keys() ) )
+        
+        self._vacuum_listctrl.Sort()
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, vacuum_listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self.widget().setLayout( vbox )
+        
+    
+    def _CanVacuumName( self, name ):
+        
+        from hydrus.core import HydrusDB
+        
+        try:
+            
+            vacuum_dict = self._vacuum_data[ name ]
+            
+            path = vacuum_dict[ 'path' ]
+            page_size = vacuum_dict[ 'page_size' ]
+            page_count = vacuum_dict[ 'page_count' ]
+            freelist_count = vacuum_dict[ 'freelist_count' ]
+            
+            HydrusDB.CheckCanVacuumData( path, page_size, page_count, freelist_count )
+            
+        except Exception as e:
+            
+            return ( False, str( e ) )
+            
+        
+        return ( True, 'yes!' )
+        
+    
+    def _CanVacuum( self ):
+        
+        names = self._vacuum_listctrl.GetData( only_selected = True )
+        
+        if len( names ) == 0:
+            
+            return False
+            
+        
+        for name in names:
+            
+            ( result, info ) = self._CanVacuumName( name )
+            
+            if not result:
+                
+                return False
+                
+            
+        
+        return True
+        
+    
+    def _ConvertNameToListCtrlTuples( self, name ):
+        
+        vacuum_dict = self._vacuum_data[ name ]
+        
+        page_size = vacuum_dict[ 'page_size' ]
+        
+        sort_name = name
+        pretty_name = name
+        
+        sort_total_size = page_size * vacuum_dict[ 'page_count' ]
+        pretty_total_size = HydrusData.ToHumanBytes( sort_total_size )
+        
+        sort_free_size = page_size * vacuum_dict[ 'freelist_count' ]
+        pretty_free_size = HydrusData.ToHumanBytes( sort_free_size )
+        
+        if sort_total_size > 0:
+            
+            pretty_free_size = '{} ({})'.format( pretty_free_size, HydrusData.ConvertFloatToPercentage( sort_free_size / sort_total_size ) )
+            
+        
+        sort_last_vacuumed = vacuum_dict[ 'last_vacuumed' ]
+        
+        if sort_last_vacuumed == 0 or sort_last_vacuumed is None:
+            
+            sort_last_vacuumed = 0
+            pretty_last_vacuumed = 'never done'
+            
+        else:
+            
+            pretty_last_vacuumed = HydrusData.TimestampToPrettyTimeDelta( sort_last_vacuumed )
+            
+        
+        ( result, info ) = self._CanVacuumName( name )
+        
+        sort_can_vacuum = result
+        pretty_can_vacuum = info
+        
+        ( sort_vacuum_time_estimate, pretty_vacuum_time_estimate ) = self._GetVacuumTimeEstimate( sort_total_size )
+        
+        display_tuple = ( pretty_name, pretty_total_size, pretty_free_size, pretty_last_vacuumed, pretty_can_vacuum, pretty_vacuum_time_estimate )
+        sort_tuple = ( sort_name, sort_total_size, sort_free_size, sort_last_vacuumed, sort_can_vacuum, sort_vacuum_time_estimate )
+        
+        return ( display_tuple, sort_tuple )
+        
+    
+    def _GetVacuumTimeEstimate( self, db_size ):
+        
+        from hydrus.core import HydrusDB
+        
+        vacuum_time_estimate = HydrusDB.GetApproxVacuumDuration( db_size )
+        
+        pretty_vacuum_time_estimate = '{} to {}'.format( HydrusData.TimeDeltaToPrettyTimeDelta( vacuum_time_estimate / 40 ), HydrusData.TimeDeltaToPrettyTimeDelta( vacuum_time_estimate ) )
+        
+        return ( vacuum_time_estimate, pretty_vacuum_time_estimate )
+        
+    
+    def _Vacuum( self ):
+        
+        names = list( self._vacuum_listctrl.GetData( only_selected = True ) )
+        
+        if len( names ) > 0:
+            
+            total_size = sum( ( vd[ 'page_size' ] * vd[ 'page_count' ] for vd in ( self._vacuum_data[ name ] for name in names ) ) )
+            
+            ( sort_time_estimate, pretty_time_estimate ) = self._GetVacuumTimeEstimate( total_size )
+            
+            message = 'Do vacuum now? Estimated time to vacuum is {}.'.format( pretty_time_estimate )
+            
+            result = ClientGUIDialogsQuick.GetYesNo( self, message, yes_label = 'do it', no_label = 'forget it' )
+            
+            if result == QW.QDialog.Accepted:
+                
+                self._controller.Write( 'vacuum', names )
+                
+                self._OKParent()
+                
+            
         
     

@@ -1,9 +1,10 @@
-import collections
+import typing
 
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusText
 
@@ -22,9 +23,6 @@ def ClientToScreen( win: QW.QWidget, pos: QC.QPoint ) -> QC.QPoint:
         return QC.QPoint( 50, 50 )
         
     
-
-MAGIC_TEXT_PADDING = 1.1
-
 def ColourIsBright( colour: QG.QColor ):
     
     it_is_bright = colour.valueF() > 0.75
@@ -37,29 +35,50 @@ def ColourIsGreyish( colour: QG.QColor ):
     
     return it_is_greyish
     
-def ConvertPixelsToTextWidth( window, pixels, round_down = False ):
+# OK, so we now have a fixed block for width, which we sometimes want to calculate in both directions.
+# by normalising our 'one character' width, the inverse calculation uses the same coefficient and we aren't losing so much in rounding
+NUM_CHARS_FOR_WIDTH_CALCULATIONS = 32
+MAGIC_TEXT_PADDING = 1.1
+
+def GetOneCharacterPixelHeight( window ) -> float:
     
-    twenty_chars_in_pixels = int( window.fontMetrics().boundingRect( 20 * 'x' ).width() * MAGIC_TEXT_PADDING )
-    one_char_in_pixels = twenty_chars_in_pixels / 20
+    return window.fontMetrics().height() * MAGIC_TEXT_PADDING
+    
+def GetOneCharacterPixelWidth( window ) -> float:
+    
+    char_block_width = window.fontMetrics().boundingRect( NUM_CHARS_FOR_WIDTH_CALCULATIONS * 'x' ).width() * MAGIC_TEXT_PADDING
+    
+    one_char_width = char_block_width / NUM_CHARS_FOR_WIDTH_CALCULATIONS
+    
+    return one_char_width
+    
+def ConvertPixelsToTextWidth( window, pixels, round_down = False ) -> int:
+    
+    one_char_width = GetOneCharacterPixelWidth( window )
     
     if round_down:
         
-        return int( pixels // one_char_in_pixels )
+        return int( pixels // one_char_width )
         
     else:
         
-        return round( pixels / one_char_in_pixels )
+        return round( pixels / one_char_width )
         
     
-def ConvertTextToPixels( window, char_dimensions ):
+def ConvertTextToPixels( window, char_dimensions ) -> typing.Tuple[ int, int ]:
     
     ( char_cols, char_rows ) = char_dimensions
     
-    return ( int( window.fontMetrics().boundingRect( char_cols * 'x' ).width() * MAGIC_TEXT_PADDING ), int( char_rows * window.fontMetrics().height() * MAGIC_TEXT_PADDING ) )
+    one_char_width = GetOneCharacterPixelWidth( window )
+    one_char_height = GetOneCharacterPixelHeight( window )
     
-def ConvertTextToPixelWidth( window, char_cols ):
+    return ( round( char_cols * one_char_width ), round( char_rows * one_char_height ) )
     
-    return int( window.fontMetrics().boundingRect( char_cols * 'x' ).width() * MAGIC_TEXT_PADDING )
+def ConvertTextToPixelWidth( window, char_cols ) -> int:
+    
+    one_char_width = GetOneCharacterPixelWidth( window )
+    
+    return round( char_cols * one_char_width )
     
 def DialogIsOpen():
     
@@ -295,6 +314,24 @@ def TLWOrChildIsActive( win ):
         
     
     return False
+    
+def UpdateAppDisplayName():
+    
+    app_display_name = HG.client_controller.new_options.GetString( 'app_display_name' )
+    
+    QW.QApplication.instance().setApplicationDisplayName( '{} {}'.format( app_display_name, HC.SOFTWARE_VERSION ) )
+    
+    for tlw in QW.QApplication.topLevelWidgets():
+        
+        window_title = tlw.windowTitle()
+        
+        if window_title != '':
+            
+            tlw.setWindowTitle( '' )
+            
+            tlw.setWindowTitle( window_title )
+            
+        
     
 def WidgetOrAnyTLWChildHasFocus( window ):
     

@@ -27,7 +27,18 @@ from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.importing import ClientImportFileSeeds
 from hydrus.client.importing.options import FileImportOptions
+from hydrus.client.metadata import ClientTagSorting
 
+def GetRetryIgnoredParam( window ):
+    
+    choice_tuples = [
+        ( 'retry all', None, 'retry all' ),
+        ( 'retry 404s', '^404', 'retry all 404s' ),
+        ( 'retry blacklisted', 'blacklisted!$', 'retry all blacklisted' )
+    ]
+    
+    return ClientGUIDialogsQuick.SelectFromListButtons( window, 'select what to retry', choice_tuples )
+    
 class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
     
     def __init__( self, parent, controller, file_seed_cache ):
@@ -188,6 +199,110 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         
         ClientGUIMenus.AppendMenuItem( menu, 'copy sources', 'Copy all the selected sources to clipboard.', self._CopySelectedFileSeedData )
         ClientGUIMenus.AppendMenuItem( menu, 'copy notes', 'Copy all the selected notes to clipboard.', self._CopySelectedNotes )
+        
+        if len( selected_file_seeds ) == 1:
+            
+            ClientGUIMenus.AppendSeparator( menu )
+            
+            ( selected_file_seed, ) = selected_file_seeds
+            
+            hash_types_to_hashes = selected_file_seed.GetHashTypesToHashes()
+            
+            if len( hash_types_to_hashes ) == 0:
+                
+                ClientGUIMenus.AppendMenuLabel( menu, 'no hashes yet' )
+                
+            else:
+                
+                hash_submenu = QW.QMenu( menu )
+                
+                for hash_type in ( 'sha256', 'md5', 'sha1', 'sha512' ):
+                    
+                    if hash_type in hash_types_to_hashes:
+                        
+                        h = hash_types_to_hashes[ hash_type ]
+                        
+                        ClientGUIMenus.AppendMenuLabel( hash_submenu, '{}:{}'.format( hash_type, h.hex() ) )
+                        
+                    
+                
+                ClientGUIMenus.AppendMenu( menu, hash_submenu, 'hashes' )
+                
+            
+            #
+            
+            if selected_file_seed.IsURLFileImport():
+                
+                referral_url = selected_file_seed.GetReferralURL()
+                primary_urls = sorted( selected_file_seed.GetPrimaryURLs() )
+                source_urls = sorted( selected_file_seed.GetSourceURLs() )
+                
+                if referral_url is None and len( primary_urls ) + len( source_urls ) == 0:
+                    
+                    ClientGUIMenus.AppendMenuLabel( menu, 'no additional urls' )
+                    
+                else:
+                    
+                    url_submenu = QW.QMenu( menu )
+                    
+                    if referral_url is not None:
+                        
+                        ClientGUIMenus.AppendMenuLabel( url_submenu, 'referral url:' )
+                        ClientGUIMenus.AppendMenuLabel( url_submenu, referral_url )
+                        
+                    
+                    if len( primary_urls ) > 0:
+                        
+                        ClientGUIMenus.AppendSeparator( url_submenu )
+                        
+                        ClientGUIMenus.AppendMenuLabel( url_submenu, 'primary urls:' )
+                        
+                        for url in primary_urls:
+                            
+                            ClientGUIMenus.AppendMenuLabel( url_submenu, url )
+                            
+                        
+                    
+                    if len( source_urls ) > 0:
+                        
+                        ClientGUIMenus.AppendSeparator( url_submenu )
+                        
+                        ClientGUIMenus.AppendMenuLabel( url_submenu, 'source urls:' )
+                        
+                        for url in source_urls:
+                            
+                            ClientGUIMenus.AppendMenuLabel( url_submenu, url )
+                            
+                        
+                    
+                    ClientGUIMenus.AppendMenu( menu, url_submenu, 'additional urls' )
+                    
+                
+                #
+                
+                tags = list( selected_file_seed.GetExternalTags() )
+                
+                tag_sort = ClientTagSorting.TagSort( sort_type = ClientTagSorting.SORT_BY_HUMAN_TAG, sort_order = CC.SORT_ASC )
+                
+                ClientTagSorting.SortTags( tag_sort, tags )
+                
+                if len( tags ) == 0:
+                    
+                    ClientGUIMenus.AppendMenuLabel( menu, 'no parsed tags' )
+                    
+                else:
+                    
+                    tag_submenu = QW.QMenu( menu )
+                    
+                    for tag in tags:
+                        
+                        ClientGUIMenus.AppendMenuLabel( tag_submenu, tag )
+                        
+                    
+                    ClientGUIMenus.AppendMenu( menu, tag_submenu, 'parsed tags' )
+                    
+                
+            
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -368,17 +483,17 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
         
     
-class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
+class FileSeedCacheButton( ClientGUICommon.BetterButton ):
     
     def __init__( self, parent, controller, file_seed_cache_get_callable, file_seed_cache_set_callable = None ):
         
-        ClientGUICommon.BetterBitmapButton.__init__( self, parent, CC.global_pixmaps().listctrl, self._ShowFileSeedCacheFrame )
+        ClientGUICommon.BetterButton.__init__( self, parent, 'file log', self._ShowFileSeedCacheFrame )
         
         self._controller = controller
         self._file_seed_cache_get_callable = file_seed_cache_get_callable
         self._file_seed_cache_set_callable = file_seed_cache_set_callable
         
-        self.setToolTip( 'open detailed file import status--right-click for quick actions, if applicable' )
+        self.setToolTip( 'open detailed file log--right-click for quick actions, if applicable' )
         
         self._widget_event_filter = QP.WidgetEventFilter( self )
         
@@ -523,16 +638,18 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
     
     def _RetryIgnored( self ):
         
-        message = 'Are you sure you want to retry all the files that were ignored/vetoed?'
+        try:
+            
+            ignored_regex = GetRetryIgnoredParam( self )
+            
+        except HydrusExceptions.CancelledException:
+            
+            return
+            
         
-        result = ClientGUIDialogsQuick.GetYesNo( self, message )
+        file_seed_cache = self._file_seed_cache_get_callable()
         
-        if result == QW.QDialog.Accepted:
-            
-            file_seed_cache = self._file_seed_cache_get_callable()
-            
-            file_seed_cache.RetryIgnored()
-            
+        file_seed_cache.RetryIgnored( ignored_regex = ignored_regex )
         
     
     def _ShowFileSeedCacheFrame( self ):
@@ -541,11 +658,13 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
         
         tlw = self.window()
         
+        title = 'file log'
+        
         if isinstance( tlw, QP.Dialog ):
             
             if self._file_seed_cache_set_callable is None: # throw up a dialog that edits the file_seed cache in place
                 
-                with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, 'file import status' ) as dlg:
+                with ClientGUITopLevelWindowsPanels.DialogNullipotent( self, title ) as dlg:
                     
                     panel = EditFileSeedCachePanel( dlg, self._controller, file_seed_cache )
                     
@@ -558,7 +677,7 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
                 
                 dupe_file_seed_cache = file_seed_cache.Duplicate()
                 
-                with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'file import status' ) as dlg:
+                with ClientGUITopLevelWindowsPanels.DialogEdit( self, title ) as dlg:
                     
                     panel = EditFileSeedCachePanel( dlg, self._controller, dupe_file_seed_cache )
                     
@@ -573,7 +692,6 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
             
         else: # throw up a frame that edits the file_seed cache in place
             
-            title = 'file import status'
             frame_key = 'file_import_status'
             
             frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, title, frame_key )
@@ -619,7 +737,7 @@ class FileSeedCacheButton( ClientGUICommon.BetterBitmapButton ):
         
         if event.button() != QC.Qt.RightButton:
             
-            ClientGUICommon.BetterBitmapButton.mouseReleaseEvent( self, event )
+            ClientGUICommon.BetterButton.mouseReleaseEvent( self, event )
             
             return
             

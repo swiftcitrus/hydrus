@@ -653,7 +653,7 @@ class EditTagFilterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().help, self._ShowHelp )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -991,15 +991,15 @@ class EditTagFilterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu = QW.QMenu()
         
-        if len( names_to_tag_filters ) == 0:
+        ClientGUIMenus.AppendMenuItem( menu, 'this tag filter', 'export this tag filter', HG.client_controller.pub, 'clipboard', 'text', self.GetValue().DumpToString() )
+        
+        if len( names_to_tag_filters ) > 0:
             
-            ClientGUIMenus.AppendMenuLabel( menu, 'no favourites set!' )
-            
-        else:
+            ClientGUIMenus.AppendSeparator( menu )
             
             for ( name, tag_filter ) in names_to_tag_filters.items():
                 
-                ClientGUIMenus.AppendMenuItem( menu, name, 'load {}'.format( name ), HG.client_controller.pub, 'clipboard', 'text', tag_filter.DumpToString() )
+                ClientGUIMenus.AppendMenuItem( menu, name, 'export {}'.format( name ), HG.client_controller.pub, 'clipboard', 'text', tag_filter.DumpToString() )
                 
             
         
@@ -1053,6 +1053,8 @@ class EditTagFilterPanel( ClientGUIScrolledPanels.EditPanel ):
             
         
         tag_filter = obj
+        
+        tag_filter.CleanRules()
         
         with ClientGUIDialogs.DialogTextEntry( self, 'Enter a name for the favourite.' ) as dlg:
             
@@ -1990,11 +1992,9 @@ class ManageTagsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         command_processed = True
         
-        data = command.GetData()
-        
         if command.IsSimpleCommand():
             
-            action = data
+            action = command.GetSimpleAction()
             
             if action == CAC.SIMPLE_MANAGE_FILE_TAGS:
                 
@@ -2690,11 +2690,9 @@ class ManageTagsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             command_processed = True
             
-            data = command.GetData()
-            
             if command.IsSimpleCommand():
                 
-                action = data
+                action = command.GetSimpleAction()
                 
                 if action == CAC.SIMPLE_SET_SEARCH_FOCUS:
                     
@@ -2895,11 +2893,11 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
             
             self._show_all = QW.QCheckBox( self )
             
-            listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
+            self._listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
             
-            self._tag_parents = ClientGUIListCtrl.BetterListCtrl( listctrl_panel, CGLC.COLUMN_LIST_TAG_PARENTS.ID, 8, self._ConvertPairToListCtrlTuples, delete_key_callback = self._ListCtrlActivated, activation_callback = self._ListCtrlActivated )
+            self._tag_parents = ClientGUIListCtrl.BetterListCtrl( self._listctrl_panel, CGLC.COLUMN_LIST_TAG_PARENTS.ID, 8, self._ConvertPairToListCtrlTuples, delete_key_callback = self._ListCtrlActivated, activation_callback = self._ListCtrlActivated )
             
-            listctrl_panel.SetListCtrl( self._tag_parents )
+            self._listctrl_panel.SetListCtrl( self._tag_parents )
             
             self._tag_parents.Sort()
             
@@ -2910,14 +2908,16 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
             menu_items.append( ( 'normal', 'from .txt file', 'Load parents from a .txt file.', HydrusData.Call( self._ImportFromTXT, False ) ) )
             menu_items.append( ( 'normal', 'from .txt file (only add pairs--no deletions)', 'Load parents from a .txt file.', HydrusData.Call( self._ImportFromTXT, True ) ) )
             
-            listctrl_panel.AddMenuButton( 'import', menu_items )
+            self._listctrl_panel.AddMenuButton( 'import', menu_items )
             
             menu_items = []
             
             menu_items.append( ( 'normal', 'to clipboard', 'Save selected parents to your clipboard.', self._ExportToClipboard ) )
             menu_items.append( ( 'normal', 'to .txt file', 'Save selected parents to a .txt file.', self._ExportToTXT ) )
             
-            listctrl_panel.AddMenuButton( 'export', menu_items, enabled_only_on_selection = True )
+            self._listctrl_panel.AddMenuButton( 'export', menu_items, enabled_only_on_selection = True )
+            
+            self._listctrl_panel.setEnabled( False )
             
             self._children = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self, self._service_key, ClientTags.TAG_DISPLAY_ACTUAL )
             self._parents = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self, self._service_key, ClientTags.TAG_DISPLAY_ACTUAL )
@@ -2972,7 +2972,7 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
             QP.AddToLayout( vbox, self._sync_status_st, CC.FLAGS_EXPAND_PERPENDICULAR )
             QP.AddToLayout( vbox, self._count_st, CC.FLAGS_EXPAND_PERPENDICULAR )
             QP.AddToLayout( vbox, ClientGUICommon.WrapInText(self._show_all,self,'show all pairs'), CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+            QP.AddToLayout( vbox, self._listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
             QP.AddToLayout( vbox, self._add, CC.FLAGS_ON_RIGHT )
             QP.AddToLayout( vbox, tags_box, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
             QP.AddToLayout( vbox, input_box, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
@@ -3314,14 +3314,22 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
                 
                 QW.QMessageBox.information( self, 'Information', 'Uneven number of tags in clipboard!' )
                 
-                return
-                
             
             pairs = []
             
             for i in range( len( tags ) // 2 ):
                 
-                pair = ( tags[ 2 * i ], tags[ ( 2 * i ) + 1 ] )
+                try:
+                    
+                    pair = (
+                        HydrusTags.CleanTag( tags[ 2 * i ] ),
+                        HydrusTags.CleanTag( tags[ ( 2 * i ) + 1 ] )
+                    )
+                    
+                except:
+                    
+                    continue
+                    
                 
                 pairs.append( pair )
                 
@@ -3545,8 +3553,15 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
             
             if self._i_am_local_tag_service:
                 
-                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PENDING ]: content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_ADD, pair ) )
-                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PETITIONED ]: content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_DELETE, pair ) )
+                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PETITIONED ]:
+                    
+                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_DELETE, pair ) )
+                    
+                
+                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PENDING ]:
+                    
+                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_ADD, pair ) )
+                    
                 
             else:
                 
@@ -3562,10 +3577,10 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
                 new_petitions = current_petitioned.difference( original_petitioned )
                 rescinded_petitions = original_petitioned.difference( current_petitioned )
                 
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PEND, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_pends ) )
+                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_RESCIND_PETITION, pair ) for pair in rescinded_petitions ) )
                 content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_RESCIND_PEND, pair ) for pair in rescinded_pends ) )
                 content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PETITION, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_petitions ) )
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_RESCIND_PETITION, pair ) for pair in rescinded_petitions ) )
+                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PEND, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_pends ) )
                 
             
             return ( self._service_key, content_updates )
@@ -3704,6 +3719,7 @@ class ManageTagParents( ClientGUIScrolledPanels.ManagePanel ):
                 
                 self._count_st.setText( 'Starting with '+HydrusData.ToHumanInt(len(original_statuses_to_pairs[HC.CONTENT_STATUS_CURRENT]))+' pairs.' )
                 
+                self._listctrl_panel.setEnabled( True )
                 self._child_input.setEnabled( True )
                 self._parent_input.setEnabled( True )
                 
@@ -3858,11 +3874,11 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             self._show_all = QW.QCheckBox( self )
             
-            listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
+            self._listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
             
-            self._tag_siblings = ClientGUIListCtrl.BetterListCtrl( listctrl_panel, CGLC.COLUMN_LIST_TAG_SIBLINGS.ID, 8, self._ConvertPairToListCtrlTuples, delete_key_callback = self._ListCtrlActivated, activation_callback = self._ListCtrlActivated )
+            self._tag_siblings = ClientGUIListCtrl.BetterListCtrl( self._listctrl_panel, CGLC.COLUMN_LIST_TAG_SIBLINGS.ID, 8, self._ConvertPairToListCtrlTuples, delete_key_callback = self._ListCtrlActivated, activation_callback = self._ListCtrlActivated )
             
-            listctrl_panel.SetListCtrl( self._tag_siblings )
+            self._listctrl_panel.SetListCtrl( self._tag_siblings )
             
             self._tag_siblings.Sort()
             
@@ -3873,14 +3889,16 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             menu_items.append( ( 'normal', 'from .txt file', 'Load siblings from a .txt file.', HydrusData.Call( self._ImportFromTXT, False ) ) )
             menu_items.append( ( 'normal', 'from .txt file (only add pairs--no deletions)', 'Load siblings from a .txt file.', HydrusData.Call( self._ImportFromTXT, True ) ) )
             
-            listctrl_panel.AddMenuButton( 'import', menu_items )
+            self._listctrl_panel.AddMenuButton( 'import', menu_items )
             
             menu_items = []
             
             menu_items.append( ( 'normal', 'to clipboard', 'Save selected siblings to your clipboard.', self._ExportToClipboard ) )
             menu_items.append( ( 'normal', 'to .txt file', 'Save selected siblings to a .txt file.', self._ExportToTXT ) )
             
-            listctrl_panel.AddMenuButton( 'export', menu_items, enabled_only_on_selection = True )
+            self._listctrl_panel.AddMenuButton( 'export', menu_items, enabled_only_on_selection = True )
+            
+            self._listctrl_panel.setEnabled( False )
             
             self._old_siblings = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self, self._service_key, ClientTags.TAG_DISPLAY_ACTUAL )
             self._new_sibling = ClientGUICommon.BetterStaticText( self )
@@ -3934,7 +3952,7 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             QP.AddToLayout( vbox, self._sync_status_st, CC.FLAGS_EXPAND_PERPENDICULAR )
             QP.AddToLayout( vbox, self._count_st, CC.FLAGS_EXPAND_PERPENDICULAR )
             QP.AddToLayout( vbox, ClientGUICommon.WrapInText(self._show_all,self,'show all pairs'), CC.FLAGS_EXPAND_PERPENDICULAR )
-            QP.AddToLayout( vbox, listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+            QP.AddToLayout( vbox, self._listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
             QP.AddToLayout( vbox, self._add, CC.FLAGS_ON_RIGHT )
             QP.AddToLayout( vbox, text_box, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
             QP.AddToLayout( vbox, input_box, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
@@ -4317,7 +4335,17 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             for i in range( len( tags ) // 2 ):
                 
-                pair = ( tags[ 2 * i ], tags[ ( 2 * i ) + 1 ] )
+                try:
+                    
+                    pair = (
+                        HydrusTags.CleanTag( tags[ 2 * i ] ),
+                        HydrusTags.CleanTag( tags[ ( 2 * i ) + 1 ] )
+                    )
+                    
+                except:
+                    
+                    continue
+                    
                 
                 pairs.append( pair )
                 
@@ -4541,14 +4569,14 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
             
             if self._i_am_local_tag_service:
                 
-                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PENDING ]:
-                    
-                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_ADD, pair ) )
-                    
-                
                 for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PETITIONED ]:
                     
                     content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_DELETE, pair ) )
+                    
+                
+                for pair in self._current_statuses_to_pairs[ HC.CONTENT_STATUS_PENDING ]:
+                    
+                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_ADD, pair ) )
                     
                 
             else:
@@ -4565,10 +4593,10 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
                 new_petitions = current_petitioned.difference( original_petitioned )
                 rescinded_petitions = original_petitioned.difference( current_petitioned )
                 
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PEND, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_pends ) )
+                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_RESCIND_PETITION, pair ) for pair in rescinded_petitions ) )
                 content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_RESCIND_PEND, pair ) for pair in rescinded_pends ) )
                 content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PETITION, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_petitions ) )
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_RESCIND_PETITION, pair ) for pair in rescinded_petitions ) )
+                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PEND, pair, reason = self._pairs_to_reasons[ pair ] ) for pair in new_pends ) )
                 
             
             return ( self._service_key, content_updates )
@@ -4732,6 +4760,8 @@ class ManageTagSiblings( ClientGUIScrolledPanels.ManagePanel ):
                 self._sync_status_st.style().polish( self._sync_status_st )
                 
                 self._count_st.setText( 'Starting with '+HydrusData.ToHumanInt(len(original_statuses_to_pairs[HC.CONTENT_STATUS_CURRENT]))+' pairs.' )
+                
+                self._listctrl_panel.setEnabled( True )
                 
                 self._old_input.setEnabled( True )
                 self._new_input.setEnabled( True )
@@ -4928,6 +4958,8 @@ class ReviewTagDisplayMaintenancePanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
                 num_items_to_regen = num_siblings_to_sync + num_parents_to_sync
                 
+                sync_halted = False
+                
                 if num_items_to_regen == 0:
                     
                     message = 'All synced!'
@@ -4943,6 +4975,14 @@ class ReviewTagDisplayMaintenancePanel( ClientGUIScrolledPanels.ReviewPanel ):
                 else:
                     
                     message = '{} siblings and {} parents to sync.'.format( HydrusData.ToHumanInt( num_siblings_to_sync ), HydrusData.ToHumanInt( num_parents_to_sync ) )
+                    
+                
+                if len( status[ 'waiting_on_tag_repos' ] ) > 0:
+                    
+                    message += os.linesep * 2
+                    message += os.linesep.join( status[ 'waiting_on_tag_repos' ] )
+                    
+                    sync_halted = True
                     
                 
                 self._siblings_and_parents_st.setText( message )
@@ -4966,7 +5006,7 @@ class ReviewTagDisplayMaintenancePanel( ClientGUIScrolledPanels.ReviewPanel ):
                     value = 1
                     range = 1
                     
-                    sync_possible = False
+                    sync_work_to_do = False
                     
                 else:
                     
@@ -4988,15 +5028,15 @@ class ReviewTagDisplayMaintenancePanel( ClientGUIScrolledPanels.ReviewPanel ):
                             
                         
                     
-                    sync_possible = True
+                    sync_work_to_do = True
                     
                 
                 self._progress.SetValue( message, value, range )
                 
                 self._refresh_button.setEnabled( True )
                 
-                self._go_faster_button.setVisible( sync_possible )
-                self._go_faster_button.setEnabled( sync_possible )
+                self._go_faster_button.setVisible( sync_work_to_do and not sync_halted )
+                self._go_faster_button.setEnabled( sync_work_to_do and not sync_halted )
                 
                 if HG.client_controller.tag_display_maintenance_manager.CurrentlyGoingFaster( self._service_key ):
                     

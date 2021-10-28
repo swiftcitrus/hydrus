@@ -165,7 +165,7 @@ def ReadFetch(
         
         fetch_from_db = True
         
-        if synchronised and qt_media_callable is not None:
+        if synchronised and qt_media_callable is not None and not file_search_context.GetSystemPredicates().HasSystemLimit():
             
             try:
                 
@@ -916,6 +916,20 @@ class AutoCompleteDropdown( QW.QWidget ):
         raise NotImplementedError()
         
     
+    def _RestoreTextCtrlFocus( self ):
+        
+        # if an event came from clicking the dropdown, we want to put focus back on textctrl
+        
+        if self._float_mode:
+            
+            self.window().activateWindow()
+            
+        else:
+            
+            ClientGUIFunctions.SetFocusLater( self._text_ctrl )
+            
+        
+    
     def _ScheduleResultsRefresh( self, delay ):
         
         if self._schedule_results_refresh_job is not None:
@@ -1042,6 +1056,8 @@ class AutoCompleteDropdown( QW.QWidget ):
     def BroadcastChoices( self, predicates, shift_down = False ):
         
         self._BroadcastChoices( predicates, shift_down )
+        
+        self._RestoreTextCtrlFocus()
         
     
     def CancelCurrentResultsFetchJob( self ):
@@ -1247,11 +1263,9 @@ class AutoCompleteDropdown( QW.QWidget ):
         
         command_processed = True
         
-        data = command.GetData()
-        
         if command.IsSimpleCommand():
             
-            action = data
+            action = command.GetSimpleAction()
             
             if action == CAC.SIMPLE_AUTOCOMPLETE_IME_MODE:
                 
@@ -1520,6 +1534,8 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
         
         CGC.core().PopupMenu( self._file_repo_button, menu )
         
+        self._RestoreTextCtrlFocus()
+        
     
     def NotifyNewServices( self ):
         
@@ -1570,6 +1586,8 @@ class AutoCompleteDropdownTags( AutoCompleteDropdown ):
             
         
         CGC.core().PopupMenu( self._tag_repo_button, menu )
+        
+        self._RestoreTextCtrlFocus()
         
     
 class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
@@ -1765,7 +1783,9 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
     
     def _SignalNewSearchState( self ):
         
-        file_search_context = self.GetFileSearchContext()
+        self._file_search_context.SetPredicates( self._predicates_listbox.GetPredicates() )
+        
+        file_search_context = self._file_search_context.Duplicate()
         
         self.searchChanged.emit( file_search_context )
         
@@ -2022,6 +2042,8 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         HG.client_controller.CallLaterQtSafe( self, 0.2, 'set stub predicates', self.SetStubPredicates, job_key, stub_predicates, parsed_autocomplete_text )
         
+        fsc = self.GetFileSearchContext()
+        
         if self._under_construction_or_predicate is None:
             
             under_construction_or_predicate = None
@@ -2031,7 +2053,7 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
             under_construction_or_predicate = self._under_construction_or_predicate.Duplicate()
             
         
-        HG.client_controller.CallToThread( ReadFetch, self, job_key, self.SetFetchedResults, parsed_autocomplete_text, self._media_callable, self._file_search_context.Duplicate(), self._search_pause_play.IsOn(), self._include_unusual_predicate_types, self._results_cache, under_construction_or_predicate, self._force_system_everything )
+        HG.client_controller.CallToThread( ReadFetch, self, job_key, self.SetFetchedResults, parsed_autocomplete_text, self._media_callable, fsc, self._search_pause_play.IsOn(), self._include_unusual_predicate_types, self._results_cache, under_construction_or_predicate, self._force_system_everything )
         
     
     def _ShouldTakeResponsibilityForEnter( self ):
@@ -2128,11 +2150,9 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         command_processed = True
         
-        data = command.GetData()
-        
         if self._can_intercept_unusual_key_events and command.IsSimpleCommand():
             
-            action = data
+            action = command.GetSimpleAction()
             
             if action == CAC.SIMPLE_SYNCHRONISED_WAIT_SWITCH:
                 
@@ -2179,10 +2199,10 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         self._file_search_context = file_search_context.Duplicate()
         
+        self._predicates_listbox.SetPredicates( self._file_search_context.GetPredicates() )
+        
         self._ChangeFileService( self._file_search_context.GetFileServiceKey() )
         self._ChangeTagService( self._file_search_context.GetTagSearchContext().service_key )
-        
-        self._predicates_listbox.SetPredicates( self._file_search_context.GetPredicates() )
         
         self._SignalNewSearchState()
         
@@ -2195,6 +2215,8 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         self._SignalNewSearchState()
         
+        self._RestoreTextCtrlFocus()
+        
     
     def SetIncludePending( self, value ):
         
@@ -2204,15 +2226,27 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         
         self._SignalNewSearchState()
         
+        self._RestoreTextCtrlFocus()
+        
     
     def SetSynchronised( self, value ):
         
         self._SignalNewSearchState()
         
+        self._RestoreTextCtrlFocus()
+        
+        if not self._search_pause_play.IsOn() and not self._file_search_context.GetSystemPredicates().HasSystemLimit():
+            
+            # update if user goes from sync to non-sync
+            self._SetListDirty()
+            
+        
     
     def PausePlaySearch( self ):
         
         self._search_pause_play.Flip()
+        
+        self._RestoreTextCtrlFocus()
         
     
     def ShowCancelSearchButton( self, show ):
@@ -2742,7 +2776,7 @@ class EditAdvancedORPredicates( ClientGUIScrolledPanels.EditPanel ):
         
         self._current_predicates = []
         
-        colour = ( 0, 0, 0 )
+        object_name = ''
         
         output = ''
         
@@ -2802,17 +2836,19 @@ class EditAdvancedORPredicates( ClientGUIScrolledPanels.EditPanel ):
                     
                 
                 output = os.linesep.join( ( pred.ToString() for pred in self._current_predicates ) )
-                colour = ( 0, 128, 0 )
+                object_name = 'HydrusValid'
                 
             except ValueError:
                 
                 output = 'Could not parse!'
-                colour = ( 128, 0, 0 )
+                object_name = 'HydrusInvalid'
                 
             
         
         self._result_preview.setPlainText( output )
-        QP.SetForegroundColour( self._result_preview, colour )
+        
+        self._result_preview.setObjectName( object_name )
+        self._result_preview.style().polish( self._result_preview )
         
     
     def EventUpdateText( self, text ):

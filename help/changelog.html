@@ -8,6 +8,457 @@
 		<div class="content">
 			<h3 id="changelog"><a href="#changelog">changelog</a></h3>
 			<ul>
+				<li><h3 id="version_459"><a href="#version_459">version 459</a></h3></li>
+				<ul>
+					<li>main highlights:</li>
+					<li>to help debugging from screenshots etc..., the client now puts its version name on every window title, like 'review services - hydrus client 459'. (issue #447)</li>
+					<li>the 'main gui title' option is reset and replaced with 'application display name' this week. it now alters the 'hydrus client' part on every window title. the actual 'main gui title' is now "main" lmao</li>
+					<li>wrote a new help document, 'help my media files are broke' in the db directory. this collects the different recovery routines I have developed while helping users after drive failure or other problems cause many missing files or a desynced database and file storage structure. I will be pointing people to this in future, please feel free to do the same</li>
+					<li>two new file maintenance jobs are added: for 'presence' and 'integrity' checks, you can now do 'if has URL, then try to redownload, else remove record'. this tidily combines the two more specific jobs that are commonly run after a hard drive problem. the 'presence' version is now the default selected job and recommended for most simple situations</li>
+					<li>a new easy-select button on the review file maintenance panel  lets you select all media files</li>
+					<li>I put some more time into the new duplicate filter zoom locking calculation. thank you to users who sent in examples of my code not working well--I have scaled back what it tried to do. now it will tend to heigh-lock for landscape images and width-lock for everything else _unless_ you are currently viewing the default zoom and that roughly fills the canvas on a dimension and doing the default lock would cause the next image to spill over the screen. the 'solution' here hence targets the 'watermark spilled over' problem more specifically and deals with all combinations of landscape/portrait A/B/canvas better. I'd still like to introduce some zoom locking options here for regular browsing, but pinning down what exactly is useful is trickier than I expected</li>
+					<li>the edit tag import options panel now shows 'THIS CURRENTLY GETS NO TAGS' warning red text if it is non default and no tags are set to parse and there are no additional tags</li>
+					<li>the status bar now shows '1,234 files in 20 collections' when you have just collections or just collections selected (previously, it wrongly said '1,234 collections') (issue #807)</li>
+					<li>macOS clients will now show dialog-created menus in a debug dialog unless the new BUGFIX checkbox under 'gui' options page is unchecked. this _should_ help Big Sur users who are unable to interact with menus created in dialogs like manage tags or manage services. I threw this together, so let me know how this works for you! (issue #986, issue #858)</li>
+					<li>the program now waits specifically for currently running subscriptions to stop work and save themselves before moving on with further shutdown tasks. hand in hand with this, subscriptions are now faster at stopping work on client exit, even when they have no popup message (through which some hackery dackery shutdown signals are sent otherwise) (issue #790)</li>
+					<li>physically deleting thousands of files in one go should no longer lock up the file manager and other systems for ages--physical delete is now serialised and processed on a new threaded mainloop, so it doesn't matter how fast the requests come it, it will chunter at a polite speed and take breaks and should not choke other consumers and freeze up other 'things are great, you can start new work' status checks</li>
+					<li>.</li>
+					<li>network job improvements:</li>
+					<li>hydrus network jobs now try to resume incomplete responses (previously they just dumped out and tried again from the beginning). if a server provides less content than it said it would, or it explicitly gives us a partial response, we now resume at that point! should fix dowmnloading of longer videos on 8chan.moe</li>
+					<li>hydrus network jobs now send a range header by default, letting servers return 206 (partial content) if they wish</li>
+					<li>SSL errors (cert verification and similar) are now caught in the network engine separately to generic connection errors. they will not be reattempted, and the failure note will display specific error info</li>
+					<li>refactored some response header parsing code, cleaning up how some variables are initialised</li>
+					<li>greatly improved the job reattempt system, resetting variables more neatly</li>
+					<li>improved some response range and content length calculations</li>
+					<li>.</li>
+					<li>smaller items, mostly bug fixes:</li>
+					<li>fixed a recent typo bug that caused the edit url class dialog to always spawn with 'file url' type set. sorry, this was stupid! (issue #982)</li>
+					<li>the edit url class dialog now sends the 'normalised' url as the example text for the api and referral string converter edit panels</li>
+					<li>fixed the new advanced file deletion 'remember last' checkboxes in _options->files and trash_. they weren't hooked up right, sorry!</li>
+					<li>fixed the tag menu's siblings submenu's copy command where it says 'ideal is "xxx" on: yyy'. despite the correct label, this was sometimes copying a different service's ideal (issue #855)</li>
+					<li>fixed the 'media zooms' text input under _options->media_ not turning off the 'red' invalid mode once its text is again valid</li>
+					<li>when you cancel the 'edit parser' dialog, it shouldn't say 'it looks like you made changes' so much when you didn't make any. the 'has changes' test now ignores some background test data updates that may have happened (issue #875)</li>
+					<li>if a JSON parsing formula is given HTML, the 'cannot parse' error now tries to detect this and present a better error text (issue #888)</li>
+					<li>I _think_ I fixed a problem in the new bytes rendering calculation (where it goes 1018825 to "995KB") where on some unlucky edge-case numbers it could non-determinitively choose different sig figs (e.g. flipping between 994.9KB and 995KB)</li>
+					<li>fixed a couple of file move actions that were unable to move across Windows partitions when the timestamp was before 1980-01-01 (issue #989)</li>
+					<li>mr bones now recognises you are not a new user if you deleted all your files. you can never exit</li>
+					<li>after some testing, it seems like large 'drop table' operations in SQLite sometimes work within seconds but generally take far longer, often working as slow as 10MB/s (and I just talked to a guy for whom it took _days_(!!!). writing a fix to make 'delete service' always run fast for something as large as the PTR will take planning and work, so for now I have attached a warning note to the delete service confirmation dialog</li>
+					<li>updated the file maintenance review panel to newer async code</li>
+					<li>fixed a typo bug in URL export when a file is missing/bad in file maintenance</li>
+				</ul>
+				<li><h3 id="version_458"><a href="#version_458">version 458</a></h3></li>
+				<ul>
+					<li>quality of life:</li>
+					<li>under _options->files and trash_, you can now govern whether the advanced file deletion dialog remembers action and reason. being able to save action (trash, physical delete, vs physical delete and clear history) is new, default off for now, and won't _always_ save (if you are currently set to trash, but the next dialog doesn't have trash as an option, then it won't overwrite to physical delete). if you try it out, let me know how you like it</li>
+					<li>a new option under 'network->pause' now lets you always boot the client with paused network traffic</li>
+					<li>the main file import object now stores primary urls (such as post and file url) separately from source url (which is produced by many parsers and typically refers to another website). a new checkbox in 'file import options' (when in advanced mode) now allows you to not associate primary urls separately to source urls (which is useful in some one-time technical jobs that talk to some unusual proxy etc...)</li>
+					<li>the new import object right-click menu that shows urls now separates primary and source urls, and also shows any referral url</li>
+					<li>when you flip between two images in the dupe filter, the zoom preservation calculation, which previously only locked to the same width, now tries to choose width or height based on the relative ratios of the two images to keep both images completely in view on a canvas zoom start. it should ensure that lower watermark banners stay in view and don't accidentally spill over the bottom of your monitor</li>
+					<li>moved popup toaster options from 'gui' options page to the new 'popup' page</li>
+					<li>added options for whether the popup toaster should update while the client is minimised and while the mouse is on a different monitor than the main gui window. these options now default to false, so if you have any trouble, please try turning them back on</li>
+					<li>a new shortcut action in the 'global' set now flips profile mode on and off. please note for now 'global' only works on main gui and media viewer--I will add a hook to every window in the future!</li>
+					<li>.</li>
+					<li>bug fixes:</li>
+					<li>you now cannot start an 'upload pending' job for a service more than once at a time. the menu is now disabled for each service while uploading is happening</li>
+					<li>fixed a bug in media load where if the file was not in a specific domain (i.e. somewhere in all known files), its tags would not show implied parents. for non-specific files, this calculation happens on the fly, and previously it was only doing siblings</li>
+					<li>fixed a bug from the somewhat recent file deletion update that meant many files' custom deletion reasons were being overwritten to 'No reason given' when trash was clearing. I am sorry for the inconvenience!</li>
+					<li>fixed an issue with parsing 'string' from html 'script' tags (and perhaps some other 'meta' tag types) on recent versions of the built hydrus release. this should fix the newgrounds gallery parser</li>
+					<li>fixed some gallery parsing error handling, for when the actually fetched url differs from  the original and cannot be parsed, and when the actually fetched url redirects straight to a file page from a 1-length search result</li>
+					<li>.</li>
+					<li>update file handling bug fixes:</li>
+					<li>when repository processing runs into an update file problem, it now specifies if the file was content or definitions type</li>
+					<li>when the database gathers updates to process, it discriminates between definitions and content updates more carefully</li>
+					<li>when a hydrus update file goes through file maintenance and changes filetype, the repository update progress tracker now 'reregisters' that file, updating what content types it can expect from it and clearing out incorrect data</li>
+					<li>during normal update file registration, incorrect old data is now cleared out</li>
+					<li>.</li>
+					<li>boring cleanup:</li>
+					<li>cleaned some of the positioning code that places icons and text on thumbnails, removing hardcoded numbers and letting custom icons position better</li>
+					<li>cleaned some import url tracking, checking, and association code</li>
+					<li>refactored profile mode and query planner mode switching up out of UI code into the controller</li>
+					<li>added a hefty unit test to test that siblings and parents are transitively applied to mappings correctly for files outside and inside specific file services, and for tag sync and the normal tag pipeline</li>
+					<li>refactored some database file maintenance code to decouple the queue from the worker</li>
+				</ul>
+				<li><h3 id="version_457"><a href="#version_457">version 457</a></h3></li>
+				<ul>
+					<li>smoother menubar updates:</li>
+					<li>improved the way the menubar menus update. rather than generating a whole new (e.g. 'pages') menu and replacing the existing out of date one, now there is a static menu skeleton that has subsections or labels updated in place. this means fewer objects changing, less flicker/jank, and should allow you to upload pending even if you have, say, a bunch of subscriptions running</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>thanks to a user's help, the filetype parser now detects pngs (this mostly happens during import) much faster! the problem previously was determining if a png is actually an apng--figuring out if they are truly apngs is now done with very fast file header scanning, rather than the previous method that booted ffmpeg. this brings filetype parse time for pngs down from 50-150ms to 1-2ms</li>
+					<li>getting apng metadata is also now faster. num_frames is now pulled from the file header, it no longer has to be manually counted by ffmpeg</li>
+					<li>clicking the session weight item in the 'pages' menu now gives you more detailed info on your session weight, including on currently closed pages in the undo list</li>
+					<li>stripped out a lot of ancient wx-era safety code that stops the client from doing certain UI work while it is minimised or minimised to tray. also brushed up some ugly update routines for menus refresh and modal message presentation that could lead to a pile-up of updates as soon as the client was unminimised, causing lag or freezes. with luck, the client should be better about restoring itself from minimised to system tray. if you minimise to tray, feedback on how this works out for you would be appreciated</li>
+					<li>when a network job stalls with the 'this domain had some errors recently' message, the cog menu on the widget now allows you to 'scrub domain errors' and try again immediately</li>
+					<li>if your search has system:limit, then any tag search you type in the autocomplete will now search the database, not your thumbnails. previously, the hack to enable this behaviour was to flip 'searching immediately' off. let's see if this new behaviour is ultimately confusing/annoying, I am mixed on it and think this subtle search option needs more thought and UI to make it more obvious and user friendly</li>
+					<li>if you have autocomplete tag search typed, and results from thumbnails displayed, and you flip 'searching immediately' off, the search will now automatically update and give you full database numbers immediately</li>
+					<li>.</li>
+					<li>help:</li>
+					<li>I moved 'searching with wildcards' from the advanced help to the 'more getting started with files' help here: https://hydrusnetwork.github.io/hydrus/help/getting_started_more_files.html</li>
+					<li>I also wrote a more detailed description of what the autocomplete dropdown buttons do in that page</li>
+					<li>I also wrote a brief description of how a system:limit query will try to clip according to the current file sort, getting the n 'biggest files' and so on</li>
+					<li>.</li>
+					<li>boring code cleanup:</li>
+					<li>cleaned some network job widget update calls</li>
+					<li>improved some misc autocomplete search status tracking</li>
+					<li>improved some account object permission checking and tests. accounts now never say they have permissions (e.g. if you click the 'see account permissions' button on review services) if they are banned or expired</li>
+					<li>file and pages menus now uses the new update routine</li>
+					<li>pending menu now uses the new update routine, with an emphasis on anti-jitter so you can interact while it is updating</li>
+					<li>database, network, service, and undo menu now use newer async update code and also use the new update routine</li>
+					<li>cleaned up help and tags menu init code</li>
+					<li>the signal that causes the pending menu to update is now only sent on tag changes if the tag service is a repository (previously, local-only updates were janking this for no reason)</li>
+					<li>the pending menu now updates its sibling/parent numbers when repository processing causes a clever row change to stuff you have pending</li>
+					<li>also, some menubar items that only show when in advanced mode now update their visibility when advanced mode is flipped on or off</li>
+					<li>misc menubar code cleanup and improvements</li>
+				</ul>
+				<li><h3 id="version_456"><a href="#version_456">version 456</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>the client no longer regularly commits a full garbage collection during memory maintenance. this debug-tier operation can take up to 15s on very large clients, resulting in awful lag. various instances of forcing it after big operations complete (e.g. to encourage post-subscription memory cleanup), are now replaced with regular pauses to allow python to clean itself more granularly. this may result in temporary memory bloat for some very subscription-heavy clients, so feedback would be appreciated</li>
+					<li>right-clicking on a single url import item in a 'file log' now shows you all the known hashes, parsed urls, and parsed tags for that item. I hope this will help debug some weird problems!</li>
+					<li>all multi-column lists across the program now convert an enter/return key press into an 'activate' command, as if you had double-clicked. this should make it easier to, for instance, highlight a downloader or shift/ctrl select a bunch of sibling rows and mass-delete (issue #933)</li>
+					<li>the subscription gap filler button now propagates file import options and tag import options from the subscription to the downloader it creates (issue #910)</li>
+					<li>a new 'mpv report mode' now prints a huge amount of mpv debug information to the hydrus log when activated</li>
+					<li>improved how mpv prints log messages to the hydrus log, including immediate log flushing</li>
+					<li>fixed a bug that meant the hydrus server was not saving custom update period or anonymisation period for next boot. thank you for the reports, and sorry for the trouble! (issue #976)</li>
+					<li>cleaned up some database savepoint handling after a serious transaction error occurs</li>
+					<li>the client api now ignores any parameter with a value of null, as if it were not there, rather than moaning about invalid datatypes (issue #922)</li>
+					<li>.</li>
+					<li>url classes:</li>
+					<li>the edit url class dialog is now broken into two notebook pages--'match rules', which strictly covers how to recognise a url, and 'options', which handles url storage, conversion, and normalisation</li>
+					<li>url classes can now support single-value parameters (a parameter with just a value, not a key/value pair). if turned on, then at least one single-value parameter is required to match the url, and multiple are permitted. a checkbox in the dialog turns this on and a string match lets you determine if the url class matches the received single value params</li>
+					<li>added unit tests to test the new single-value parameter matching</li>
+					<li>fixed an issue where StringMatch buttons were not emitting their valueChanged signal, guess how I discovered that bug this week</li>
+					<li>fixed the insertion of default parameter values when the URL Class has non-alphabetised params</li>
+					<li>refactored and cleaned up some related parsing and string convertion code into new ClientString module</li>
+				</ul>
+				<li><h3 id="version_455"><a href="#version_455">version 455</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>many of the simple system predicates (width, size, duration, etc..) now support the '≠' (not equal) operator! searches only support one of these at once for now (e.g. you can't say height != 640 AND height != 1080--it'll pick one of these pseudorandomly)</li>
+					<li>the watcher page list right-click menu now has 'copy subjects', which copies the selected watchers' 'subject' texts to clipboard</li>
+					<li>the advanced file deletion panel now remembers which reason you last used. it remembers if you selected the 'default' value up top versus specific reason text, and if you enter custom text, it remembers that for next time too</li>
+					<li>the network job widget now shows the current URL as tooltip over the progress gauge, and under the cog menu, where clicking it copies it to clipboard</li>
+					<li>the various menu labels across the program should now show ampersand (&) correctly (e.g. in URLs)</li>
+					<li>the way byte sizes (like 21.7KB or 1.24GB) above 1KB are rendered to strings has been overhauled. they now generally show three significant figures. a new EXPERIMENTAL option in 'gui' options panel lets you change this, but only 2 or 3 are really helpful</li>
+					<li>if a repository clears the message on your account, you no longer get a popup telling you 'hey, new message from server x: ...'</li>
+					<li>the new ≠ system preds should be parseable (but be careful, likely buggy) using the client api's new system predicate parser, with '≠', '!=', 'is not', or 'isn't'</li>
+					<li>cleaned up some old data presentation methods and improved how client specific options are patched in to base hydrus string conversion code</li>
+					<li>.</li>
+					<li>ui freezes:</li>
+					<li>session pages can now detect if they have had no saveable changes since a certain time. they use this ability to skip redundant session save CPU time for pages with no changes since the last session save</li>
+					<li>for now, since the smallest atom of the session system is a whole page, gallery and watcher pages can only save time if _every_ downloader in the page has had no changes, so in their case this optimisation mostly only applies to completely finished/paused pages. it is still better to have several medium size downloader pages than one gigantic one</li>
+					<li>a new database maintenance task ensures that optimisation cannot accidentally lose a page (from something like an unfortunate timing of a session save after many manual session deletes)</li>
+					<li>the existing optimisation that skips 'last session' save on no changes now initialises its data as the 'last session' is first loaded (rather than on first save), meaning that if there are no changes while the client is open, no new 'last session's will be saved at all</li>
+					<li>misc session save code cleanup</li>
+					<li>.</li>
+					<li>database repair, mostly boring:</li>
+					<li>a client can now boot with client.caches.db missing and will rebuild that file. almost all of its tables are now able to automatically repopulate (issue #975)</li>
+					<li>all the new modules I have been working on are now responsible for their own repair. this includes missing indices, missing tables, and table repopulation where possible. modules now know which of their tables are critical to a boot, what version each table and index was added, and now manage both initial and later-created service tables and indices</li>
+					<li>essentially, all newer database repair code is now modularised rather than hardcoded. the repair and creation code actually now share the same table and index definitions. the code is more reliable, checkpoints its good work in case of later failure, and will be much easier to maintain and expand in future</li>
+					<li>lots of module repair and initialisation code is refactored and generally given a full pass</li>
+					<li>the core mappings cache regeneration routine now takes transaction checkpoints throughout its job to save progress and reduce journal size</li>
+					<li>master definition critical error detection code is no longer hardcoded!</li>
+					<li>mapping storage repair code is no longer hardcoded!</li>
+					<li>similar files repair code is no longer hardcoded!</li>
+					<li>parent or sibling cache repair repopulation is no longer hardcoded!</li>
+					<li>the local hashes cache module can now repopulate itself during repair</li>
+					<li>the notes fast search table can now repopulate itself during repair</li>
+					<li>the similar files search tree table can now rebuild itself during repair</li>
+				</ul>
+				<li><h3 id="version_454"><a href="#version_454">version 454</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>when a downloader page fetch gives a 500 Server Error, it is now handled better, status numbers are updated to 'failed' quickly, and I believe the post-500 downloader deadlock issue (downloaders staying as 'pending', not 'working', after several of these 500s) should also be fixed (issue #898 maybe, but many other reports also)</li>
+					<li>when finishing a very large archive/delete filter, the UI should not hang so much to commit the changes. the changes may be delayed a second or more, if your client is currently chugging, so if you are a user who hits F5 real quick after committing archive/delete, let me know how you get on. I've tried to mitigate for your situation, but it may not be perfect.(issue #845)</li>
+					<li>the Edit URL Class dialog will now refuse to OK if the API Converter fails.</li>
+					<li>the Edit URL Class dialog will now put up an 'are you sure?' messagebox if the URL Class matches its own example API URL</li>
+					<li>fixed some gallery error handling when a gallery cannot be parsed</li>
+					<li>improved 'cannot parse' error reporting text to include more information</li>
+					<li>the client api /manage_pages/add_files command should now always preserve the sort of both the file_ids or hashes parameter</li>
+					<li>fixed an instance where image bitmaps were being handled incorrectly (issue #876)</li>
+					<li>the client will no longer report shutdown work due for a repository when the work is on a currently paused content type</li>
+					<li>fixed some logic related to the advanced tag option of 'fetch page even if url recognised and already in db'</li>
+					<li>improved the error message when an unlucky duplicate boot causes a locked database error</li>
+					<li>I rearranged and clarified a couple of links in the 'advanced' area of the help index page</li>
+					<li>added some help texts and tooltips to the edit checker options dialog and fixed some borked layout</li>
+					<li>did a quick hack to fix some db repair code that wasn't dealing with some missing module information. I will brush the repair code up in the near future so that modules can repair themselves</li>
+					<li>.</li>
+					<li>some text colour stuff:</li>
+					<li>the green/red/blue duplicate comparison statements on the duplicate filter's right-hand hover window are now coloured by QSS. a new 'HydrusIndeterminate' object name handles the blue.</li>
+					<li>the green/red background in the advanced OR input is now governed by HydrusValid and HydrusInvalid</li>
+					<li>the various 'help for this panel' blue texts are also now HydrusIndeterminate</li>
+					<li>I have added dark or light HydrusIndeterminate and more Valid/Invalid class definitions to all the default qss styles. they may need some updates, so if you wrote any of these QSS files, please fiddle with them and send me any updates to roll in!</li>
+					<li>added a new user created QSS style called 'Dark Blue', thank you for the submission!</li>
+					<li>all text colours are now dynamically set, either QSS or through (tag colour) options! there are no more hardcoded text colours!</li>
+					<li>.</li>
+					<li>media viewer's image tile renderer:</li>
+					<li>a new option in 'speed and memory' allows you to change the typical square dimensions of tiles in the tile renderer. default is 768 pixels. you can go bigger to improve accuracy, but it'll cost a little memory and CPU inefficiency</li>
+					<li>the new 'nice' tile size calculator now tests more potential tile sizes, improving precision and reducing stretch-warping along tile borders for unusual zooms</li>
+					<li>the new nice size calculator is now also used when figuring out tile padding, making padding widths that do not cause stretch-warps</li>
+					<li>there remain slight stretch-warps in some bottom-most and right-most tiles</li>
+					<li>a new canvas tile debug report mode now draws blue lines on tile edges in the media viewer and spams some tile number info to popups</li>
+					<li>improved tile coordinate safety checks for extremely small images (e.g. 1x1) when blown up to ridiculous zooms so there are more than one tile per pixel</li>
+					<li>this took a bunch of work, and I am happy that I figured out some solutions, but I believe it may be impossible to get perfect answers here. please try out this new version and let me know how it goes, particularly in the duplicate viewer where warping is obvious. I think ultimately I may replace this with a single tile system that goes over the borders of your screen, eliminating the stitching problems entirely, although this will eat more memory and CPU</li>
+				</ul>
+				<li><h3 id="version_453"><a href="#version_453">version 453</a></h3></li>
+				<ul>
+					<li>qol and misc:</li>
+					<li>the network job status labels around waiting for 'subscription'/'download page'/'watcher' forced wait slots are reworded. now they just say a more plain 'waiting to work' with a time estimate, and if a job does not get a chance to work this check cycle, it says 'a different xxx got the chance to work' for a few seconds.</li>
+					<li>if a network job does not get bandwidth on a check cycle, it now says 'a different network job got the bandwidth' for a few seconds</li>
+					<li>when waiting on bandwidth or gallery work, network jobs should count down more smoothly, one second at a time, not skip a second so often</li>
+					<li>network job widgets are now better about updating the layout of their two text labels. the status text on the left should take all the available pixels much better, sharing with the '64KB/s' speed text as it changes width and disappear</li>
+					<li>added a new user-made darkmode QSS stylesheet called 'OledBlack' to default hydrus, try it out under _options->style_</li>
+					<li>if the tag domain in a search page is other than 'all known tags', the 'selection tags' box, which limits itself to the current domain's tags, now explicitly labels itself with that domain</li>
+					<li>consolidated and optimised the pre-work checks on all importers/downloaders in pages. pages with idling/finished/paused downloaders will consume just a little less CPU and need to talk to fewer important objects</li>
+					<li>renamed the shortcut sets for viewer/preview media windows and clarified that they are mouse only for now. the new seek command works with these, but you'd have to map ctrl+right-click or something</li>
+					<li>improved the system predicate unit tests to catch datatype problems like with last week's hotfix and system:time imported</li>
+					<li>advanced archive/delete stuff: wrote up a neat idea I had about using local parents applied to the PTR to make fast multi-tag processing workflows here: https://hydrusnetwork.github.io/hydrus/help/advanced_parents.html#parent_favourites</li>
+					<li>.</li>
+					<li>bug fixes:</li>
+					<li>an important tag search bug is fixed. for some users, files that were imported before a service was added were not appearing in some of that service's search results, or their tag counts were not added in certain tag autocomplete results. this file miscount is fixed, and holes will be filled on database update. it should not take too long to fix, although different users will have different situations</li>
+					<li>this bug was leading to artificially fast PTR processing speeds on some clients as their older files were being skipped. if you have used the client for a long time but only added the PTR recently, sorry if you notice it slow down! it is now working correct!</li>
+					<li>fixed an important bug in the image rendering system that was causing tile artifacts (little lines of double-pixel jank along tile borders) at a variety of regular zoom levels. the way ideal tile size was being calculated was often incorrect, so I have replaced it with a better calculation</li>
+					<li>the system predicate parser can now parse 'system:is not the best quality file of its duplicate group' (only 'isn't' was working, previously) (issue #954)</li>
+					<li>if the collect-by dropdown is fed garbage namespace data from the namespace sort options, it now recovers with a nicer error message (issue #904)</li>
+					<li>misc db code cleanup and minor refactoring</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>OR predicates are now supported in the client api! Just nest within the tag list, and it'll bundle the nested list into an OR. there's an example in the client api help</li>
+					<li>some permissions testing in file search is tightened up--now we have OR and system predicates, if you do not submit any regular positive tags, the search permissions have to be 'allow anything'</li>
+					<li>fixed an issue where the client api would let you ask about sha256 hashes of incorrect length (and would ultimately make a master database id for these borked hashes, even the empty string!!). now the client api throws a 400</li>
+					<li>fixed a bug in /manage_pages/get_pages where all pages were marked as 'selected'=true (issue #841)</li>
+					<li>in the client api, if you use missing file_id(s) on a request for a file, thumbnail, metadata about a file, or when trying to add a files to a page, it now gives 404 correctly (rather than 500) (issue #961)</li>
+					<li>added a section to the client api help on variable encoding, including an example of how to convert a python tag list to JSON+URL encoded string</li>
+					<li>added new unit tests for OR pred parsing and the hash length check</li>
+					<li>client api version is now 20</li>
+				</ul>
+				<li><h3 id="version_452"><a href="#version_452">version 452</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>my 'simple' shortcut commands can now store additional variables. to start things off, I have finally added 'seek video' shortcut commands that have back/forwards and second+millisecond values. these should work on the native video viewer and mpv, audio and video. existing users will have to add their own (do it to the 'media viewers - all' set), but new users will get ctrl+left/right for 2.5s back and 5s forwards as the new defaults. let me know if you have any trouble!</li>
+					<li>the maximum number tracked by 'tag as number' system predicate is expanded from -99999999->99999999 to -2^63 -> 2^63 - 1. tag caches will be regenerated on update to store these, it will take a few minutes. the input ui for the system predicate is temporarily limited to -/+2^31, but I'll expand it</li>
+					<li>subscriptions now have a checkbox for 'do not worry about subscription gaps'. if you have a subscription that gets files randomly, or gets an intentionally small sample, this will disable the 'hey, there was a gap, click here to fill it in' popup messages</li>
+					<li>you can now set negative values for the duplicate score weights in options->duplicates</li>
+					<li>also added a weight for the 'nice ratio' duplicate comparison</li>
+					<li>vastly improved the cancel speed for searches in the realm of 'get the files that have any xxx tag', be that all tags or a namespace wildcard, and also some important search setup for various 'all known files' search pages. if you have ever tried to search the PTR raw and run into a three minute uncancellable initial setup lag, it should be gone now!</li>
+					<li>when you right-click on files in a specific local file domain (e.g. trash or my files), the 'view this file's dupes' number check is now run on 'all local files' as well, and if the numbers differ, a second menu is shown for all local files. this should make it easier to chase dupes of trashed files that are still untrashed while also allowing a trash-only search</li>
+					<li>fixed a critical bug in repository mapping processing that was not adding mappings to certain caches for files imported before the repo was added, and/or the new repository 'per content type' processing reset. this mostly manifested as these files not showing up in search results despite the tag being there. there is more work to do here, so it is top priority next week, and likely some maintenance to regen the bad caches</li>
+					<li>.</li>
+					<li>boring rewrites for multiple local file services:</li>
+					<li>many users have asked for the ability, when multiple local file domains are available, to search multiple file domains at once. I spent time this week doing background work to support this, and a related concept of searching 'deleted' files, which is a current gap in the program and not always covered by 'all known files'. nothing significant changes, but almost all the file search code now works on n file domains rather than 1, but for now n=1 lmao</li>
+					<li>made a new 'database search context' object to handle a virtualised but still simple and fast file 'location view' at the database level</li>
+					<li>the primary file search call is converted to use this object. references to a single file service are replaced with the view or its components</li>
+					<li>all duplicate file search code is moved to the new location search context</li>
+					<li>searching by 'system:import time' now works over multiple domains, although it is a little muddled. in future, import time predicate will have an optional specific file service and do 'import time' vs 'deleted time'</li>
+					<li>'system:local' and 'system:not local' is adapted so it can still work fast with multiple file domains, sped up worst case 'local' time, and a new optimisation lets it run fast for 'deleted from local files' too</li>
+					<li>sorting search files by import time is now only supported if the search domain is just one domain</li>
+				</ul>
+				<li><h3 id="version_451"><a href="#version_451">version 451</a></h3></li>
+				<ul>
+					<li>stupid anti-virus thing:</li>
+					<li>we have had several more anti-virus false positives just recently. we discovered that at least one testbed used by these companies was testing the 'open html help' checkbox in the installer, which then launched Edge on the testbed, and then launched the Windows Update process for Edge and Skype, which was somehow interacting with UAC and thus considered suspicious activity owned by the hydrus installer process, lmao. thereafter, it seems the installer exe's DNS requests were somehow being cross-connected with the client.exe scan as that was identified as connected with the installer. taking that checkbox out as a test produced a much cleaner scan. there is a limit to how much of this nonsense I will accomodate, but this week we are trying a release without that 'open help' link in the installer, let's see how it goes</li>
+					<li>semi-related, I brushed up the install path message in the installer and clarified help->help will open the help in the first-start welcome popup message</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>I fixed a critical bug in tag sibling storage when a 'bad' tag's mapping is removed (e.g. 'delete A->B') and added ('add A->C') in the same transaction, and in a heap of fun other situations besides, that mostly resulted in the newly added sibling being forgotten. the bug was worse when this was on a local tag service via the manage siblings dialog. this problem is likely the cause of some of our weird sibling issues on clients that processed certain repository updates extremely quickly. I will keep investigating here for more issues and trigger another sibling reset for everyone in the future</li>
+					<li>the 'show some random pairs' button on the duplicates page is nicer--the 'did not find any pairs' notification is a popup rather than an annoying error dialog, and when there is nothing found, it also clears the page of thumbs. it also tries to guess if you are at the end of the current search, and if so, it will not do an auto re-fetch and will clear the page without producing the popup message</li>
+					<li>fixed a bug that meant file order was not being saved correctly in sessions! sorry for the trouble!</li>
+					<li>import of videos is now a little faster as the ffmpeg call to check resolution and duration is now retained to check for presence of an audio channel</li>
+					<li>when files are imported, the status messages are now much more granular. large and CPU-heavy files should move noticeably from hash generation to filetype calculation to metadata to actual file copying</li>
+					<li>fixed a database query bug in the new processing progress tracking code that was affecting some (perhaps older) versions of sqlite</li>
+					<li>when you trash/untrash/etc... a file in the media viewer, the top hover text now updates to show the file location change</li>
+					<li>fixed a typo bug in the new content type tracking that broke ipfs pinning yet again, sorry for the trouble! (issue #955)</li>
+					<li>I fleshed out my database pending and num_pending tests significantly. now all uploadable content types are tested, so ipfs should not break at the _db_ level again</li>
+					<li>the page tab menu now clumps the 'close x pages' into a dynamic submenu when there are several options and excludes duplicates (e.g. 'close others' and 'close to the left' when you right-click the rightmost page)</li>
+					<li>the page tab menu also puts the 'move' actions under a submenu</li>
+					<li>the page tab menu now has 'select' submenu for navigating home/left/right/end like the shortcuts</li>
+					<li>fixed some repository content type checking problems: showing petition pages when the user has moderation privileges on a repository, permission check when fetching number of petitions, and permissions check when uploading files</li>
+					<li>fixed a typo in the 'running in wine' html that made the whole document big and bold</li>
+					<li>across the program, a 'year' for most date calculations like 'system:time imported: more than a year ago' is now 365 days (up from 12 x 30-day months). these will likely be calendar calculated correctly in future, but for now we'll just stick with simple but just a bit more accurate</li>
+					<li>fixed a bug in mpv loop-seek when the system lags for a moment just when the user closes the media viewer and the video loops back to start</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>expanded my testing system to handle more 'read' database parameter testing, and added some unit tests for the new client api file search code</li>
+					<li>fixed the 'file_sort_asc' in the new client api file search call. it was a stupid untested typo, thank you for the reports (issue #959)</li>
+					<li>fixed 'file_service_name' and 'tag_service_name' when they are GET parameters in the client api</li>
+					<li>I fleshed out the file search sort help to say what ascending/descending means for each file sort type</li>
+					<li>.</li>
+					<li>boring database cleanup:</li>
+					<li>to cut down on redundant spam, the new query planner profile mode only plans each unique query text once per run of the mode</li>
+					<li>also fixed an issue in the query planner with multiple-row queries with an empty list argument</li>
+					<li>refactored the tag sibling and parent database storage and lookup code out to separate db modules</li>
+					<li>untangled and optimised a couple of sibling/parent lookup chain regeneration calls</li>
+					<li>moved more sibling and parent responsibility to the new modules, clearing some inline hardcoding out of the main class</li>
+					<li>cleaned up a bunch of sibling, parent, and display code generally, and improved communication between these modules, particularly in regards to update interactions and display sync</li>
+					<li>the similar files data tables are migrated to more appropriate locations. previously, they were all in client.caches.db, now the phash definition and file mapping tables are in master, and the similar files search record is now in main</li>
+				</ul>
+				<li><h3 id="version_450"><a href="#version_450">version 450</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>when exporting files from the file export window, a cancellable popup job with progress updates is also created. if you close the window, you can still cancel the job from the popup</li>
+					<li>fixed a crash bug in file export window</li>
+					<li>system:num file relationships (duplicates) now correctly only returns files in the current file search domain (previously, it returned all files, including those previously deleted etc...)</li>
+					<li>I rearranged some of the thumbnail menu file relationships actions menu. I'm not really happy with this, but a shuffle is easier than a full rework</li>
+					<li>fixed the '4k' resolution label replacer, which was looking at 2060 height not 2160 by mistake</li>
+					<li>the phash generation routine (part of the duplicates system, happens on image imports) now uses less memory and CPU for images with an alpha channel (pngs and still gifs), and if those images are taller or wider than 1:30 or 30:1, the phashes are also better quality</li>
+					<li>the 'fill in subscription gap' popup button now correctly boots its created downloader when the action also opens a new downloader page. previously, due to overactive safety code, it would hang on 'pending' until a client restart. related similar 'start downloader after creating page' actions off drag and drop or client api should also be more reliable</li>
+					<li>.</li>
+					<li>repositories (also the various improvements in 449-experimental are folded in):</li>
+					<li>fixed an issue with some 'force repository account refresh' code not kicking in immediately</li>
+					<li>when a client sees repository update period change, it now recalculates the metadata next check time</li>
+					<li>fixed a bug with the new repo sync where updates just added from additive sync were not being processed until client restart. related long-term buggy 'do we have this hash in updates?' and 'how many updates are there?' tests for update metadata are also fixed</li>
+					<li>the experimental by-content-type repository reset from last week now leaves pending content in place</li>
+					<li>the reset also now clears cached service info counts for files, tags, and mappings</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>the /get_files/search_files command now takes six new parameters for file/tag domain selection and file sort type and order</li>
+					<li>I wrote out some simple help and added some hacky unit tests for these new parameters. it needs another pass for potential bug fixes and readability/specificity (e.g. what does 'asc' for 'sort by ratio' mean?), but let me know how you get on anyway</li>
+					<li>fixed the new system predicate parsing for system:hash with only one hash</li>
+					<li>improved the url system predicate examples in client api documentation</li>
+					<li>client api version is now 19</li>
+					<li>.</li>
+					<li>mr bones:</li>
+					<li>mr bones now reports the correct numbers for your 'my files' again (and will continue to do so as multiple local file services are added)</li>
+					<li>mr bones now reports total files deleted and their total size</li>
+					<li>mr bones now reports your earliest recorded file import time</li>
+					<li>mr bones now has separate tabs for different stats types. this neatly ditches the giant stack of numbers this was becoming, but I may revisit it. some people who take mr bones screens will prefer all the info in one easy shot, while I others I know would rather the 'viewing habits' stuff were not immediately there. maybe expanding boxes?</li>
+					<li>fixed some mr bones layout</li>
+					<li>.</li>
+					<li>boring code cleanup:</li>
+					<li>made a new base class for the different database modules to hold cursor and collect common administrative functions</li>
+					<li>all database queries (about 1,200 of them) now go through a single location in the new class</li>
+					<li>a new profile mode, 'query planner' mode, now prints query text and EXPLAIN QUERY PLAN lines to a new profile log. this is a new experimental thing, extremely spammy, but will help with diagnosing very unusually slow queries on individual clients (it'll most likely show up odd sqlite versions, weird data distributions, or un-analysed tables)</li>
+					<li>updated a core function in 'all known files' mappings change autocomplete count adjustment. this seemed to have extremely bad worst case time, and I think it might have been giving some bad counts in unusual situations</li>
+				</ul>
+				<li><h3 id="version_449"><a href="#version_449">version 449</a></h3></li>
+				<ul>
+					<li>this is an experimental release! please do not use this unless you are an advanced user who has a good backup, syncs with a repository (e.g. the PTR), and would like to help me out. if this is you, I don't need you to do anything too special, just please use the client and repo as normal, downloading and uploading, and let me know if anything messes up during normal operation</li>
+					<li>repository processing split:</li>
+					<li>tl;dr: nothing has changed, you don't have to do anything. with luck, your PTR service is going to fix some bad siblings and parents over the next couple of days</li>
+					<li>repositories now track what they have processed on a per-content basis. this gives some extra maintenance tools to, for instance, quickly reset and reprocess your ~150k tag siblings on the PTR without having to clear and reprocess all 1.3 billion mappings too</li>
+					<li>in review services, you now see definition updates and all a repository's content types processing progress independently (just files for a file repo, but mappings, siblings, and parents for a tag repo). most of the time they will all be the same, but each can be paused separately. it is now possible (though not yet super efficient, since definitions still run 100%) to sync with the PTR and only grab siblings and parents by simply pausing mappings in review services</li>
+					<li>I have also split the 'network' and 'processing' sync progress gauges and their buttons into separate boxes for clarity</li>
+					<li>the 'fill in content gaps' maintenance job now lets you choose which content types to do it for</li>
+					<li>also, a new 'reset content' maintenance job lets you choose to delete and reprocess by content type. the nuclear 'complete' reset is now really just for critical situations where definitions or database tables are irrevocably messed up</li>
+					<li>all users have their siblings and parents processing reset this week. next time you have update processing, they'll come back in over about fifteen minutes, and with luck we'll wipe out some years-old legacy bugs and hopefully discover some info about the remaining bugs. most importantly, we can re-trigger this reprocess in just a few seconds to quickly test future fixes</li>
+					<li>a variety of tests such as 'service is mostly caught up' are now careful just to test for the currently unpaused content types</li>
+					<li>if you try to commit some content that is currently processing-paused, the client now says 'hey, sorry this is paused, I won't upload that stuff right now' but still upload everything else that isn't paused. this is a ' service is caught up' issue</li>
+					<li>tag display sync, which does background work to make sure siblings and parents appear as they should, will now not run for a service if any of the services it relies on for siblings or parents is not process synced. when this happens, it is also shown on the tag display sync review panel. this stops big changes like the new sibling/parent reset from causing display sync to do a whole bunch of work before the service is ready and happy with what it has. with luck it will also smooth out new users' first PTR sync too</li>
+					<li>clients now process the sub-updates of a repository update step in the order they were generated on the server, which _may_ fix some non-determinant update bugs we are trying to pin down</li>
+					<li>all update processing tracking is overhauled. all related code and database access techniques have been brushed up and should use less CPU and fail more gracefully</li>
+				</ul>
+				<li><h3 id="version_448"><a href="#version_448">version 448</a></h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>/get_files/search_files now supports most system predicates! simply submit normal system predicate text in your taglist (check the expanded api help for a list of what is supported now) and they should be converted to proper system preds automatically. anything that doesn't parse will give 400 response. this is thanks to a user that submitted a system predicate parser a long time ago and which I did not catch up on until now. with this framework established, in future I will be able to add more predicate types and allow this parsing in normal autocomplete typing (issue #351)</li>
+					<li>this is a complicated system with many possible inputs and outputs! I have tried to convert all the object types over and fill out unit tests, but there are likely some typos or bad error handling for some unusual predicates. let me know what problems you run into, and I'll fix it up!</li>
+					<li>the old system_inbox and system_archive parameters on /get_files/search_files are now obselete. they still work, but I recommend you just use tags now. I'll deprecate them fully in future</li>
+					<li>/get_files/search_files now disables the implicit system limit that most clients apply to all searches (by default, 10,000), so if you ask for a million files, you'll (eventually) get it</li>
+					<li>a new call /manage_pages/add_files now allows you to add files to any media page, just like a file drag and drop</li>
+					<li>in the /get_files/file_metadata call, the tag lists in the different 'statuses' Objects are now human-sorted</li>
+					<li>added a link to https://github.com/floogulinc/hyextract to the client api help. this lets you extract from imported archives and reimport with tags and URLs</li>
+					<li>the client api is now ok if you POST with a utf-8 charset content-type "application/json;charset=utf-8"</li>
+					<li>the client api now tests the types of items within list parameters (e.g. file_ids should be a list of _integers_), raising an appropriate exception if they are incorrect</li>
+					<li>client api version is now 18</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>hydrus now supports wave (.wav) audio files! they play in mpv fine too</li>
+					<li>simple psd files now have thumbnails! complicated ones will get a stretched version of the old default psd filetype thumbnail, much like how flash works. all your psd files are queued up for thumbnail regen on update, so they should figure themselves out in the background. this is thanks to ffmpeg, which it turns out can handle simple psds!</li>
+					<li>vacuum returns as a manual operation. there's some new gui under _database->db maintenance->review vacuum data_. it talks about vacuum, shows current free space for each file, gives an estimate of how long vacuum will take, and allows you to launch vacuum on particular files</li>
+					<li>the 'maintenance and processing' option that checks CPU usage for 'system busy' status now lets you choose how many CPU cores must exceed the % value (previously, one core exceeding the value would cause 'busy'). maybe 4 > 25% is more useful than 1 > 50% in some situations?</li>
+					<li>removed the warning when updating from v411-v436. user reports and more study suggest this range was most likely ok in the end!</li>
+					<li>double-clicking the autocomplete tag list, or the current/pending/etc.. buttons, should now restore keyboard focus back to the text input afterwards, in float mode or not</li>
+					<li>the thumbnail 'remote services' menu, if you have file repositories or ipfs services, now appears on the top level, just below 'manage'</li>
+					<li>the file maintenance menu is shuffled up the 'database' menubar menu</li>
+					<li>fixed mr bones! I knew I was going to make a file status typo in 447, and he got it</li>
+					<li>in the downloader system, if a download object has any hashes, it now no longer consults urls for pre-import predictions. this saves a little time looking up urls and ensures that the logically stronger hashes take precedence over urls in all cases (previously, they only took precedence when a non-'looks new' status was found)</li>
+					<li>fixed an ugly bug in manage tag siblings/parents where tags imported from clipboard or .txt were not being cleaned, so all sorts of garbage with capital letters or leading spaces could be entered. all pairs are now cleaned, and anything invalid skipped over</li>
+					<li>the manage tag filter dialog now cleans all imported tag rules when using the 'import' button (issue #768)</li>
+					<li>the manage tag filter dialog now allows you to export the current tag filter with the export button</li>
+					<li>fixed the 'edit json parse rule' dialog layout so if you transition from a short display to a string match that has complicated controls, it should now expand properly to show them all</li>
+					<li>I think I fixed an odd bug where when uploading pending mappings while more mappings were being added, the x/y progress could accurately but unhelpfully continually reset to 0/y, with an ever-decreasing y until it was equal to the value it had at start. y should now always grow</li>
+					<li>hydrus servers now put their server header on a second header 'Hydrus-Server', which should allow them to be properly detectable through a proxy that overrides 'Server'</li>
+					<li>optimised a critical call in the tag mappings update database routine. for a service with many siblings and parents, I estimate repository processing is 2-7% faster</li>
+					<li>optimised the 'add/delete file' database routines in multiple ways, particularly when the file(s) have many deleted tags, and for the local file services, and when the client has multiple tag services</li>
+					<li>brushed up a couple of system predicate texts--things like num_pixels to 'number of pixels'</li>
+					<li>.</li>
+					<li>boring database refactoring:</li>
+					<li>repository update file tracking and service id normalisation is now pulled out to a new 'repositories' database module</li>
+					<li>file maintenance tracking and database-level file info updates is now pulled out to a new 'files maintenance' database module</li>
+					<li>analyse and vacuum tracking and information generation is now pulled out to a new 'db maintenance' database module</li>
+					<li>moved more commands to the 'similar files' module</li>
+					<li>the 'metadata regeneration' file maintenance job is now a little faster to save back to the database</li>
+					<li>cleared out some defunct/bad database code related to these two modules</li>
+					<li>misc code cleanup, particularly around the stuff I optimised this week</li>
+				</ul>
+				<li><h3 id="version_447"><a href="#version_447">version 447</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed drag and dropping multiple newline separated urls onto the client when those urls come from a generic text source</li>
+					<li>pages now cache their 'ordered' file id list. this speeds up several little jobs, but most importantly should reduce session save time for sessions with tens of thousands of files</li>
+					<li>common file resolutions such as 1920x1080 are now replaced in labels with '1080p' strings as already used in the duplicate system. also added 'vertical' variants of 720p, 1080p, and 4k</li>
+					<li>when a page preview viewer gets a call to clear its current media when it is not currently the page in view, it now recognises that properly. this was happening (a 'sticky' preview) on drag and drops that navigated and terminated on other pages</li>
+					<li>the various 'retry ignored' commands on downloaders now give an interstitial dialog where you can choose to retry 'all', '404s', or 'blacklisted' files only</li>
+					<li>manage tag siblings/parents now disables its import button until its data is loaded. imports that were clicked through before loading were being forgotten due to tangled logic, so for now I'll just disable the button!</li>
+					<li>reduced some more spiky database I/O overhead from the UI's perspective (now savepoints are performed after a result is returned, just like I recently did with transaction commit)</li>
+					<li>duplicate potentials search will now update the y in its x/y progress display if many files have been imported since the search was started and x becomes larger than y (due to y secretly growing)</li>
+					<li>fixed the default 'gelbooru md5' file lookup script. if you have a lookup script with this name, it will be updated to my new default automatically. I don't really like fixing this old system, but I am not sure when I will fit in my big rewrite that will merge it with the normal downloader system, so this is a quick fix for the meantime</li>
+					<li>if you are one of the users who had weird unfixable 404 update file problems with the PTR, please try unpausing and doing a metadata resync one more time this week. fingers crossed, this is fixed. please let me know how you get on too, fixed or not, and also if you have had 'malformed' database problems in the past</li>
+					<li>.</li>
+					<li>multi column lists:</li>
+					<li>improved the precision of longer text pixel_width->text and text->pixel_width calculations, which are particularly used in the multi-column list state saving system. another multi-column size calculation bug, where lists could grow by 1 character's width on >~60 character width columns on every dialog reopen, is now fixed</li>
+					<li>multi-column lists should now calculate last column width more precisely and accurately regardless of vertical scrollbar presence or recent show/hide</li>
+					<li>the snapping system that locks last column size to 5-character multiples can now snap up or down, increasing error tolerance</li>
+					<li>I added a hack to stop the bug some people had of multi-column lists suddenly growing wide, up to screen width, in a resize loop. I think it works, but as I cannot reproduce this error, please let me know how you get on. resizing the options->external programs panel seems to initiate it reliably for those users affected</li>
+					<li>.</li>
+					<li>profile mode:</li>
+					<li>all debug profile modes (callto, db, server, menu, pubsub, and ui) are now merged into one mode under help->debug</li>
+					<li>this new mode no longer spams popups, and it only prints 'slow' jobs to the profile log</li>
+					<li>it also makes a new profile log every time it is turned on, using mode start timestamp rather than client boot timestamp, and when profile mode is turned off, there is a popup summary of how many fast and slow jobs passed through during the log time</li>
+					<li>touched up profile code, timing thresholds, summary statements, and the help</li>
+					<li>.</li>
+					<li>special update rule this week:</li>
+					<li>due to the big file storage rework this week, there's some bit rot in older update routines. 447 cannot update databases older than 411, and it _may_ have trouble updating before 436. if this applies to you, the client will error out or warn you before continuing. I'd like to know what happens to you if you are v411-435 so I can refine these messages</li>
+					<li>.</li>
+					<li>boring database refactoring:</li>
+					<li>the primary current, deleted, pending, and petitioned files tables are now split according to service, much as I have done with mapping tables in the past. this saves a little space and accelerates many file calculations on large clients. if you have a client database script or patch that inspects 'current_files' or 'deleted_files', you'll now be looking at client_files_x etc.., where x is the service_id, and they obviously no longer have a service_id column</li>
+					<li>a new file storage database module manages these tables, and also some misc file deletion metadata</li>
+					<li>refactored all raw file storage updates, filters, and searches to the new module</li>
+					<li>the mappings and new file storage database modules are now responsible for various 'num files/mappings' metadata calculations</li>
+					<li>most file operations on smaller domains, typically trash or repository update files, will be significantly faster (since the much larger 'my files' table data isn't fattening the relevant indices, and worst case query planning is so much better)</li>
+					<li>cleaned up a ton of file domain filtering code as a result of all this</li>
+					<li>physical file deletion is now much faster when the client has many pending file uploads to a file repository or IPFS service</li>
+					<li>complicated duplicate file operations of many sorts should be a _little_ faster now, particularly on large clients</li>
+					<li>searching files with 'file import time' sort should be a little faster in many situations</li>
+					<li>tag repositories no longer bother going down to the database level to to see if they have any thumbnails to sync with</li>
+					<li>everyone also gets a local file id cache regen this week, it may take a few seconds on update</li>
+				</ul>
+				<li><h3 id="version_446"><a href="#version_446">version 446</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed a typo bug in the latest pending upload routine when it was cancelled/errors out early</li>
+					<li>fixed a problem with the new subscription gap downloader, where when the page opens with the first query, it could sometimes assign 'already in db' to items in that query that were actually 'successful'. some other downloaders may have been rarely hit by this, but it was mostly the gap downloader</li>
+					<li>the client _should_ now support a service host that has path components (e.g. one hosted on a proxy), like myserver.com/hydrus_repo. the port will now be correctly inserted in the address before all requests. hydrus and ipfs both should work, fingers crossed</li>
+					<li>when an admin modifies the account types, the server now only prints the 'updated account type' log record if there were actual changes</li>
+					<li>.</li>
+					<li>downloader UI:</li>
+					<li>the confusingly named 'file import status' and 'gallery search log' in the downloader system are now renamed 'file log'/'search log'/'check log' for the file import queue, gallery downloader, and watcher respectively. the 'table' bitmap buttons are also replaced with simple easy (and easy to refer to!) label buttons.</li>
+					<li>when you open the file/search/check logs from the downloader page list right-click menu, they now spawn properly inside regular windows, not modal dialogs (which were inhibiting interaction with the rest of the program while open)</li>
+					<li>relabelled the awkward 'even if url/hash recognised' checkboxes in file import options. 'do not skip if' becomes 'force download even if', and the text matches that in tag import options for page content. also improved the tooltip on these checkboxes</li>
+					<li>all of the downloader layout boxes have also been renamed and harmonised with each other. gone are overly technical 'import queue' and 'gallery parsing'. now it is generally 'imports' up top and 'search' or 'checker' etc... below</li>
+					<li>layouts have also been harmonised a little. the url downloader page now has boxes for file vs search URLs, the hard drive import pause button is moved up as other pages have, and several off-by-a-pixel sizer layouts have been fixed</li>
+					<li>.</li>
+					<li>null account:</li>
+					<li>to further improve server privacy, particularly after the PTR's multiple account switch, all repositories now forget which accounts uploaded which content after a certain age. by default it is 90 days, but you can check in _review services_ once a server updates. this defends against a variety of hypothetical attacks where someone very clever gains access to the raw server database files, maybe years from now, and tries to crawl its anonymous account history for derivable information--now there is no history!</li>
+					<li>it will take some time to retroactively scrub a huge server like the PTR. for the PTR, it is mostly a relative no-op of moving account ids from the old public shared account to a new 'null' account, but it'll still be about 1.2 billion rows! this happens in the background, so the server will still be useable most of the time, but it will have spikes of 'busy' for about one hour every four (i.e. one hour of mostly busy, three hours of free), probably for several days. it may be a pain to try uploading a bunch of stuff in that time, so if you have a million pending mappings, you might like to just give the PTR a break for a few days. once it has fully caught up, the anonymisation should only be 20-60 seconds of 'busy' a day</li>
+					<li>the way the anonymisation works is all serverside services now have a single non-useable 'null account' that will take possession of all content after the delay. the original uploader is lost, and the whole historical record is merged together.</li>
+					<li>the privacy help doc has been updated to talk about the new anonymising system. overall, I think the null account pretty much eliminates the speculative account cross-referencing worries we had, and I am happy</li>
+					<li>.</li>
+					<li>admin/janny info:</li>
+					<li>for admins, all repositories now have an 'anonymisation period' option that you can edit in the service admin menu, defaulting to 90 days (min 1, max 360). you'll also see summary statements in the server logs as updates are anonymised. anonymisation will kick in two minutes after boot, so if you want to change this value immediately on update, get ready and be quick about it!</li>
+					<li>for jannies who can see accounts, you will see the null account pop up in reference to older content (moreso in future when I expand janny UI and permissions). it being special is highlighted, and various account modifying UI shows it cannot be edited</li>
+					<li>also for jannies/admins, I had to do some wickity woo to get the null account to work without a network update for everyone. if you try to look at the null account on 445 you may get an error. normal users won't run into this, but there's a kind of 'soft' network version update for you today</li>
+				</ul>
 				<li><h3 id="version_445"><a href="#version_445">version 445</a></h3></li>
 				<ul>
 					<li>misc:</li>

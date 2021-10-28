@@ -1,6 +1,7 @@
 import numpy
 import os
 import re
+import struct
 import subprocess
 
 from hydrus.core import HydrusAudioHandling
@@ -41,6 +42,12 @@ def CheckFFMPEGError( lines ):
         
         raise HydrusExceptions.DamagedOrUnusualFileException( 'FFMPEG could not parse.' )
         
+    
+def GetAPNGNumFrames( file_header_bytes ):
+    
+    ( num_frames, ) = struct.unpack( '>I', file_header_bytes[ 41 : 45 ] )
+    
+    return num_frames
     
 def GetFFMPEGVersion():
     
@@ -217,6 +224,34 @@ def GetFFMPEGInfoLines( path, count_frames_manually = False, only_first_second =
     
     return lines
     
+def GetFFMPEGAPNGProperties( path ):
+    
+    with open( path, 'rb' ) as f:
+        
+        file_header_bytes = f.read( 256 )
+        
+    
+    num_frames = GetAPNGNumFrames( file_header_bytes )
+    
+    lines = GetFFMPEGInfoLines( path )
+    
+    resolution = ParseFFMPEGVideoResolution( lines )
+    
+    ( fps, confident_fps ) = ParseFFMPEGFPS( lines )
+    
+    if not confident_fps:
+        
+        fps = 24
+        
+    
+    duration = num_frames / fps
+    
+    duration_in_ms = int( duration * 1000 )
+    
+    has_audio = False
+    
+    return ( resolution, duration_in_ms, num_frames, has_audio )
+    
 def GetFFMPEGVideoProperties( path, force_count_frames_manually = False ):
     
     lines_for_first_second = GetFFMPEGInfoLines( path, count_frames_manually = True, only_first_second = True )
@@ -292,7 +327,9 @@ def GetFFMPEGVideoProperties( path, force_count_frames_manually = False ):
     
     duration_in_ms = int( duration * 1000 )
     
-    return ( resolution, duration_in_ms, num_frames )
+    has_audio = VideoHasAudio( path, lines_for_first_second )
+    
+    return ( resolution, duration_in_ms, num_frames, has_audio )
     
 def GetMime( path ):
     
@@ -353,6 +390,10 @@ def GetMime( path ):
         
         return HC.AUDIO_FLAC
         
+    elif mime_text == 'wav':
+        
+        return HC.AUDIO_WAVE
+        
     elif mime_text == 'mp3':
         
         return HC.AUDIO_MP3
@@ -407,6 +448,50 @@ def HasVideoStream( path ):
     lines = GetFFMPEGInfoLines( path )
     
     return ParseFFMPEGHasVideo( lines )
+    
+def RenderImageToPNGPath( path, temp_png_path ):
+    
+    # -y to overwrite the temp path
+    cmd = [ FFMPEG_PATH, '-y', "-i", path, temp_png_path ]
+    
+    sbp_kwargs = HydrusData.GetSubprocessKWArgs()
+    
+    HydrusData.CheckProgramIsNotShuttingDown()
+    
+    try:
+        
+        process = subprocess.Popen( cmd, bufsize = 10**5, stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, **sbp_kwargs )
+        
+    except FileNotFoundError as e:
+        
+        global FFMPEG_MISSING_ERROR_PUBBED
+        
+        if not FFMPEG_MISSING_ERROR_PUBBED:
+            
+            message = 'FFMPEG, which hydrus uses to parse and render video, was not found! This may be due to it not being available on your system, or hydrus being unable to find it.'
+            message += os.linesep * 2
+            
+            if HC.PLATFORM_WINDOWS:
+                
+                message += 'You are on Windows, so there should be a copy of ffmpeg.exe in your install_dir/bin folder. If not, please check if your anti-virus has removed it and restore it through a new install.'
+                
+            else:
+                
+                message += 'If you are certain that FFMPEG is installed on your OS and accessible in your PATH, please let hydrus_dev know, as this problem is likely due to an environment problem. You may be able to solve this problem immediately by putting a static build of the ffmpeg executable in your install_dir/bin folder.'
+                
+            
+            message += os.linesep * 2
+            message += 'You can check your current FFMPEG status through help->about.'
+            
+            HydrusData.ShowText( message )
+            
+            FFMPEG_MISSING_ERROR_PUBBED = True
+            
+        
+        raise FileNotFoundError( 'Cannot interact with video because FFMPEG not found--are you sure it is installed? Full error: ' + str( e ) )
+        
+    
+    ( stdout, stderr ) = HydrusThreading.SubprocessCommunicate( process )
     
 def ParseFFMPEGDuration( lines ):
     
@@ -700,6 +785,72 @@ def ParseFFMPEGVideoResolution( lines ):
     except:
         
         raise HydrusExceptions.DamagedOrUnusualFileException( 'Error parsing resolution!' )
+        
+    
+def VideoHasAudio( path, info_lines ):
+    
+    ( audio_found, audio_format ) = HydrusAudioHandling.ParseFFMPEGAudio( info_lines )
+    
+    if not audio_found:
+        
+        return False
+        
+    
+    # just because video metadata has an audio stream doesn't mean it has audio. some vids have silent audio streams lmao
+    # so, let's read it as PCM and see if there is any noise
+    # this obviously only works for single audio stream vids, we'll adapt this if someone discovers a multi-stream mkv with a silent channel that doesn't work here
+    
+    cmd = [ FFMPEG_PATH ]
+    
+    # this is perhaps not sensible for eventual playback and I should rather go for wav file-like and feed into python 'wave' in order to maintain stereo/mono and so on and have easy chunk-reading
+    
+    cmd.extend( [ '-i', path,
+        '-loglevel', 'quiet',
+        '-f', 's16le',
+        '-' ] )
+        
+    
+    sbp_kwargs = HydrusData.GetSubprocessKWArgs()
+    
+    HydrusData.CheckProgramIsNotShuttingDown()
+    
+    try:
+        
+        process = subprocess.Popen( cmd, bufsize = 65536, stdin = subprocess.PIPE, stdout = subprocess.PIPE, stderr = subprocess.PIPE, **sbp_kwargs )
+        
+    except FileNotFoundError as e:
+        
+        HydrusData.ShowText( 'Cannot render audio--FFMPEG not found!' )
+        
+        raise
+        
+    
+    # silent PCM data is just 00 bytes
+    # every now and then, you'll get a couple ffs for some reason, but this is not legit audio data
+    
+    try:
+        
+        chunk_of_pcm_data = process.stdout.read( 65536 )
+        
+        while len( chunk_of_pcm_data ) > 0:
+            
+            # iterating over bytes gives you ints, recall
+            if True in ( b != 0 and b != 255 for b in chunk_of_pcm_data ):
+                
+                return True
+                
+            
+            chunk_of_pcm_data = process.stdout.read( 65536 )
+            
+        
+        return False
+        
+    finally:
+        
+        process.terminate()
+        
+        process.stdout.close()
+        process.stderr.close()
         
     
 # This was built from moviepy's FFMPEG_VideoReader

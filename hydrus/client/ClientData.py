@@ -375,7 +375,7 @@ def ShowTextClient( text ):
     
     HG.client_controller.pub( 'message', job_key )
     
-def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'just now', just_now_threshold = 3, show_seconds = True, no_prefix = False ):
+def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'just now', just_now_threshold = 3, history_suffix = ' ago', show_seconds = True, no_prefix = False ):
     
     if HG.client_controller.new_options.GetBoolean( 'always_show_iso_time' ):
         
@@ -383,9 +383,19 @@ def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'just now', just_no
         
     else:
         
-        return HydrusData.TimestampToPrettyTimeDelta( timestamp, just_now_string = just_now_string, just_now_threshold = just_now_threshold, show_seconds = show_seconds, no_prefix = no_prefix )
+        return HydrusData.BaseTimestampToPrettyTimeDelta( timestamp, just_now_string = just_now_string, just_now_threshold = just_now_threshold, history_suffix = history_suffix, show_seconds = show_seconds, no_prefix = no_prefix )
         
     
+HydrusData.TimestampToPrettyTimeDelta = TimestampToPrettyTimeDelta
+
+def ToHumanBytes( size ):
+    
+    sig_figs = HG.client_controller.new_options.GetInteger( 'human_bytes_sig_figs' )
+    
+    return HydrusData.BaseToHumanBytes( size, sig_figs = sig_figs )
+    
+HydrusData.ToHumanBytes = ToHumanBytes
+
 class Booru( HydrusData.HydrusYAMLBase ):
     
     yaml_tag = '!Booru'
@@ -459,6 +469,31 @@ class Credentials( HydrusData.HydrusYAMLBase ):
         connection_string += self._host + ':' + str( self._port )
         
         return connection_string
+        
+    
+    def GetPortedAddress( self ):
+        
+        if self._host.endswith( '/' ):
+            
+            host = self._host[:-1]
+            
+        else:
+            
+            host = self._host
+            
+        
+        if '/' in host:
+            
+            ( actual_host, gubbins ) = self._host.split( '/', 1 )
+            
+            address = '{}:{}/{}'.format( actual_host, self._port, gubbins )
+            
+        else:
+            
+            address = '{}:{}'.format( self._host, self._port )
+            
+        
+        return address
         
     
     def HasAccessKey( self ): return self._access_key is not None and self._access_key != ''

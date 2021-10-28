@@ -18,6 +18,7 @@ from hydrus.client import ClientPaths
 from hydrus.client import ClientThreading
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportFileSeeds
+from hydrus.client.importing.options import FileImportOptions
 from hydrus.client.importing.options import TagImportOptions
 from hydrus.client.metadata import ClientTags
 
@@ -77,6 +78,8 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
         
         self._files_repeating_job = None
         
+        self._last_serialisable_change_timestamp = 0
+        
         HG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
         
     
@@ -94,6 +97,11 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
         
         self._file_seed_cache = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_file_seed_cache )
         self._file_import_options = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_options )
+        
+    
+    def _SerialisableChangeMade( self ):
+        
+        self._last_serialisable_change_timestamp = HydrusData.GetNow()
         
     
     def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
@@ -269,11 +277,21 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def HasSerialisableChangesSince( self, since_timestamp ):
+        
+        with self._lock:
+            
+            return self._last_serialisable_change_timestamp > since_timestamp
+            
+        
+    
     def NotifyFileSeedsUpdated( self, file_seed_cache_key, file_seeds ):
         
         if file_seed_cache_key == self._file_seed_cache.GetFileSeedCacheKey():
             
             ClientImporting.WakeRepeatingJob( self._files_repeating_job )
+            
+            self._SerialisableChangeMade()
             
         
     
@@ -285,13 +303,20 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
             
             ClientImporting.WakeRepeatingJob( self._files_repeating_job )
             
+            self._SerialisableChangeMade()
+            
         
     
-    def SetFileImportOptions( self, file_import_options ):
+    def SetFileImportOptions( self, file_import_options: FileImportOptions.FileImportOptions ):
         
         with self._lock:
             
-            self._file_import_options = file_import_options
+            if file_import_options.DumpToString() != self._file_import_options.DumpToString():
+                
+                self._file_import_options = file_import_options
+                
+                self._SerialisableChangeMade()
+                
             
         
     
@@ -302,7 +327,7 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
         self._files_repeating_job.SetThreadSlotType( 'misc' )
         
     
-    def REPEATINGWorkOnFiles( self, page_key ):
+    def CanDoFileWork( self, page_key ):
         
         with self._lock:
             
@@ -310,15 +335,37 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
                 
                 self._files_repeating_job.Cancel()
                 
-                return
+                return False
                 
             
             paused = self._paused or HG.client_controller.new_options.GetBoolean( 'pause_all_file_queues' )
             
-            work_to_do = self._file_seed_cache.WorkToDo() and not ( paused or HG.client_controller.PageClosedButNotDestroyed( page_key ) )
+            if paused:
+                
+                return False
+                
+            
+            work_to_do = self._file_seed_cache.WorkToDo()
+            
+            if not work_to_do:
+                
+                return False
+                
+            
+            page_shown = not HG.client_controller.PageClosedButNotDestroyed( page_key )
+            
+            if not page_shown:
+                
+                return False
+                
             
         
-        while work_to_do:
+        return True
+        
+    
+    def REPEATINGWorkOnFiles( self, page_key ):
+        
+        while self.CanDoFileWork( page_key ):
             
             try:
                 
@@ -326,23 +373,11 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
                 
                 HG.client_controller.WaitUntilViewFree()
                 
+                self._SerialisableChangeMade()
+                
             except Exception as e:
                 
                 HydrusData.ShowException( e )
-                
-            
-            with self._lock:
-                
-                if ClientImporting.PageImporterShouldStopWorking( page_key ):
-                    
-                    self._files_repeating_job.Cancel()
-                    
-                    return
-                    
-                
-                paused = self._paused or HG.client_controller.new_options.GetBoolean( 'pause_all_file_queues' )
-                
-                work_to_do = self._file_seed_cache.WorkToDo() and not ( paused or HG.client_controller.PageClosedButNotDestroyed( page_key ) )
                 
             
         

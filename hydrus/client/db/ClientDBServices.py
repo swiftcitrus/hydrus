@@ -3,18 +3,19 @@ import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusDBModule
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusSerialisable
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
+from hydrus.client.db import ClientDBModule
 
-class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
+class ClientDBMasterServices( ClientDBModule.ClientDBModule ):
     
     def __init__( self, cursor: sqlite3.Cursor ):
         
-        HydrusDBModule.HydrusDBModule.__init__( self, 'client services master', cursor )
+        ClientDBModule.ClientDBModule.__init__( self, 'client services master', cursor )
         
         self._service_ids_to_services = {}
         self._service_keys_to_service_ids = {}
@@ -28,18 +29,25 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
         self._InitCaches()
         
     
-    def _GetInitialIndexGenerationTuples( self ):
+    def _GetCriticalTableNames( self ) -> typing.Collection[ str ]:
         
-        index_generation_tuples = []
+        return {
+            'main.services'
+        }
         
-        return index_generation_tuples
+    
+    def _GetInitialTableGenerationDict( self ) -> dict:
+        
+        return {
+            'main.services' : ( 'CREATE TABLE {} ( service_id INTEGER PRIMARY KEY AUTOINCREMENT, service_key BLOB_BYTES UNIQUE, service_type INTEGER, name TEXT, dictionary_string TEXT );', 400 )
+        }
         
     
     def _InitCaches( self ):
         
-        if self._c.execute( 'SELECT 1 FROM sqlite_master WHERE name = ?;', ( 'services', ) ).fetchone() is not None:
+        if self._Execute( 'SELECT 1 FROM sqlite_master WHERE name = ?;', ( 'services', ) ).fetchone() is not None:
             
-            all_data = self._c.execute( 'SELECT service_id, service_key, service_type, name, dictionary_string FROM services;' ).fetchall()
+            all_data = self._Execute( 'SELECT service_id, service_key, service_type, name, dictionary_string FROM services;' ).fetchall()
             
             for ( service_id, service_key, service_type, name, dictionary_string ) in all_data:
                 
@@ -60,27 +68,13 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
             
         
     
-    def CreateInitialTables( self ):
-        
-        self._c.execute( 'CREATE TABLE services ( service_id INTEGER PRIMARY KEY AUTOINCREMENT, service_key BLOB_BYTES UNIQUE, service_type INTEGER, name TEXT, dictionary_string TEXT );' )
-        
-    
-    def GetExpectedTableNames( self ) -> typing.Collection[ str ]:
-        
-        expected_table_names = [
-            'services'
-        ]
-        
-        return expected_table_names
-        
-    
     def AddService( self, service_key, service_type, name, dictionary: HydrusSerialisable.SerialisableBase ) -> int:
         
         dictionary_string = dictionary.DumpToString()
         
-        self._c.execute( 'INSERT INTO services ( service_key, service_type, name, dictionary_string ) VALUES ( ?, ?, ?, ? );', ( sqlite3.Binary( service_key ), service_type, name, dictionary_string ) )
+        self._Execute( 'INSERT INTO services ( service_key, service_type, name, dictionary_string ) VALUES ( ?, ?, ?, ? );', ( sqlite3.Binary( service_key ), service_type, name, dictionary_string ) )
         
-        service_id = self._c.lastrowid
+        service_id = self._GetLastRowId()
         
         service = ClientServices.GenerateService( service_key, service_type, name, dictionary )
         
@@ -125,7 +119,7 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
                 
             
         
-        self._c.execute( 'DELETE FROM services WHERE service_id = ?;', ( service_id, ) )
+        self._Execute( 'DELETE FROM services WHERE service_id = ?;', ( service_id, ) )
         
     
     def GetNonDupeName( self, name ) -> str:
@@ -180,6 +174,27 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
         return []
         
     
+    def LocationSearchContextIsCoveredByCombinedLocalFiles( self, location_search_context: ClientSearch.LocationSearchContext ):
+        
+        if location_search_context.SearchesDeleted():
+            
+            return False
+            
+        
+        file_location_is_all_local = False
+        
+        service_ids = { self.GetServiceId( service_key ) for service_key in location_search_context.current_service_keys }
+        
+        service_types = { self.GetService( service_id ).GetServiceType() for service_id in service_ids }
+        
+        if False not in ( service_type in HC.LOCAL_FILE_SERVICES for service_type in service_types ):
+            
+            file_location_is_all_local = True
+            
+        
+        return file_location_is_all_local
+        
+    
     def UpdateService( self, service: ClientServices.Service ):
         
         ( service_key, service_type, name, dictionary ) = service.ToTuple()
@@ -188,7 +203,7 @@ class ClientDBMasterServices( HydrusDBModule.HydrusDBModule ):
         
         dictionary_string = dictionary.DumpToString()
         
-        self._c.execute( 'UPDATE services SET name = ?, dictionary_string = ? WHERE service_id = ?;', ( name, dictionary_string, service_id ) )
+        self._Execute( 'UPDATE services SET name = ?, dictionary_string = ? WHERE service_id = ?;', ( name, dictionary_string, service_id ) )
         
         self._service_ids_to_services[ service_id ] = service
         

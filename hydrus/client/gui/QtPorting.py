@@ -1246,11 +1246,11 @@ class CallAfterEventCatcher( QC.QObject ):
         
         if event.type() == CallAfterEventType and isinstance( event, CallAfterEvent ):
             
-            if HG.callto_profile_mode:
+            if HG.profile_mode:
                 
                 summary = 'Profiling CallAfter Event: {}'.format( event._fn )
                 
-                HydrusData.Profile( summary, 'event.Execute()', globals(), locals(), min_duration_ms = 3, show_summary = True )
+                HydrusData.Profile( summary, 'event.Execute()', globals(), locals(), min_duration_ms = HG.callto_profile_min_job_time_ms )
                 
             else:
                 
@@ -1454,34 +1454,6 @@ def SetBackgroundColour( widget, colour ):
         widget.setStyleSheet( '#{} {{ background-color: {} }}'.format( object_name, QG.QColor( colour ).name() ) )
         
     
-def SetForegroundColour( widget, colour ):
-    
-    widget.setAutoFillBackground( True )
-    
-    object_name = widget.objectName()
-
-    if not object_name:
-        
-        object_name = str( id( widget ) )
-        
-        widget.setObjectName( object_name )
-        
-
-    if isinstance( colour, QG.QColor ):
-
-        widget.setStyleSheet( '#{} {{ color: {} }}'.format( object_name, colour.name()) )
-        
-    elif isinstance( colour, tuple ):
-        
-        colour = QG.QColor( *colour )
-        
-        widget.setStyleSheet( '#{} {{ color: {} }}'.format( object_name, colour.name() ) )
-        
-    else:
-
-        widget.setStyleSheet( '#{} {{ color: {} }}'.format( object_name, QG.QColor( colour ).name() ) )
-        
-
 def SetStringSelection( combobox, string ):
     
     index = combobox.findText( string )
@@ -2603,7 +2575,16 @@ class CollectComboCtrl( QW.QComboBox ):
             
             namespaces = media_sort.GetNamespaces()
             
-            text_and_data_tuples.update( namespaces )
+            try:
+                
+                text_and_data_tuples.update( namespaces )
+                
+            except:
+                
+                HydrusData.DebugPrint( 'Bad namespaces: {}'.format( namespaces ) )
+                
+                HydrusData.ShowText( 'Hey, your namespace-based sorts are likely damaged. Details have been written to the log, please let hydev know!' )
+                
             
         
         text_and_data_tuples = sorted( ( ( namespace, ( 'namespace', namespace ) ) for namespace in text_and_data_tuples ) )
@@ -2614,8 +2595,8 @@ class CollectComboCtrl( QW.QComboBox ):
             
             text_and_data_tuples.append( ( ratings_service.GetName(), ('rating', ratings_service.GetServiceKey() ) ) )
             
-
-        for (text, data) in text_and_data_tuples:
+        
+        for ( text, data ) in text_and_data_tuples:
 
             self.Append( text, data )
             
@@ -2646,8 +2627,8 @@ class CollectComboCtrl( QW.QComboBox ):
     
     def GetValues( self ):
 
-        namespaces = [ ]
-        rating_service_keys = [ ]
+        namespaces = []
+        rating_service_keys = []
 
         for index in self.GetCheckedItems():
 

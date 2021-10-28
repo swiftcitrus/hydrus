@@ -1679,7 +1679,7 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
         self._query_text = QW.QLineEdit( self )
         self._query_text.setReadOnly( True )
         
-        self._import_queue_panel = ClientGUICommon.StaticBox( self, 'import queue' )
+        self._import_queue_panel = ClientGUICommon.StaticBox( self, 'imports' )
         
         self._file_status = ClientGUICommon.BetterStaticText( self._import_queue_panel, ellipsize_end = True )
         self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self._import_queue_panel, HG.client_controller, self._page_key )
@@ -1688,14 +1688,14 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
         self._files_pause_button = ClientGUICommon.BetterBitmapButton( self._import_queue_panel, CC.global_pixmaps().file_pause, self.PauseFiles )
         self._files_pause_button.setToolTip( 'pause/play files' )
         
-        self._gallery_panel = ClientGUICommon.StaticBox( self, 'gallery parser' )
+        self._gallery_panel = ClientGUICommon.StaticBox( self, 'search' )
         
         self._gallery_status = ClientGUICommon.BetterStaticText( self._gallery_panel, ellipsize_end = True )
         
         self._gallery_pause_button = ClientGUICommon.BetterBitmapButton( self._gallery_panel, CC.global_pixmaps().gallery_pause, self.PauseGallery )
         self._gallery_pause_button.setToolTip( 'pause/play search' )
         
-        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._gallery_panel, HG.client_controller, False, True, page_key = self._page_key )
+        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self._gallery_panel, HG.client_controller, False, True, 'search', page_key = self._page_key )
         
         self._gallery_download_control = ClientGUINetworkJobControl.NetworkJobControl( self._gallery_panel )
         
@@ -1747,7 +1747,7 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
         HG.client_controller.gui.RegisterUIUpdateWindow( self )
         
     
-    def _SetFileImportOptions( self, file_import_options ):
+    def _SetFileImportOptions( self, file_import_options: FileImportOptions.FileImportOptions ):
         
         if self._gallery_import is not None:
             
@@ -1755,7 +1755,7 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
             
         
     
-    def _SetTagImportOptions( self, tag_import_options ):
+    def _SetTagImportOptions( self, tag_import_options: TagImportOptions.TagImportOptions ):
         
         if self._gallery_import is not None:
             
@@ -1876,9 +1876,23 @@ class GalleryImportPanel( ClientGUICommon.StaticBox ):
             
             ( file_network_job, gallery_network_job ) = self._gallery_import.GetNetworkJobs()
             
-            self._file_download_control.SetNetworkJob( file_network_job )
+            if file_network_job is None:
+                
+                self._file_download_control.ClearNetworkJob()
+                
+            else:
+                
+                self._file_download_control.SetNetworkJob( file_network_job )
+                
             
-            self._gallery_download_control.SetNetworkJob( gallery_network_job )
+            if gallery_network_job is None:
+                
+                self._gallery_download_control.ClearNetworkJob()
+                
+            else:
+                
+                self._gallery_download_control.SetNetworkJob( gallery_network_job )
+                
             
         
     
@@ -2248,7 +2262,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
         
         #
         
-        imports_panel = ClientGUICommon.StaticBox( self._options_panel, 'file imports' )
+        imports_panel = ClientGUICommon.StaticBox( self._options_panel, 'imports' )
         
         self._files_pause_button = ClientGUICommon.BetterBitmapButton( imports_panel, CC.global_pixmaps().file_pause, self.PauseFiles )
         self._files_pause_button.setToolTip( 'pause/play files' )
@@ -2271,7 +2285,7 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
         self._check_now_button = QW.QPushButton( 'check now', checker_panel )
         self._check_now_button.clicked.connect( self.EventCheckNow )
         
-        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( checker_panel, HG.client_controller, True, False, page_key = self._page_key )
+        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( checker_panel, HG.client_controller, True, False, 'check', page_key = self._page_key )
         
         checker_options = ClientImportOptions.CheckerOptions()
         
@@ -2513,9 +2527,23 @@ class WatcherReviewPanel( ClientGUICommon.StaticBox ):
             
             ( file_network_job, checker_network_job ) = self._watcher.GetNetworkJobs()
             
-            self._file_download_control.SetNetworkJob( file_network_job )
+            if file_network_job is None:
+                
+                self._file_download_control.ClearNetworkJob()
+                
+            else:
+                
+                self._file_download_control.SetNetworkJob( file_network_job )
+                
             
-            self._checker_download_control.SetNetworkJob( checker_network_job )
+            if checker_network_job is None:
+                
+                self._checker_download_control.ClearNetworkJob()
+                
+            else:
+                
+                self._checker_download_control.SetNetworkJob( checker_network_job )
+                
             
         
     

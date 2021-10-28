@@ -15,8 +15,8 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTemp
 from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
@@ -24,6 +24,7 @@ from hydrus.client import ClientDefaults
 from hydrus.client import ClientParsing
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
+from hydrus.client import ClientStrings
 from hydrus.client import ClientThreading
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
@@ -64,7 +65,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         listctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( self )
         
@@ -418,7 +419,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
             
             example_url = url_class.GetExampleURL()
             
-            ( url_type, match_name, can_parse ) = self._network_engine.domain_manager.GetURLParseCapability( example_url )
+            ( url_type, match_name, can_parse, cannot_parse_reason ) = self._network_engine.domain_manager.GetURLParseCapability( example_url )
             
             if can_parse:
                 
@@ -506,7 +507,7 @@ class EditCompoundFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -738,7 +739,7 @@ class EditContextVariableFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -1185,7 +1186,7 @@ class EditHTMLFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -1444,7 +1445,7 @@ class EditJSONParsingRulePanel( ClientGUIScrolledPanels.EditPanel ):
         self._parse_rule_type.addItem( 'all dictionary/list items', ClientParsing.JSON_PARSE_RULE_TYPE_ALL_ITEMS )
         self._parse_rule_type.addItem( 'indexed item', ClientParsing.JSON_PARSE_RULE_TYPE_INDEXED_ITEM )
         
-        string_match = ClientParsing.StringMatch( match_type = ClientParsing.STRING_MATCH_FIXED, match_value = 'posts', example_string = 'posts' )
+        string_match = ClientStrings.StringMatch( match_type = ClientStrings.STRING_MATCH_FIXED, match_value = 'posts', example_string = 'posts' )
         
         self._string_match = ClientGUIStringPanels.EditStringMatchPanel( self, string_match )
         
@@ -1479,7 +1480,7 @@ class EditJSONParsingRulePanel( ClientGUIScrolledPanels.EditPanel ):
         gridbox = ClientGUICommon.WrapInGrid( self, rows )
         
         QP.AddToLayout( vbox, self._parse_rule_type, CC.FLAGS_EXPAND_PERPENDICULAR )
-        QP.AddToLayout( vbox, self._string_match, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._string_match, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
         self.widget().setLayout( vbox )
@@ -1542,7 +1543,7 @@ class EditJSONFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -1651,7 +1652,7 @@ class EditJSONFormulaPanel( ClientGUIScrolledPanels.EditPanel ):
         
         with ClientGUITopLevelWindowsPanels.DialogEdit( self, dlg_title, frame_key = 'deeply_nested_dialog' ) as dlg:
             
-            new_rule = ( ClientParsing.JSON_PARSE_RULE_TYPE_DICT_KEY, ClientParsing.StringMatch( match_type = ClientParsing.STRING_MATCH_FIXED, match_value = 'posts', example_string = 'posts' ) )
+            new_rule = ( ClientParsing.JSON_PARSE_RULE_TYPE_DICT_KEY, ClientStrings.StringMatch( match_type = ClientStrings.STRING_MATCH_FIXED, match_value = 'posts', example_string = 'posts' ) )
             
             panel = EditJSONParsingRulePanel( dlg, new_rule )
             
@@ -1777,7 +1778,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -1858,7 +1859,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         self._veto_panel = QW.QWidget( self._content_panel )
         
         self._veto_if_matches_found = QW.QCheckBox( self._veto_panel )
-        self._string_match = ClientGUIStringPanels.EditStringMatchPanel( self._veto_panel, ClientParsing.StringMatch() )
+        self._string_match = ClientGUIStringPanels.EditStringMatchPanel( self._veto_panel, ClientStrings.StringMatch() )
         
         self._temp_variable_panel = QW.QWidget( self._content_panel )
         
@@ -2811,7 +2812,7 @@ The formula should attempt to parse full or relative urls. If the url is relativ
     
 class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
     
-    def __init__( self, parent, parser, formula = None, test_data = None ):
+    def __init__( self, parent, parser: ClientParsing.PageParser, formula = None, test_data = None ):
         
         self._original_parser = parser
         
@@ -2835,7 +2836,7 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         help_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().help, menu_items )
         
-        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', QG.QColor( 0, 0, 255 ) )
+        help_hbox = ClientGUICommon.WrapInText( help_button, self, 'help for this panel -->', object_name = 'HydrusIndeterminate' )
         
         #
         
@@ -3260,11 +3261,15 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def UserIsOKToCancel( self ):
         
-        if self._original_parser.GetSerialisableTuple() != self.GetValue().GetSerialisableTuple():
+        original_parser = self._original_parser.Duplicate()
+        current_parser = self.GetValue()
+        
+        original_parser.NullifyTestData()
+        current_parser.NullifyTestData()
+        
+        if original_parser.GetSerialisableTuple() != current_parser.GetSerialisableTuple():
             
             text = 'It looks like you have made changes to the parser--are you sure you want to cancel?'
-            text += os.linesep * 2
-            text += 'If this is a subsidiary page parser and you think you have made no changes, it might just be example test data, auto-populated from the parent, that changed.'
             
             result = ClientGUIDialogsQuick.GetYesNo( self, text )
             
@@ -3853,7 +3858,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
         url = ''
         query_type = HC.GET
         file_identifier_type = ClientParsing.FILE_IDENTIFIER_TYPE_MD5
-        file_identifier_string_converter = ClientParsing.StringConverter( ( ( ClientParsing.STRING_CONVERSION_ENCODE, 'hex' ), ), 'some hash bytes' )
+        file_identifier_string_converter = ClientStrings.StringConverter( ( ( ClientStrings.STRING_CONVERSION_ENCODE, 'hex' ), ), 'some hash bytes' )
         file_identifier_arg_name = 'md5'
         static_args = {}
         children = []
@@ -4439,7 +4444,7 @@ class TestPanel( QW.QWidget ):
                 
                 if example_bytes is not None:
                     
-                    ( os_file_handle, temp_path ) = HydrusPaths.GetTempPath()
+                    ( os_file_handle, temp_path ) = HydrusTemp.GetTempPath()
                     
                     try:
                         
@@ -4456,7 +4461,7 @@ class TestPanel( QW.QWidget ):
                         
                     finally:
                         
-                        HydrusPaths.CleanUpTempPath( os_file_handle, temp_path )
+                        HydrusTemp.CleanUpTempPath( os_file_handle, temp_path )
                         
                     
                 else:
@@ -4611,7 +4616,7 @@ class TestPanelFormula( TestPanel ):
         
         try:
             
-            formula.SetStringProcessor( ClientParsing.StringProcessor() )
+            formula.SetStringProcessor( ClientStrings.StringProcessor() )
             
             texts = formula.Parse( example_parsing_context, self._example_data_raw )
             
