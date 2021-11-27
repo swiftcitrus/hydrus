@@ -50,9 +50,10 @@ from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportGallery
 from hydrus.client.importing import ClientImportLocal
-from hydrus.client.importing.options import FileImportOptions
 from hydrus.client.importing import ClientImportSimpleURLs
 from hydrus.client.importing import ClientImportWatchers
+from hydrus.client.importing.options import FileImportOptions
+from hydrus.client.importing.options import PresentationImportOptions
 from hydrus.client.media import ClientMedia
 from hydrus.client.metadata import ClientTags
 
@@ -70,6 +71,64 @@ MANAGEMENT_TYPE_PAGE_OF_PAGES = 10
 
 management_panel_types_to_classes = {}
 
+def AddPresentationSubmenu( menu: QW.QMenu, importer_name: str, single_selected_presentation_import_options: typing.Optional[ PresentationImportOptions.PresentationImportOptions ], callable ):
+    
+    submenu = QW.QMenu( menu )
+    
+    # inbox only
+    # detect single_selected_presentation_import_options and deal with it
+    
+    description = 'Gather these files for the selected importers and show them.'
+    
+    if single_selected_presentation_import_options is None:
+        
+        ClientGUIMenus.AppendMenuItem( submenu, 'default presented files', description, callable )
+        
+    else:
+        
+        ClientGUIMenus.AppendMenuItem( submenu, 'default presented files ({})'.format( single_selected_presentation_import_options.GetSummary() ), description, callable )
+        
+    
+    sets_of_options = []
+    
+    presentation_import_options = PresentationImportOptions.PresentationImportOptions()
+    
+    presentation_import_options.SetPresentationStatus( PresentationImportOptions.PRESENTATION_STATUS_NEW_ONLY )
+    
+    sets_of_options.append( presentation_import_options )
+    
+    presentation_import_options = PresentationImportOptions.PresentationImportOptions()
+    
+    presentation_import_options.SetPresentationInbox( PresentationImportOptions.PRESENTATION_INBOX_REQUIRE_INBOX )
+    
+    sets_of_options.append( presentation_import_options )
+    
+    presentation_import_options = PresentationImportOptions.PresentationImportOptions()
+    
+    sets_of_options.append( presentation_import_options )
+    
+    presentation_import_options = PresentationImportOptions.PresentationImportOptions()
+    
+    presentation_import_options.SetPresentationLocation( PresentationImportOptions.PRESENTATION_LOCATION_IN_TRASH_TOO )
+    
+    sets_of_options.append( presentation_import_options )
+    
+    for presentation_import_options in sets_of_options:
+        
+        if single_selected_presentation_import_options is not None and presentation_import_options == single_selected_presentation_import_options:
+            
+            continue
+            
+        
+        ClientGUIMenus.AppendMenuItem( submenu, presentation_import_options.GetSummary(), description, callable, presentation_import_options = presentation_import_options )
+        
+    
+    importer_label_template = '{}s\'' if single_selected_presentation_import_options is None else '{}\'s'
+    
+    importer_label = importer_label_template.format( importer_name )
+    
+    ClientGUIMenus.AppendMenu( menu, submenu, 'show {} files'.format( importer_label ) )
+    
 def CreateManagementController( page_name, management_type, file_service_key = None ):
     
     if file_service_key is None:
@@ -747,11 +806,16 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
         self._tag_autocomplete = tag_autocomplete
         
     
-    def _Activate( self, shift_down ) -> bool:
+    def _Activate( self, ctrl_down, shift_down ) -> bool:
         
         predicates = self._GetPredicatesFromTerms( self._selected_terms )
         
         if len( predicates ) > 0:
+            
+            if ctrl_down:
+                
+                predicates = [ predicate.GetInverseCopy() for predicate in predicates ]
+                
             
             if shift_down and len( predicates ) > 1:
                 
@@ -790,7 +854,7 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
     
     def _ProcessMenuPredicateEvent( self, command ):
         
-        ( predicates, or_predicate, inverse_predicates ) = self._GetSelectedPredicatesAndInverseCopies()
+        ( predicates, or_predicate, inverse_predicates, namespace_predicate, inverse_namespace_predicate ) = self._GetSelectedPredicatesAndInverseCopies()
         
         p = None
         permit_remove = True
@@ -820,6 +884,16 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
             
             p = predicates
             permit_add = False
+            
+        elif command == 'add_namespace_predicate':
+            
+            p = ( namespace_predicate, )
+            permit_remove = False
+            
+        elif command == 'add_inverse_namespace_predicate':
+            
+            p = ( inverse_namespace_predicate, )
+            permit_remove = False
             
         
         if p is not None:
@@ -2005,9 +2079,9 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
     
     def _GetListCtrlMenu( self ):
         
-        selected_watchers = self._gallery_importers_listctrl.GetData( only_selected = True )
+        selected_importers = self._gallery_importers_listctrl.GetData( only_selected = True )
         
-        if len( selected_watchers ) == 0:
+        if len( selected_importers ) == 0:
             
             raise HydrusExceptions.DataMissing()
             
@@ -2018,10 +2092,16 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'show all importers\' presented files', 'Gather the presented files for the selected importers and show them in a new page.', self._ShowSelectedImportersFiles, show='presented' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all importers\' new files', 'Gather the presented files for the selected importers and show them in a new page.', self._ShowSelectedImportersFiles, show='new' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all importers\' files', 'Gather the presented files for the selected importers and show them in a new page.', self._ShowSelectedImportersFiles, show='all' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all importers\' files (including trash)', 'Gather the presented files (including trash) for the selected importers and show them in a new page.', self._ShowSelectedImportersFiles, show='all_and_trash' )
+        single_selected_presentation_import_options = None
+        
+        if len( selected_importers ) == 1:
+            
+            ( importer, ) = selected_importers
+            
+            single_selected_presentation_import_options = importer.GetFileImportOptions().GetPresentationImportOptions()
+            
+        
+        AddPresentationSubmenu( menu, 'downloader', single_selected_presentation_import_options, self._ShowSelectedImportersFiles )
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -2074,8 +2154,6 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
             hashes = self._highlighted_gallery_import.GetPresentedHashes()
             
             if len( hashes ) > 0:
-                
-                hashes = HG.client_controller.Read( 'filter_hashes', CC.LOCAL_FILE_SERVICE_KEY, hashes )
                 
                 media_results = HG.client_controller.Read( 'media_results', hashes )
                 
@@ -2315,7 +2393,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         frame.SetPanel( panel )
         
     
-    def _ShowSelectedImportersFiles( self, show = 'presented' ):
+    def _ShowSelectedImportersFiles( self, presentation_import_options = None ):
         
         gallery_imports = self._gallery_importers_listctrl.GetData( only_selected = True )
         
@@ -2329,35 +2407,13 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         for gallery_import in gallery_imports:
             
-            if show == 'presented':
-                
-                gallery_hashes = gallery_import.GetPresentedHashes()
-                
-            elif show == 'new':
-                
-                gallery_hashes = gallery_import.GetNewHashes()
-                
-            elif show in ( 'all', 'all_and_trash' ):
-                
-                gallery_hashes = gallery_import.GetHashes()
-                
+            gallery_hashes = gallery_import.GetPresentedHashes( presentation_import_options = presentation_import_options )
             
             new_hashes = [ hash for hash in gallery_hashes if hash not in seen_hashes ]
             
             hashes.extend( new_hashes )
             seen_hashes.update( new_hashes )
             
-        
-        if show == 'all_and_trash':
-            
-            filter_file_service_key = CC.COMBINED_LOCAL_FILE_SERVICE_KEY
-            
-        else:
-            
-            filter_file_service_key = CC.LOCAL_FILE_SERVICE_KEY
-            
-        
-        hashes = HG.client_controller.Read( 'filter_hashes', filter_file_service_key, hashes )
         
         if len( hashes ) > 0:
             
@@ -2724,7 +2780,7 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         self._watchers_listctrl.UpdateDatas()
         
     
-    def _ConvertDataToListCtrlTuples( self, watcher ):
+    def _ConvertDataToListCtrlTuples( self, watcher: ClientImportWatchers.WatcherImport ):
         
         subject = watcher.GetSubject()
         
@@ -2782,14 +2838,25 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         ( status_enum, pretty_watcher_status ) = self._multiple_watcher_import.GetWatcherSimpleStatus( watcher )
         
-        next_check_time = watcher.GetNextCheckTime()
+        checking_status = watcher.GetCheckingStatus()
         
-        if next_check_time is None:
+        if checking_status == ClientImporting.CHECKER_STATUS_OK:
             
-            next_check_time = 0
+            next_check_time = watcher.GetNextCheckTime()
             
-        
-        sort_watcher_status = ( ClientImporting.downloader_enum_sort_lookup[ status_enum ], next_check_time )
+            if next_check_time is None:
+                
+                next_check_time = 0
+                
+            
+            sort_watcher_status = ( ClientImporting.downloader_enum_sort_lookup[ status_enum ], next_check_time )
+            
+        else:
+            
+            # this lets 404 and DEAD sort different
+            
+            sort_watcher_status = ( ClientImporting.downloader_enum_sort_lookup[ status_enum ], checking_status )
+            
         
         display_tuple = ( pretty_subject, pretty_files_paused, pretty_checking_paused, pretty_watcher_status, pretty_progress, pretty_added )
         sort_tuple = ( subject, files_paused, sort_checking_paused, sort_watcher_status, progress, added )
@@ -2846,10 +2913,16 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'show all watchers\' presented files', 'Gather the presented files for the selected watchers and show them in a new page.', self._ShowSelectedImportersFiles, show='presented' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all watchers\' new files', 'Gather the presented files for the selected watchers and show them in a new page.', self._ShowSelectedImportersFiles, show='new' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all watchers\' files', 'Gather the presented files for the selected watchers and show them in a new page.', self._ShowSelectedImportersFiles, show='all' )
-        ClientGUIMenus.AppendMenuItem( menu, 'show all watchers\' files (including trash)', 'Gather the presented files (including trash) for the selected watchers and show them in a new page.', self._ShowSelectedImportersFiles, show='all_and_trash' )
+        single_selected_presentation_import_options = None
+        
+        if len( selected_watchers ) == 1:
+            
+            ( watcher, ) = selected_watchers
+            
+            single_selected_presentation_import_options = watcher.GetFileImportOptions().GetPresentationImportOptions()
+            
+        
+        AddPresentationSubmenu( menu, 'watcher', single_selected_presentation_import_options, self._ShowSelectedImportersFiles )
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -2898,8 +2971,6 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
             hashes = self._highlighted_watcher.GetPresentedHashes()
             
             if len( hashes ) > 0:
-                
-                hashes = HG.client_controller.Read( 'filter_hashes', CC.LOCAL_FILE_SERVICE_KEY, hashes )
                 
                 media_results = HG.client_controller.Read( 'media_results', hashes )
                 
@@ -3139,7 +3210,7 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         frame.SetPanel( panel )
         
     
-    def _ShowSelectedImportersFiles( self, show = 'presented' ):
+    def _ShowSelectedImportersFiles( self, presentation_import_options = None ):
         
         watchers = self._watchers_listctrl.GetData( only_selected = True )
         
@@ -3153,35 +3224,13 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         for watcher in watchers:
             
-            if show == 'presented':
-                
-                watcher_hashes = watcher.GetPresentedHashes()
-                
-            elif show == 'new':
-                
-                watcher_hashes = watcher.GetNewHashes()
-                
-            elif show in ( 'all', 'all_and_trash' ):
-                
-                watcher_hashes = watcher.GetHashes()
-                
+            watcher_hashes = watcher.GetPresentedHashes( presentation_import_options = presentation_import_options )
             
             new_hashes = [ hash for hash in watcher_hashes if hash not in seen_hashes ]
             
             hashes.extend( new_hashes )
             seen_hashes.update( new_hashes )
             
-        
-        if show == 'all_and_trash':
-            
-            filter_file_service_key = CC.COMBINED_LOCAL_FILE_SERVICE_KEY
-            
-        else:
-            
-            filter_file_service_key = CC.LOCAL_FILE_SERVICE_KEY
-            
-        
-        hashes = HG.client_controller.Read( 'filter_hashes', filter_file_service_key, hashes )
         
         if len( hashes ) > 0:
             

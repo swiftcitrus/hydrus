@@ -8,6 +8,145 @@
 		<div class="content">
 			<h3 id="changelog"><a href="#changelog">changelog</a></h3>
 			<ul>
+				<li><h3 id="version_463"><a href="#version_463">version 463</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>ogv files (ogg with a video stream) are now recognised by the client! they will get resolution, duration, num frames and now show in the media viewer correctly as resizeable videos. all your existing ogg files will be scheduled for a rescan on update</li>
+					<li>wrote new downloader objects to fix deviant art tag search. all clients will automatically update and should with luck just be working again with the same old 'deviant art tag search' downloader</li>
+					<li>added prototype copy/paste buttons to the manage ratings dialog. the copy button also grabs 'null' ratings, let me know how you get on here and we'll tweak as needed</li>
+					<li>file searches with namespaced and unnamespaced tags should now run just a little faster</li>
+					<li>most file searches with multiple search predicates that include normal tags should now run just a little faster</li>
+					<li>the file log right-click menu now shows 'delete x yyy files from the queue' for deleted, ignored, failed, and skipped states separately</li>
+					<li>the tag siblings + parents display sync manager now forces more wait time before it does work. it now waits for the database and gui to be free of pending or current background work. this _should_ stop slower clients getting into hangs when the afterwork updates pile up and overwhelm the main work</li>
+					<li>the option 'warn at this many pages' under _options->gui pages_ now has a max value of 65535, up from 500. if you are a madman or you have very page-spammy subscriptions, feel free to try boosting this super high. be warned this may lead to resource limit crashes</li>
+					<li>the 'max pages' value that triggers a full yes/no dialog on page open is now set as the maximum value of 500 and 2 x the 'warn at this many pages' value</li>
+					<li>the 'max pages' dialog trigger now only fires if there are no dialogs currently open (this should fix a nested dialog crash when page-publishing subscriptions goes bananas)</li>
+					<li>improved error reporting for unsolveable cloudflare captcha errors</li>
+					<li>added clarification text to the edit subscription query dialog regarding the tag import options there</li>
+					<li>added/updated a bunch of file import options tooltips</li>
+					<li>.</li>
+					<li>new presentation import options:</li>
+					<li>the 'presentation' section of 'file import options' has been completely overhauled. it can do more, and is more human-friendly</li>
+					<li>rather than the old three checkboxes of new/already-in-inbox/already-in-archive, you now choose from three dropdowns--do you want all/new/none, do you want all/only-inbox/inbox-too, and do you want to my-files/and-trash-too. it is now possible to show 'in inbox' exclusively, at the time of publish (e.g. when you highlight)</li>
+					<li>added a little help UI text around the places presentation is used</li>
+					<li>the downloader and watcher page's list right-click menu entries for 'show xxx files' is now a submenu, uses the new presentation import options, shows 'show inbox files', and if you click on one row it says what the default is and excludes other entries if they are duplicates</li>
+					<li>.</li>
+					<li>boring presentation import options stuff:</li>
+					<li>presentation options are now in their own object and will be easier to update in future</li>
+					<li>the 'should I present' code is radically cleaned up and refactored to a single central object</li>
+					<li>presentation filtering in general has more sophisticated logic and is faster when used on a list (e.g. when you highlight a decent sized downloader and it has to figure out which thumbs to show). it is now careful about only checking for inbox status on outstanding files</li>
+					<li>presentation now always checks file domain, whereas before this was ad-hoc and scattered around (and in some buggy cases lead to long-deleted files appearing in import views)</li>
+					<li>added a full suite of unit tests to ensure the presentation import options object is making the right decisions and filtering efficiently at each stage</li>
+					<li>.</li>
+					<li>boring multiple local file services work:</li>
+					<li>I basically moved a bunch of file search code from 1 file services to n file services:</li>
+					<li>the file storage module can now filter file ids to a complex location search context</li>
+					<li>namespace:anything searches of various sorts now use complex location search contexts</li>
+					<li>wildcard tag searches now use complex location search contexts</li>
+					<li>counted tag searches now use complex location search contexts</li>
+					<li>search code that uses complex location search contexts now cross-references its file results in all cases</li>
+					<li>I now have a great plan to add deleted files search and keep it working quick. this will be the next step, and then I can do efficient complex-location regular tag search and hopefully just switch over the autocomplete control to allow deleted files search</li>
+				</ul>
+				<li><h3 id="version_462"><a href="#version_462">version 462</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed a recent serious regression that could cause a crash when playing audio in mpv (issue #1007)</li>
+					<li>the main importer file log now does 'get next/all/count imports with status y' calls significantly faster, particularly on very large lists. these calls happen all the time for different status text changes and general 'which import to try next?' work. all busy downloader situations should see CPU gains to regular and background work</li>
+					<li>fixed a problem where importing with the min/max file resolution options set would give a typo error when the size was violated rather than 'ignored'</li>
+					<li>I think I have fixed an issue with subscriptions not wanting to run a query if by random accident that query has an invalid URL selected as the query's 'example url' for various pre-work login and bandwidth tests</li>
+					<li>hydrus can now capture duration/fps of videos that specify two very close fps, e.g. 60 and 59.99. previously, these would default to the 24 fallback and could cause some weirdness in mpv</li>
+					<li>replaced the default pixiv artist page api parser with one that fetches the newer url format, matching the tag search. existing users will see no automatic change but will receive the new parser, so if you are a big pixiv user, you might like to switch 'pixiv artist gallery page api' to the 'new urls' parser variant under _network->downloader components->manage url class links_. note that if you do this, your pixiv artist subscriptions will do a mini-resync (which involves some wasted time/bandwidth) as their urls change!</li>
+					<li>.</li>
+					<li>network redirect improvements:</li>
+					<li>gallery page jobs now give their child 'next gallery page' jobs themselves as a referrer</li>
+					<li>when the gallery downloader gets a 3XX redirect, the file import objects and next gallery pages it makes now get the redirected URL as referral url (previously, it used the original gallery url)</li>
+					<li>when the post downloader gets a 3XX redirect, the redirected url is now added as a primary source url</li>
+					<li>when the post downloader gets a 3XX redirect, child import objects and direct file downloads now get the redirect URL as referral url (previously, it used the original post url)</li>
+					<li>when the raw file downloader gets a 3XX redirect, the redirected url is now added as a primary source url</li>
+					<li>when the raw file downloader gets a 3XX redirect to a Post URL, it now tries to queue that URL back up in the file log, just like when a gallery fetch comes back with a Post URL. some safety code stops potential loops here as well</li>
+					<li>.</li>
+					<li>new services:</li>
+					<li>a new client now starts with a second local tag service called 'downloader tags'. default tag import options are now initialised in a fresh client to pull all file post tags to this service. this should relieve new users' confusion about setting up default tag import options</li>
+					<li>similarly, a new client now starts with a like/dislike rating service called 'favourites'. existing users who have no rating services will be asked if they want to get it on update. many users are unaware of the rating system, so this is a chance to play with it</li>
+					<li>the 'getting started with downloading' 'and '...with ratings' help has some updated screenshots and talk about the new default services and parsing</li>
+					<li>.</li>
+					<li>database fixes:</li>
+					<li>fixed a very slow database query that was involved with file search using unnamespaced tags when other search predicates had already limited the scope of search</li>
+					<li>fixed a similar slow query when the 'bad' search predicate was 'namespace:anything', particularly when the namespace is a wildcard</li>
+					<li>fixed the 'clear orphan tables' database maintenance routine. it had decayed due to bit rot and was deleting new repository processing tracking tables. the routine is now plugged directly into the new database modules system, and any module now can be upgraded to discover surplus service tables. the system has been updated to permit the detection and removal of duplicate tables in the wrong database file, and it also makes a statement if no orphan tables were found</li>
+					<li>the 'metadata resync' repository maintenance task now removes surplus file rows from the processing tracking tables</li>
+					<li>the 'metadata resync' repository maintenance task now corrects content type rows in the main processing tracking table</li>
+					<li>the process of registering updates to a repository is now a little faster, more reliable, repairs basic damage, and keeps more good work when damage needs to be repaired</li>
+					<li>I _think_ the users who were still getting PTR processing errors related to a database confusion about content/definitions update files should now be fixed after another full metadata resync! please let me know if there are still problems</li>
+				</ul>
+				<li><h3 id="version_461"><a href="#version_461">version 461</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>the text on the animation scanbar is now center-vertically aligned and should look better on taller and thinner scanbars (issue #998)</li>
+					<li>the scanbar now reports better frame number and current time for the mpv player when the current video is very short or has very few frames. screamer gifs should now report 2/2 frames if you scan to the right, not like 97/2</li>
+					<li>fixed using the mpv player with an embed button (it previously was staying hidden even after embed was clicked) (issue #999)</li>
+					<li>the 'search' submenu when you right-click on tags in certain locations now shows add/exclude namespace:anything if all the selected tags share the same namespace</li>
+					<li>as an experiment that I think will be bulked out into proper shortcuts later, and maybe actual +/- buttons like you'll see on a booru, if you activate the 'selection tags' listbox (double-click or enter key) while ctrl is down, it now excludes the selected tags from the current query</li>
+					<li>when you paste query texts into the edit subscription dialog, those queries already in the sub _and_ DEAD will now be revived (it does a 'check now' on them). the dialog reports this</li>
+					<li>when editing subscriptions, the way it waits for the current subs to stop running is improved. it is now separate from the global 'pause subs' variable, so big delays here (e.g. waiting a long time to open the dialog, then hitting 'pause' on the network menu, which was secretly a logically messy unpause) should be less able to run into trouble</li>
+					<li>watchers now sort DEAD and 404 separately when sorting the status column (previously they were sorted by their now-defunct 'next check time')</li>
+					<li>I think I improved the speed of the new subscriptions guaranteed shutdown. I think I also fixed a shutdown hang on some lagging async jobs. there are a couple of reports of hanging shutdown, so let me know if this changes</li>
+					<li>I moved the autocomplete options from 'gui pages' to 'search', and I brushed up the layout and tooltips there generally</li>
+					<li>.</li>
+					<li>file parsing:</li>
+					<li>clip files with canvas size units in mm, cm, inches, or points are now parsed correctly! thanks to the user who helped here! turns out a point is 1/72 (two grossths :^)) of an inch</li>
+					<li>clip animations now get the number of frames and duration of the first timeline!</li>
+					<li>all clip files will reparse for fixed resolution and duration and make new thumbs as needed on update</li>
+					<li>hydrus file parsing should now detect the duration of video and audio with 10 or more hours duration</li>
+					<li>hydrus now gets a more accurate duration estimate for files with bonkers duration/start_offset pairs, for instance "Duration: 127:57:31.25, start: 460633.291000". if you ever saw a 7MB webm with 5 hour duration (and actually 18 seconds), it could have been this. hydrus now counts frames manually when you get this sort of thing</li>
+					<li>any file with resolution > 360p, a duration over an hour, and size less than 64MB will be scheduled for a file metadata reparse on update</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>/get_files/file_metadata now has an optional boolean parameter, 'hide_service_names_tags', default False, which will hide the old 'service_names_to...' tag Objects</li>
+					<li>a unit test tests hide_service_names_tags</li>
+					<li>client api help documentation now talks about hide_service_names_tags</li>
+					<li>client api version is now 22</li>
+					<li>.</li>
+					<li>boring code refactoring and cleanup:</li>
+					<li>tl;dr: about 60KB total code moved out of client database!</li>
+					<li>moved most combined sibling+parent database code to a new 'tag display' module</li>
+					<li>moved autocomplete counts cache database code to a new 'mappings counts' module, and refactored a whole lot of of misc old a/c table creation and reference code into that module, cleaning things up</li>
+					<li>the 'mappings counts' module is plugged into new repair code and on error repopulates itself as efficiently as regen code currently allows</li>
+					<li>moved tag cache code to a new 'tag search' module, and similar related decoupling refactoring</li>
+					<li>the 'tag search' module is plugged into new repair code and on error repopulates itself very efficiently</li>
+					<li>the 'local tags cache' module can now regenerate itself on boot</li>
+					<li>regenerating the local tags cache now works a little faster and takes less memory</li>
+					<li>I _believe_ client.caches.db can now regenerate all of itself automatically, with no subsequent user actions needed</li>
+					<li>the boot database repair notifications have some quality of life improvements. modules now say whether they think they can recover everything, and there is more guidance on what to do in the different situations </li>
+					<li>during various heavy database work, a common analysis tool now saves a lot of time on regeneration vs generation</li>
+					<li>pubsubs now go through the transaction wrapper, meaning modules can pubsub</li>
+					<li>emergency boot messages (like database trouble) are now printed to the log</li>
+				</ul>
+				<li><h3 id="version_460"><a href="#version_460">version 460</a></h3></li>
+				<ul>
+					<li>client api:</li>
+					<li>/add_tags/add_tags now supports 'service_keys_to_tags' and 'service_keys_to_actions_to_tags'.</li>
+					<li>/add_urls/add_url now supports 'service_keys_to_additional_tags'</li>
+					<li>/get_files/file_metadata now returns with duplicates of the tag structures using 'service_keys_to_statuses_to_(display_)tags'</li>
+					<li>added unit tests for the above</li>
+					<li>updated the client api help for the above</li>
+					<li>I recommend you move from 'service_names_to...' to 'service_keys_to...' when convenient. 'names' was an ugly old hack, and while I am not in a rush to delete it from the client api, I think I will eventually</li>
+					<li>client api version is now 21</li>
+					<li>.</li>
+					<li>apngs and clips:</li>
+					<li>fixed a problem where the new apng metadata parsing was not completely hooked up, so num_frames was not being parsed correct for the final metadata row even when 'apng' filetype was, leading to some odd '1 frame apng' situations</li>
+					<li>apng parsing now recognises more kinds of apngs--if one has an unusual scaling chunk in the header, this is recognised and the correct animation chunk searched for</li>
+					<li>clip files now get resolution on import and a thumbnail! big thanks to the user who dug up how to extract this--it actually comes from a sqlite file embedded in the clip! (issue #996)</li>
+					<li>on update, all apngs and clips will be scheduled for metadata rescan, and all clips will be scheduled for thumbnail generation</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>right-clicking a selection tag and choosing 'select->files with x tag' now obeys the current tag domain (previously, it forced 'all known tags'). so, if you want to quickly select just the files with 'samus aran' on 'my tags', it should be doable</li>
+					<li>the new 'partial' download resumer system will now tolerate two successive empty chunks before throwing a 'this chunk was empty' error. it seems some servers will randomly give an empty chunk at times during 206 transfers</li>
+					<li>cancelling the slideshow custom time dialog no longer raises an error</li>
+					<li>after the build boot problem last week, updated the opencv version in requirements.txts--we are now officially >=4.0.0, <=4.5.3.56. it looks like pyinstaller needs a patch for 4.5.4.58 to work, so we'll wait for that. I am improving my weekly test routine to try to catch this in future</li>
+					<li>also, the windows build no longer includes two copies of an opencv dll. turns out PyInstaller finds this dll ok now (putting it in another location) and it doesn't need to be explicitly added during build</li>
+					<li>added a new help file to the db dir for users who experience crashes as soon as they load videos in mpv when using WASAPI or ASIO drivers. thanks greatly for the user who figured out the mpv.conf solution here (issue #973)</li>
+				</ul>
 				<li><h3 id="version_459"><a href="#version_459">version 459</a></h3></li>
 				<ul>
 					<li>main highlights:</li>
