@@ -8,6 +8,90 @@
 		<div class="content">
 			<h3 id="changelog"><a href="#changelog">changelog</a></h3>
 			<ul>
+				<li><h3 id="version_466"><a href="#version_466">version 466</a></h3></li>
+				<ul>
+					<li>video scanbar autohide:</li>
+					<li>the scanbar that shows below audio and video is now embedded inside the video frame, and it show/hides based on how close your mouse is to it</li>
+					<li>I've wanted to do this for a long time, since it will allow you to watch 16:9 videos at true 100% in borderless fullscreen, but the hackery of how the media viewer works behind the scenes means this took more work than you'd think and is still a little jank. there's a small amount of flicker when it pops in and out, which I will work on in future. in any case, please have a play with it and let me know what you think. I expect to add some more options, like for the activation padding area around it, and I will be tidying up more layout stuff throughout the media viewer</li>
+					<li>if you are a mostly keyboard user, please check out the new 'global' shortcut to flip on/off a 'force the animation scanbar to show' mode</li>
+					<li>I don't really want to bring back the always-on hanging-below scanbar that just takes up space, but if you try this new embedded scanbar and really hate it, we'll see what we can do</li>
+					<li>.</li>
+					<li>more duplicate filter search options:</li>
+					<li>the duplicates page now has a dropdown on the search for 'must be/can be/excludes pixel dupes'!</li>
+					<li>the duplicates page now has a number control on the search for what distance the pair was found at! I am not sure how accurate this thing is in all cases, but it seems I started tracking this data some time ago and forgot I even had it</li>
+					<li>these new options are remembered in your session and _should_ remain fast in most normal cases. I put time into some complicated database work this week to get this going, please let me know if you have any trouble with it</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>when the export filename pattern in the export files dialog means many of the files share the same base and hence need to do 'filename (5)'-style suffixes to be unique, the number here is now calculated much more efficiently. opening this dialog on 10,000 files with an oft-duplicate pattern should now be a jolt of lag but not many minutes</li>
+					<li>when you choose to 'separate' a subscription with more than 100 queries, you are no longer forced to break it into half</li>
+					<li>when you do break a subscription in half, it now makes sure to sort the query texts before separating</li>
+					<li>if you are in advanced mode, the 'selection tags' list on the left of every page can now switch its tag display type between 'multiple media views', 'display', and 'storage'. this is experimental and a bunch of stuff like 'select files with this tag' won't work yet</li>
+					<li>janitors' petition pages now start with their tag list in 'storage' mode, so you can see the actual tags being changed rather than with siblings and parents calculated</li>
+					<li>rebalanced some janitor mapping petition weights. jannies _should_ see a smoother balance of 'lots of small petitions' vs 'a few larger petitions' amongst petitions all with the same reason and creator</li>
+					<li>.</li>
+					<li>boring cleanup and little fixes:</li>
+					<li>when you set the checker options in the edit subscription dialog, the queries now recalculate their file velocity better. previously, they would just set 'unknown' and recalc on the next run, but now they will actually recalculate if the query container is loaded into memory or otherwise put a status that says 'will calculate on next run'</li>
+					<li>removed the 'should be namespaced' reason from the manage tags quick petition reasons. this is now all handled by siblings, tidying up storage tags manually is busywork</li>
+					<li>when you click 'copy traceback' on an error popup, it also copies the software version, your platform, and if you are on a frozen build or running from source</li>
+					<li>the logger now prints version number for every block, just before the timestamp</li>
+					<li>cleaned up a variety of media viewer UI code while working on the scanbar, fixing some misc display bugs</li>
+					<li>moved pixel hash storage responsibility from 'file metadata' to 'similar files' module</li>
+					<li>the similar files system now searches pixel hashes when it is called to do any similar files search. they count as 'exact match' distance</li>
+					<li>when a file gets a new pixel hash, it now sees if any other files have that same hash. if so, it now gets queued up again in the similar files search system, ensuring this match is not missed</li>
+					<li>misc nomenclature cleanup--since we now have both 'pixel hashes' and 'phashes', phashes are now referred to as 'perceptual hashes' everywhere</li>
+					<li>massively refactored the primary table join that drives potential duplicates search. it should work a bit faster now and it is much easier to work with</li>
+					<li>I added pixel dupe and distance search to the standard search results version of the join and the 'system:everything' version, which has several optimisations</li>
+					<li>silenced some shutdown handling in file maintenance that was being printed to log as an error</li>
+					<li>fixed some 'broken object load' error handling to print the timestamp of the specific bad object, not whatever timestamp was requested. this error handling now also prints the full dump name and version to the log, and version to the exported filename. I was working with a user who had broken subs this week, and lacking this full info made things just a little trickier to put back together</li>
+					<li>fixed some drag and drop handling where it was possible to drop thumbnails on a certain location of a page of pages that held an empty page of pages but it would not create a new child media page to hold them</li>
+					<li>misc serverside db code cleanup</li>
+					<li>fixed python 3.10 type bugs in window coordinate saving and Qt image generation from buffer (issue #1027)</li>
+				</ul>
+				<li><h3 id="version_465"><a href="#version_465">version 465</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed a recent bug in wildcard search where 't\*g' unnamespaced wildcards were not returning namespace results</li>
+					<li>sped up multi-predicate wildcard searches in some unusual file domains</li>
+					<li>the file maintenance manager is now more polite about how it works. no matter its speed settings, it now pauses regularly to check on and wait until the main UI is feeling good to start new work. this should relieve heavier clients on older machines who will get a bunch of new work to do this week</li>
+					<li>'all local files' in _review services_ now states how many files are awaiting physical deletion in the new deferred delete queue. this live updates when the values change but should be 0 pretty much all the time</li>
+					<li>'all known files' in _review services_ also gets a second safety yes/no dialog on its clear deleted files record button</li>
+					<li>updated the gelbooru 0.2.x gallery page parser, which at some point had been pulling 'delete from favourites' links when running the login-required 'gelbooru favorites by user id' downloader!!! it was deleting favourites, which I presume and hope was a recent change in gelbooru's html. in any case, the parser now skips over any deletion url (issue #1023)</li>
+					<li>fixed a bad index to label conversion in a common database progress method. it was commonly saying 22/21 progress instead of 21/21</li>
+					<li>fixed an error when manage tags dialog posts tags from the autocomplete during dialog shutdown</li>
+					<li>fixed a layout issue with the new presentation import options where the dropdowns could grow a little tall and make a sub-panel scrollbar</li>
+					<li>added handling for an error raised on loading an image with what seems to be a borked ICC profile</li>
+					<li>increased the default per-db-file cache size from 200MB up to 256MB</li>
+					<li>.</li>
+					<li>some new options:</li>
+					<li>the default tag service in the manage tags dialog (and some similar 'tag services in a row of tabs' dialogs) is reset this week. from now on, the last used service is remembered for the next time the dialog is opened. let's see how that works out. if you don't like it, you can go back to the old fixed default setting under the 'tags' options panel</li>
+					<li>added a checkbox to the 'search' options panel that controls whether new search pages are in 'searching immediately' or 'searching paused' state (issue #761)</li>
+					<li>moved default tag sort from 'tags' options panel to 'sort/collect'</li>
+					<li>.</li>
+					<li>deleted files and ipfs searchability:</li>
+					<li>wrote a new virtual file service to hold all previously deleted files of all real file services. this provides a mapping cache and tag lookup cache allowing for fast search of any deleted file domain in the future</li>
+					<li>ipfs services also now have mapping caches and tag search caches</li>
+					<li>ipfs services are now searchable in the main file search view! just select them from the autocomplete dropdown file domain button. they have tag counts and everything</li>
+					<li>it will take some time to populate the new ipfs and deleted files caches. if you don't have much deleted files history and no ipfs, it will be a few seconds. if you have a massive client with many deleted/ipfs files and many tags, it could be twenty minutes or more</li>
+					<li>.</li>
+					<li>'has icc profile' now cached in database:</li>
+					<li>the client database now keeps track of which image files have an icc profile. this data is added on file import</li>
+					<li>a new file maintenance task can generate it retroactively, and if a file is discovered to have an icc profile, it will be scheduled for a thumbnail regeneration too</li>
+					<li>a new system predicate, 'system:has icc profile', can now search this data. this system pred is weird, so I expect in future it will get tucked into an umbrella system pred for advanced/rare stuff</li>
+					<li>on update, all your existing image files are scheduled for the maintenance task. your 'has icc profile' will populate over time, and thumbnails will correct themselves</li>
+					<li>.</li>
+					<li>pixel hash now cached in database:</li>
+					<li>the client database now keeps track of image 'pixel hashes', which are fast unique identifiers that aggregate all that image's pixels. if two images have the same pixel hash, they are pixel duplicates. this data is added on file import</li>
+					<li>a new file maintenance task can generate it retroactively</li>
+					<li>on update, all your existing image files are scheduled for the maintenance task. it'll work lightly in the background in prep for future duplicate file system improvements</li>
+					<li>.</li>
+					<li>boring search code cleanup:</li>
+					<li>fixed a bug where the tag search cache could lose sibling/parent-chained values when their count was zeroed, even though they should always exist in a domain's lookup</li>
+					<li>fixed up some repository reset code that was regenerating surplus tag search data</li>
+					<li>with the new deleted files domain, simplified the new complex domain search pattern</li>
+					<li>converted basic tag search code to support multiple location domains</li>
+					<li>cleaned up some search cache and general table creation code to handle legacy orphan tables without error</li>
+					<li>misc tag and mapping cache code and combined local files code refactoring and cleanup</li>
+				</ul>
 				<li><h3 id="version_464"><a href="#version_464">version 464</a></h3></li>
 				<ul>
 					<li>image icc:</li>
