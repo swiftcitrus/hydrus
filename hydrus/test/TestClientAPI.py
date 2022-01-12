@@ -1786,6 +1786,30 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertFalse( HG.client_busy.locked() )
         
+        #
+        
+        expected_data = { 'hell forever' : 666 }
+        
+        HG.test_controller.SetRead( 'boned_stats', expected_data )
+        
+        path = '/manage_database/mr_bones'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        boned_stats = d[ 'boned_stats' ]
+        
+        self.assertEqual( boned_stats, dict( expected_data ) )
+        
     
     def _test_manage_pages( self, connection, set_up_permissions ):
         
@@ -2309,6 +2333,14 @@ class TestClientAPI( unittest.TestCase ):
             
             sorted_urls = sorted( urls )
             
+            random_file_service_hex_current = HydrusData.GenerateKey()
+            random_file_service_hex_deleted = HydrusData.GenerateKey()
+            
+            current_import_timestamp = 500
+            deleted_import_timestamp = 300
+            deleted_deleted_timestamp = 450
+            file_modified_timestamp = 20
+            
             for ( file_id, hash ) in file_ids_to_hashes.items():
                 
                 size = random.randint( 8192, 20 * 1048576 )
@@ -2325,7 +2357,7 @@ class TestClientAPI( unittest.TestCase ):
                 
                 tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
                 
-                locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set(), inbox = False, urls = urls )
+                locations_manager = ClientMediaManagers.LocationsManager( { random_file_service_hex_current : current_import_timestamp }, { random_file_service_hex_deleted : ( deleted_deleted_timestamp, deleted_import_timestamp ) }, set(), set(), inbox = False, urls = urls, file_modified_timestamp = file_modified_timestamp )
                 ratings_manager = ClientMediaManagers.RatingsManager( {} )
                 notes_manager = ClientMediaManagers.NotesManager( {} )
                 file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager( 0, 0, 0, 0 )
@@ -2360,6 +2392,22 @@ class TestClientAPI( unittest.TestCase ):
                 metadata_row[ 'has_audio' ] = file_info_manager.has_audio
                 metadata_row[ 'num_frames' ] = file_info_manager.num_frames
                 metadata_row[ 'num_words' ] = file_info_manager.num_words
+                
+                metadata_row[ 'file_services' ] = {
+                    'current' : {
+                        random_file_service_hex_current.hex() : {
+                            'time_imported' : current_import_timestamp
+                        }
+                    },
+                    'deleted' : {
+                        random_file_service_hex_deleted.hex() : {
+                            'time_deleted' : deleted_deleted_timestamp,
+                            'time_imported' : deleted_import_timestamp
+                        }
+                    }
+                }
+                
+                metadata_row[ 'time_modified' ] = file_modified_timestamp
                 
                 metadata_row[ 'is_inbox' ] = False
                 metadata_row[ 'is_local' ] = False
