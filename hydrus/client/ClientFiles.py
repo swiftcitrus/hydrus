@@ -142,7 +142,7 @@ def GetAllFilePaths( raw_paths, do_human_sort = True ):
         
         for path in paths_to_process:
             
-            if HG.view_shutdown:
+            if HG.started_shutdown:
                 
                 raise HydrusExceptions.ShutdownException()
                 
@@ -217,7 +217,7 @@ class ClientFilesManager( object ):
         
         try:
             
-            HydrusPaths.MakeFileWriteable( dest_path )
+            HydrusPaths.TryToGiveFileNicePermissionBits( dest_path )
             
             with open( dest_path, 'wb' ) as f:
                 
@@ -409,15 +409,16 @@ class ClientFilesManager( object ):
         duration = media.GetDuration()
         num_frames = media.GetNumFrames()
         
-        bounding_dimensions = HG.client_controller.options[ 'thumbnail_dimensions' ]
+        bounding_dimensions = self._controller.options[ 'thumbnail_dimensions' ]
+        thumbnail_scale_type = self._controller.new_options.GetInteger( 'thumbnail_scale_type' )
         
-        target_resolution = HydrusImageHandling.GetThumbnailResolution( ( width, height ), bounding_dimensions )
+        ( clip_rect, target_resolution ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), bounding_dimensions, thumbnail_scale_type )
         
         percentage_in = self._controller.new_options.GetInteger( 'video_thumbnail_percentage_in' )
         
         try:
             
-            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( file_path, target_resolution, mime, duration, num_frames, percentage_in = percentage_in )
+            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( file_path, target_resolution, mime, duration, num_frames, clip_rect = clip_rect, percentage_in = percentage_in )
             
         except Exception as e:
             
@@ -760,7 +761,7 @@ class ClientFilesManager( object ):
             HydrusData.ShowText( 'Adding file from string: ' + str( ( len( file_bytes ), dest_path ) ) )
             
         
-        HydrusPaths.MakeFileWriteable( dest_path )
+        HydrusPaths.TryToGiveFileNicePermissionBits( dest_path )
         
         with open( dest_path, 'wb' ) as f:
             
@@ -1019,7 +1020,7 @@ class ClientFilesManager( object ):
         
         pauser = HydrusData.BigJobPauser()
         
-        while not HG.view_shutdown:
+        while not HG.started_shutdown:
             
             with self._rwlock.write:
                 
@@ -1319,8 +1320,9 @@ class ClientFilesManager( object ):
             ( current_width, current_height ) = HydrusImageHandling.GetResolutionNumPy( numpy_image )
             
             bounding_dimensions = self._controller.options[ 'thumbnail_dimensions' ]
+            thumbnail_scale_type = self._controller.new_options.GetInteger( 'thumbnail_scale_type' )
             
-            ( expected_width, expected_height ) = HydrusImageHandling.GetThumbnailResolution( ( media_width, media_height ), bounding_dimensions )
+            ( clip_rect, ( expected_width, expected_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( media_width, media_height ), bounding_dimensions, thumbnail_scale_type )
             
             if current_width != expected_width or current_height != expected_height:
                 
@@ -1631,7 +1633,7 @@ class FilesMaintenanceManager( object ):
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
             
-            HydrusPaths.MakeFileWriteable( path )
+            HydrusPaths.TryToGiveFileNicePermissionBits( path )
             
         except HydrusExceptions.FileMissingException:
             
@@ -1894,6 +1896,7 @@ class FilesMaintenanceManager( object ):
             
             big_pauser = HydrusData.BigJobPauser( wait_time = 0.8 )
             
+            last_time_jobs_were_cleared = HydrusData.GetNow()
             cleared_jobs = []
             
             num_to_do = len( media_results )
@@ -2027,7 +2030,7 @@ class FilesMaintenanceManager( object ):
                     cleared_jobs.append( ( hash, job_type, additional_data ) )
                     
                 
-                if len( cleared_jobs ) > 100:
+                if HydrusData.TimeHasPassed( last_time_jobs_were_cleared + 10 ) or len( cleared_jobs ) > 256:
                     
                     self._controller.WriteSynchronous( 'file_maintenance_clear_jobs', cleared_jobs )
                     

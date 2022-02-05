@@ -22,6 +22,7 @@ from hydrus.core.networking import HydrusServerResources
 
 from hydrus.client import ClientAPI
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientLocation
 from hydrus.client import ClientSearch
 from hydrus.client import ClientSearchParseSystemPredicates
 from hydrus.client.importing import ClientImportFiles
@@ -41,7 +42,7 @@ LOCAL_BOORU_JSON_BYTE_LIST_PARAMS = set()
 CLIENT_API_INT_PARAMS = { 'file_id', 'file_sort_type' }
 CLIENT_API_BYTE_PARAMS = { 'hash', 'destination_page_key', 'page_key', 'Hydrus-Client-API-Access-Key', 'Hydrus-Client-API-Session-Key', 'tag_service_key', 'file_service_key' }
 CLIENT_API_STRING_PARAMS = { 'name', 'url', 'domain', 'file_service_name', 'tag_service_name' }
-CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'system_inbox', 'system_archive', 'tags', 'file_ids', 'only_return_identifiers', 'detailed_url_information', 'hide_service_names_tags', 'simple', 'file_sort_asc' }
+CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'system_inbox', 'system_archive', 'tags', 'file_ids', 'only_return_identifiers', 'detailed_url_information', 'hide_service_names_tags', 'simple', 'file_sort_asc', 'return_hashes' }
 CLIENT_API_JSON_BYTE_LIST_PARAMS = { 'hashes' }
 CLIENT_API_JSON_BYTE_DICT_PARAMS = { 'service_keys_to_tags', 'service_keys_to_actions_to_tags', 'service_keys_to_additional_tags' }
 
@@ -1895,11 +1896,11 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
             raise HydrusExceptions.BadRequestException( 'Sorry, search for all known tags over all known files is not supported!' )
             
         
-        location_search_context = ClientSearch.LocationSearchContext( current_service_keys = [ file_service_key ] )
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( file_service_key )
         tag_search_context = ClientSearch.TagSearchContext( service_key = tag_service_key )
         predicates = ParseClientAPISearchPredicates( request )
         
-        file_search_context = ClientSearch.FileSearchContext( location_search_context = location_search_context, tag_search_context = tag_search_context, predicates = predicates )
+        file_search_context = ClientSearch.FileSearchContext( location_context = location_context, tag_search_context = tag_search_context, predicates = predicates )
         
         file_sort_type = CC.SORT_FILES_BY_IMPORT_TIME
         
@@ -1925,11 +1926,28 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
         # newest first
         sort_by = ClientMedia.MediaSort( sort_type = ( 'system', file_sort_type ), sort_order = sort_order )
         
+        return_hashes = False
+        
+        if 'return_hashes' in request.parsed_request_args:
+            
+            return_hashes = request.parsed_request_args.GetValue( 'return_hashes', bool )
+            
+        
         hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context, sort_by = sort_by, apply_implicit_limit = False )
         
         request.client_api_permissions.SetLastSearchResults( hash_ids )
         
-        body_dict = { 'file_ids' : list( hash_ids ) }
+        if return_hashes:
+            
+            hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
+            
+            # maintain sort
+            body_dict = { 'hashes' : [ hash_ids_to_hashes[ hash_id ].hex() for hash_id in hash_ids ] }
+            
+        else:
+            
+            body_dict = { 'file_ids' : list( hash_ids ) }
+            
         
         body = json.dumps( body_dict )
         
