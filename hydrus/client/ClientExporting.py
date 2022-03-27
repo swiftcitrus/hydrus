@@ -291,7 +291,7 @@ class ExportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         
         if file_search_context is None:
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             file_search_context = ClientSearch.FileSearchContext( location_context = default_location_context )
             
@@ -702,7 +702,7 @@ class SidecarExporter( HydrusSerialisable.SerialisableBase ):
             
             with open( txt_path, 'w', encoding = 'utf-8' ) as f:
                 
-                f.write( os.linesep.join( tags ) )
+                f.write( '\n'.join( tags ) )
                 
             
         

@@ -7,7 +7,7 @@ on:
 
 jobs:
   build-macos:
-    runs-on: macos-latest
+    runs-on: macos-11
     steps:
       - 
         name: Checkout
@@ -18,6 +18,12 @@ jobs:
         id: setup_ffmpeg
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+      - 
+        name: Install mkdocs-material
+        run: python3 -m pip install mkdocs-material 
+      - 
+        name: Build docs to /help
+        run: mkdocs build -d help
       - 
         name: Install PyOxidizer
         run: python3 -m pip install pyoxidizer
@@ -68,6 +74,13 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+      - 
+        name: Install mkdocs-material
+        run: pip install mkdocs-material 
+      - 
+        name: Build docs to /help
+        run: mkdocs build -d help
+        working-directory: hydrus
       #- name: Cache Qt
       #  id: cache-qt
       #  uses: actions/cache@v1
@@ -126,7 +139,7 @@ jobs:
           retention-days: 2
 
   build-windows:
-    runs-on: [windows-latest]
+    runs-on: windows-2019
     steps:
       - 
         name: Checkout
@@ -145,6 +158,13 @@ jobs:
         with:
           python-version: 3.8
           architecture: x64
+      - 
+        name: Install mkdocs-material
+        run: pip install mkdocs-material 
+      - 
+        name: Build docs to /help
+        run: mkdocs build -d help
+        working-directory: hydrus
       - 
         name: Cache Qt
         id: cache_qt
@@ -184,16 +204,19 @@ jobs:
         run: |
           move ${{ steps.setup_ffmpeg.outputs.ffmpeg-path }} hydrus\bin\
           move hydrus\static\build_files\windows\sqlite3.dll hydrus\
+          move hydrus\static\build_files\windows\sqlite3.exe hydrus\db
           move hydrus\static\build_files\windows\client-win.spec client-win.spec
           move hydrus\static\build_files\windows\server-win.spec server-win.spec
           pyinstaller server-win.spec
           pyinstaller client-win.spec
           dir -r
       - 
+      # yo pretty sure we'll need to install this manually once we are on windows server 2022
+      # https://github.com/actions/virtual-environments/issues/4856
         name: InnoSetup
         run: |
           move hydrus\static\build_files\windows\InnoSetup.iss InnoSetup.iss
-          ISCC.exe InnoSetup.iss /DVersion=${GITHUB_REF##*/v}
+          ISCC.exe InnoSetup.iss /DVersion=${{ github.ref_name }}
       -
         name: Compress Client
         run: |

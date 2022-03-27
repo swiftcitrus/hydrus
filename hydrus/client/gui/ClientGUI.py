@@ -41,10 +41,10 @@ from hydrus.client import ClientExporting
 from hydrus.client import ClientLocation
 from hydrus.client import ClientParsing
 from hydrus.client import ClientPaths
-from hydrus.client import ClientRendering
 from hydrus.client import ClientServices
 from hydrus.client import ClientThreading
 from hydrus.client.gui import ClientGUIAsync
+from hydrus.client.gui import ClientGUICharts
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsManage
@@ -75,6 +75,8 @@ from hydrus.client.gui import ClientGUITags
 from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindows
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
+from hydrus.client.gui import QLocator
+from hydrus.client.gui import ClientGUILocatorSearchProviders
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.networking import ClientGUIHydrusNetwork
 from hydrus.client.gui.networking import ClientGUINetwork
@@ -509,6 +511,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         self._controller.sub( self, 'NotifyNewImportFolders', 'notify_new_import_folders' )
         self._controller.sub( self, 'NotifyNewOptions', 'notify_new_options' )
         self._controller.sub( self, 'NotifyNewPages', 'notify_new_pages' )
+        self._controller.sub( self, 'NotifyNewPagesCount', 'notify_new_pages_count' )
         self._controller.sub( self, 'NotifyNewPending', 'notify_new_pending' )
         self._controller.sub( self, 'NotifyNewPermissions', 'notify_new_permissions' )
         self._controller.sub( self, 'NotifyNewPermissions', 'notify_account_sync_due' )
@@ -516,6 +519,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         self._controller.sub( self, 'NotifyNewSessions', 'notify_new_sessions' )
         self._controller.sub( self, 'NotifyNewUndo', 'notify_new_undo' )
         self._controller.sub( self, 'NotifyPendingUploadFinished', 'notify_pending_upload_finished' )
+        self._controller.sub( self, 'NotifyRefreshNetworkMenu', 'notify_refresh_network_menu' )
         self._controller.sub( self, 'PresentImportedFilesToPage', 'imported_files_to_page' )
         self._controller.sub( self, 'SetDBLockedStatus', 'db_locked_status' )
         self._controller.sub( self, 'SetStatusBarDirty', 'set_status_bar_dirty' )
@@ -583,6 +587,31 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         ClientGUIFunctions.UpdateAppDisplayName()
         
+        # locator setup
+        
+        self._locator = QLocator.QLocator( self )
+        
+        self._locator.setIconBasePath( HC.STATIC_DIR + os.path.sep )
+        
+        # TODO: make configurable which providers + order
+        self._locator.addProvider( ClientGUILocatorSearchProviders.CalculatorSearchProvider() )
+        self._locator.addProvider( ClientGUILocatorSearchProviders.MainMenuSearchProvider() )
+        self._locator.addProvider( ClientGUILocatorSearchProviders.MediaMenuSearchProvider() )
+        self._locator.addProvider( ClientGUILocatorSearchProviders.PagesSearchProvider() )
+        self._locator_widget = QLocator.QLocatorWidget( self,
+            width = 800,
+            resultHeight = 36,
+            titleHeight = 36,
+            primaryTextWidth = 430,
+            secondaryTextWidth = 280,
+            maxVisibleItemCount = 16
+        )
+        self._locator_widget.setDefaultStylingEnabled( False )
+        self._locator_widget.setLocator( self._locator )
+        self._locator_widget.setAlignment( QC.Qt.AlignCenter )
+        self._locator_widget.setEscapeShortcuts( [ QG.QKeySequence( QC.Qt.Key_Escape ) ] )
+        # self._locator_widget.setQueryTimeout( 100 ) # how much to wait before starting a search after user edit. default 0
+        
     
     def _AboutWindow( self ):
         
@@ -618,15 +647,15 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         library_versions.append( ( 'OpenCV', cv2.__version__ ) )
         library_versions.append( ( 'Pillow', PIL.__version__ ) )
         
-        if HC.RUNNING_FROM_FROZEN_BUILD and HC.PLATFORM_MACOS:
+        if ClientGUIMPV.MPV_IS_AVAILABLE:
             
-            library_versions.append( ( 'mpv: ', 'is not currently available on macOS' ) )
+            library_versions.append( ( 'mpv api version: ', ClientGUIMPV.GetClientAPIVersionString() ) )
             
         else:
             
-            if ClientGUIMPV.MPV_IS_AVAILABLE:
+            if HC.RUNNING_FROM_FROZEN_BUILD and HC.PLATFORM_MACOS:
                 
-                library_versions.append( ( 'mpv api version: ', ClientGUIMPV.GetClientAPIVersionString() ) )
+                library_versions.append( ( 'mpv: ', 'is not currently available on macOS' ) )
                 
             else:
                 
@@ -659,6 +688,18 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             library_versions.append( ( 'PyQt5', PYQT_VERSION_STR ) )
             library_versions.append( ( 'sip', SIP_VERSION_STR ) )
             
+        CBOR_AVAILABLE = False
+        
+        try:
+            
+            import cbor2
+            CBOR_AVAILABLE = True
+            
+        except:
+            
+            pass
+        
+        library_versions.append( ( 'cbor2 present: ', str( CBOR_AVAILABLE ) ) )
         
         from hydrus.client.networking import ClientNetworkingJobs
         
@@ -2102,7 +2143,10 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         self._menu_updater_services = self._InitialiseMenubarGetMenuUpdaterServices()
         self._menu_updater_undo = self._InitialiseMenubarGetMenuUpdaterUndo()
         
+        self._menu_updater_pages_count = ClientGUIAsync.FastThreadToGUIUpdater( self, self._UpdateMenuPagesCount )
+        
         self._boned_updater = self._InitialiseMenubarGetBonesUpdater()
+        self._file_history_updater = self._InitialiseMenubarGetFileHistoryUpdater()
         
         self.setMenuBar( self._menubar )
         
@@ -2210,6 +2254,44 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'review your fate' )
             
             panel = ClientGUIScrolledPanelsReview.ReviewHowBonedAmI( frame, boned_stats )
+            
+            frame.SetPanel( panel )
+            
+        
+        return ClientGUIAsync.AsyncQtUpdater( self, loading_callable, work_callable, publish_callable )
+        
+    
+    def _InitialiseMenubarGetFileHistoryUpdater( self ):
+        
+        def loading_callable():
+            
+            pass
+            
+        
+        def work_callable():
+            
+            job_key = ClientThreading.JobKey()
+            
+            job_key.SetVariable( 'popup_text_1', 'Loading File History\u2026' )
+            
+            HG.client_controller.pub( 'message', job_key )
+            
+            num_steps = 2000
+            
+            file_history = HG.client_controller.Read( 'file_history', num_steps )
+            
+            return ( job_key, file_history )
+            
+        
+        def publish_callable( result ):
+            
+            ( job_key, file_history ) = result
+            
+            job_key.Delete()
+            
+            frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'file history' )
+            
+            panel = ClientGUIScrolledPanelsReview.ReviewFileHistory( frame, file_history )
             
             frame.SetPanel( panel )
             
@@ -2344,6 +2426,8 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             self._menubar_network_subscriptions_paused.setChecked( HC.options[ 'pause_subs_sync' ] )
             
+            self._menubar_network_paged_import_queues_paused.setChecked( HG.client_controller.new_options.GetBoolean( 'pause_all_file_queues' ) )
+            
         
         return ClientGUIAsync.AsyncQtUpdater( self, loading_callable, work_callable, publish_callable )
         
@@ -2375,27 +2459,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         def publish_callable( result ):
             
-            (
-                total_active_page_count,
-                total_active_num_hashes,
-                total_active_num_seeds,
-                total_closed_page_count,
-                total_closed_num_hashes,
-                total_closed_num_seeds
-            ) = self.GetTotalPageCounts()
-            
-            total_active_weight = ClientGUIPages.ConvertNumHashesAndSeedsToWeight( total_active_num_hashes, total_active_num_seeds )
-            
-            if total_active_weight > 10000000 and self._controller.new_options.GetBoolean( 'show_session_size_warnings' ) and not self._have_shown_session_size_warning:
-                
-                self._have_shown_session_size_warning = True
-                
-                HydrusData.ShowText( 'Your session weight is {}, which is pretty big! To keep your UI lag-free, please try to close some pages or clear some finished downloaders!'.format( HydrusData.ToHumanInt( total_active_weight ) ) )
-                
-            
-            ClientGUIMenus.SetMenuItemLabel( self._menubar_pages_page_count, '{} pages open'.format( HydrusData.ToHumanInt( total_active_page_count ) ) )
-            
-            ClientGUIMenus.SetMenuItemLabel( self._menubar_pages_session_weight, 'total session weight: {}'.format( HydrusData.ToHumanInt( total_active_weight ) ) )
+            self._UpdateMenuPagesCount()
             
             #
             
@@ -2839,9 +2903,9 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                     for ( i, ( time_closed, page ) ) in enumerate( self._closed_pages ):
                         
-                        name = page.GetName()
+                        menu_name = page.GetNameForMenu()
                         
-                        args.append( ( i, name + ' - ' + page.GetPrettyStatus() ) )
+                        args.append( ( i, menu_name ) )
                         
                     
                     args.reverse() # so that recently closed are at the top
@@ -3055,11 +3119,11 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         menu = QW.QMenu( self )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'help and getting started guide', 'Open hydrus\'s local help in your web browser.', ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'index.html' ) )
+        ClientGUIMenus.AppendMenuItem( menu, 'help and getting started guide', 'Open hydrus\'s local help in your web browser.', self._OpenHelp )
         
         links = QW.QMenu( menu )
         
-        site = ClientGUIMenus.AppendMenuBitmapItem( links, 'site', 'Open hydrus\'s website, which is mostly a mirror of the local help.', CC.global_pixmaps().file_repository, ClientPaths.LaunchURLInWebBrowser, 'https://hydrusnetwork.github.io/hydrus/' )
+        site = ClientGUIMenus.AppendMenuBitmapItem( links, 'site', 'Open hydrus\'s website, which is a mirror of the local help.', CC.global_pixmaps().file_repository, ClientPaths.LaunchURLInWebBrowser, 'https://hydrusnetwork.github.io/hydrus/' )
         site = ClientGUIMenus.AppendMenuBitmapItem( links, 'github repository', 'Open the hydrus github repository.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus' )
         site = ClientGUIMenus.AppendMenuBitmapItem( links, 'latest build', 'Open the latest build on the hydrus github repository.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus/releases/latest' )
         site = ClientGUIMenus.AppendMenuBitmapItem( links, 'issue tracker', 'Open the github issue tracker, which is run by users.', CC.global_pixmaps().github, ClientPaths.LaunchURLInWebBrowser, 'https://github.com/hydrusnetwork/hydrus/issues' )
@@ -3081,6 +3145,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         ClientGUIMenus.AppendSeparator( menu )
         
         ClientGUIMenus.AppendMenuItem( menu, 'how boned am I?', 'Check for a summary of your ride so far.', self._HowBonedAmI )
+        ClientGUIMenus.AppendMenuItem( menu, 'view file history', 'See a chart of your file import history.', self._ShowFileHistory )
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -3148,7 +3213,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         gui_actions = QW.QMenu( debug )
         
-        default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+        default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
         
         def flip_macos_antiflicker():
             
@@ -3248,7 +3313,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         ClientGUIMenus.AppendSeparator( submenu )
         
-        ClientGUIMenus.AppendMenuCheckItem( submenu, 'paged file import queues', 'Pause all file import queues.', self._controller.new_options.GetBoolean( 'pause_all_file_queues' ), self._controller.new_options.FlipBoolean, 'pause_all_file_queues' )
+        self._menubar_network_paged_import_queues_paused = ClientGUIMenus.AppendMenuCheckItem( submenu, 'paged file import queues', 'Pause all file import queues.', self._controller.new_options.GetBoolean( 'pause_all_file_queues' ), self._controller.new_options.FlipBoolean, 'pause_all_file_queues' )
         ClientGUIMenus.AppendMenuCheckItem( submenu, 'gallery searches', 'Pause all gallery imports\' searching.', self._controller.new_options.GetBoolean( 'pause_all_gallery_searches' ), self._controller.new_options.FlipBoolean, 'pause_all_gallery_searches' )
         ClientGUIMenus.AppendMenuCheckItem( submenu, 'watcher checkers', 'Pause all watchers\' checking.', self._controller.new_options.GetBoolean( 'pause_all_watcher_checkers' ), self._controller.new_options.FlipBoolean, 'pause_all_watcher_checkers' )
         
@@ -3569,7 +3634,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
                 if load_a_blank_page:
                     
-                    default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+                    default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
                     
                     self._notebook.NewPageQuery( default_location_context, on_deepest_notebook = True )
                     
@@ -4715,6 +4780,47 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         
     
+    def _OpenHelp( self ):
+        
+        help_path = os.path.join( HC.HELP_DIR, 'index.html' )
+        
+        if os.path.exists( help_path ):
+            
+            ClientPaths.LaunchPathInWebBrowser( help_path )
+            
+        else:
+            
+            message = 'You do not have a local help! Are you running from source? Would you like to open the online help or see a guide on how to build your own?'
+            
+            yes_tuples = []
+            
+            yes_tuples.append( ( 'open online help', 0 ) )
+            yes_tuples.append( ( 'open how to build guide', 1 ) )
+            
+            with ClientGUIDialogs.DialogYesYesNo( self, message, yes_tuples = yes_tuples, no_label = 'forget it' ) as dlg:
+                
+                if dlg.exec() == QW.QDialog.Accepted:
+                    
+                    value = dlg.GetValue()
+                    
+                    if value == 0:
+                        
+                        url = 'https://hydrusnetwork.github.io/hydrus/'
+                        
+                    elif value == 1:
+                        
+                        url = 'https://hydrusnetwork.github.io/hydrus/about_docs.html'
+                        
+                    else:
+                        
+                        return
+                        
+                    ClientPaths.LaunchURLInWebBrowser( url )
+                    
+                
+            
+        
+    
     def _OpenInstallFolder( self ):
         
         HydrusPaths.LaunchDirectory( HC.BASE_DIR )
@@ -4764,7 +4870,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         else:
             
-            media_status = page.GetPrettyStatus()
+            media_status = page.GetPrettyStatusForStatusBar()
             
         
         if self._controller.CurrentlyIdle():
@@ -5611,7 +5717,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             t = 0.25
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             HG.client_controller.CallLaterQtSafe( self, t, 'test job', self._notebook.NewPageQuery, default_location_context, page_name = 'test', on_deepest_notebook = True )
             
@@ -5683,7 +5789,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         def qt_test_ac():
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             SYS_PRED_REFRESH = 1.0
             
@@ -6103,6 +6209,20 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
         
     
+    def _ShowFileHistory( self ):
+        
+        if not ClientGUICharts.QT_CHARTS_OK:
+            
+            message = 'Sorry, you do not have QtCharts available, so this chart cannot be shown!'
+            
+            QW.QMessageBox.warning( self, 'Warning', message )
+            
+            return
+            
+        
+        self._file_history_updater.update()
+        
+    
     def _ShowHideSplitters( self ):
         
         page = self._notebook.GetCurrentMediaPage()
@@ -6364,6 +6484,31 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         self._menu_updater_pending.update()
         
         self._controller.CallToThread( THREADUploadPending, service_key )
+        
+    
+    def _UpdateMenuPagesCount( self ):
+        
+        (
+            total_active_page_count,
+            total_active_num_hashes,
+            total_active_num_seeds,
+            total_closed_page_count,
+            total_closed_num_hashes,
+            total_closed_num_seeds
+        ) = self.GetTotalPageCounts()
+        
+        total_active_weight = ClientGUIPages.ConvertNumHashesAndSeedsToWeight( total_active_num_hashes, total_active_num_seeds )
+        
+        if total_active_weight > 10000000 and self._controller.new_options.GetBoolean( 'show_session_size_warnings' ) and not self._have_shown_session_size_warning:
+            
+            self._have_shown_session_size_warning = True
+            
+            HydrusData.ShowText( 'Your session weight is {}, which is pretty big! To keep your UI lag-free, please try to close some pages or clear some finished downloaders!'.format( HydrusData.ToHumanInt( total_active_weight ) ) )
+            
+        
+        ClientGUIMenus.SetMenuItemLabel( self._menubar_pages_page_count, '{} pages open'.format( HydrusData.ToHumanInt( total_active_page_count ) ) )
+        
+        ClientGUIMenus.SetMenuItemLabel( self._menubar_pages_session_weight, 'total session weight: {}'.format( HydrusData.ToHumanInt( total_active_weight ) ) )
         
     
     def _UpdateSystemTrayIcon( self, currently_booting = False ):
@@ -7070,6 +7215,11 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
         self._menu_updater_pages.update()
         
     
+    def NotifyRefreshNetworkMenu( self ):
+        
+        self._menu_updater_network.update()
+        
+    
     def NotifyNewExportFolders( self ):
         
         self._menu_updater_file.update()
@@ -7089,6 +7239,11 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
     def NotifyNewPages( self ):
         
         self._menu_updater_pages.update()
+        
+    
+    def NotifyNewPagesCount( self ):
+        
+        self._menu_updater_pages_count.Update()
         
     
     def NotifyNewPending( self ):
@@ -7256,6 +7411,10 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             elif action == CAC.SIMPLE_GLOBAL_FORCE_ANIMATION_SCANBAR_SHOW:
                 
                 HG.client_controller.new_options.FlipBoolean( 'force_animation_scanbar_show' )
+                
+            elif action == CAC.SIMPLE_OPEN_COMMAND_PALETTE:
+                
+                self._locator_widget.start()
                 
             elif action == CAC.SIMPLE_SHOW_HIDE_SPLITTERS:
                 
@@ -7857,7 +8016,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
                             
                             if HG.client_controller.IsFirstStart():
                                 
-                                text += 'Since this is your first session, this maintenance should should just be some quick initialisation work. It should only take a few seconds.'
+                                text += 'Since this is your first session, this maintenance should just be some quick initialisation work. It should only take a few seconds.'
                                 text += os.linesep * 2
                                 
                             

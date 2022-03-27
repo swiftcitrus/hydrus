@@ -20,11 +20,9 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientAPI
-from hydrus.client import ClientManagers
 from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
 from hydrus.client.importing import ClientImportFiles
-from hydrus.client.media import ClientMedia
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientTags
@@ -751,7 +749,7 @@ class TestClientAPI( unittest.TestCase ):
         
         [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash } ) ] }
+        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash }, reason = 'Deleted via Client API.' ) ] }
         
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
@@ -775,9 +773,57 @@ class TestClientAPI( unittest.TestCase ):
         
         [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes ) ] }
+        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = 'Deleted via Client API.' ) ] }
         
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # now with a reason
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/delete_files'
+        
+        reason = 'yo'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'reason' : reason }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] }
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # now test it not working
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_name' : 'not existing service' }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 400 )
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertIn( 'not existing service', text ) # error message should be complaining about it
         
         #
         
@@ -826,6 +872,28 @@ class TestClientAPI( unittest.TestCase ):
         expected_service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes ) ] }
         
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        #
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_files/undelete_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_name' : 'not existing service' }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 400 )
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertIn( 'not existing service', text ) # error message should be complaining about it
         
         #
         
@@ -923,7 +991,75 @@ class TestClientAPI( unittest.TestCase ):
         
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
-    
+    def _test_add_notes( self, connection, set_up_permissions ):
+        
+        hash = os.urandom( 32 )
+        hash_hex = hash.hex()
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        # set notes
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'new note' : 'hello test', 'new note 2' : 'hello test 2' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in new_notes_dict.items() ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # delete notes
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/delete_notes'
+        
+        delete_note_names = { 'new note 3', 'new note 4' }
+        
+        body_dict = { 'hash' : hash_hex, 'note_names' : list( delete_note_names ) }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( hash, name ) ) for name in delete_note_names ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
     def _test_add_tags( self, connection, set_up_permissions ):
         
         api_permissions = set_up_permissions[ 'everything' ]
@@ -1145,6 +1281,114 @@ class TestClientAPI( unittest.TestCase ):
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
     
+    def _test_add_tags_search_tags( self, connection, set_up_permissions ):
+        
+        predicates = [
+            ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'green', count = ClientSearch.PredicateCount( 2, 0, None, None ) ),
+            ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'green car', count = ClientSearch.PredicateCount( 5, 0, None, None ) )
+        ]
+        
+        HG.test_controller.SetRead( 'autocomplete_predicates', predicates )
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'search_green_files' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/add_tags/search_tags?search={}'.format( 'gre' )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_answer = {
+            'tags' : [
+                {
+                    'value' : 'green',
+                    'count' : 2
+                }
+            ]
+        }
+        
+        self.assertEqual( expected_answer, d )
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/add_tags/search_tags?search={}'.format( 'gre' )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        # note this also tests sort
+        expected_answer = {
+            'tags' : [
+                {
+                    'value' : 'green car',
+                    'count' : 5
+                },
+                {
+                    'value' : 'green',
+                    'count' : 2
+                }
+            ]
+        }
+        
+        self.assertEqual( expected_answer, d )
+        
+        #
+        
+        # the db won't be asked in this case since default rule for all known tags is not to run this search
+        path = '/add_tags/search_tags?search={}'.format( urllib.parse.quote( '*' ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        # note this also tests sort
+        expected_answer = {
+            'tags' : []
+        }
+        
+        self.assertEqual( expected_answer, d )
+        
     def _test_add_urls( self, connection, set_up_permissions ):
         
         # get url files
@@ -1472,7 +1716,7 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_service_keys_to_content_updates = collections.defaultdict( list )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], [ hash ] ) ) ]
+        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ]
         
         expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
         
@@ -1501,7 +1745,7 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_service_keys_to_content_updates = collections.defaultdict( list )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], [ hash ] ) ) ]
+        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ]
         
         expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
         
@@ -1530,7 +1774,7 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_service_keys_to_content_updates = collections.defaultdict( list )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], [ hash ] ) ) ]
+        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ]
         
         expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
         
@@ -1559,7 +1803,7 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_service_keys_to_content_updates = collections.defaultdict( list )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], [ hash ] ) ) ]
+        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ]
         
         expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
         
@@ -2414,9 +2658,21 @@ class TestClientAPI( unittest.TestCase ):
                 
                 tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
                 
-                locations_manager = ClientMediaManagers.LocationsManager( { random_file_service_hex_current : current_import_timestamp }, { random_file_service_hex_deleted : ( deleted_deleted_timestamp, deleted_import_timestamp ) }, set(), set(), inbox = False, urls = urls, file_modified_timestamp = file_modified_timestamp )
+                timestamp_manager = ClientMediaManagers.TimestampManager()
+                
+                timestamp_manager.SetFileModifiedTimestamp( file_modified_timestamp )
+                
+                locations_manager = ClientMediaManagers.LocationsManager(
+                    { random_file_service_hex_current : current_import_timestamp },
+                    { random_file_service_hex_deleted : ( deleted_deleted_timestamp, deleted_import_timestamp ) },
+                    set(),
+                    set(),
+                    inbox = False,
+                    urls = urls,
+                    timestamp_manager = timestamp_manager
+                )
                 ratings_manager = ClientMediaManagers.RatingsManager( {} )
-                notes_manager = ClientMediaManagers.NotesManager( {} )
+                notes_manager = ClientMediaManagers.NotesManager( { 'note' : 'hello', 'note2' : 'hello2' } )
                 file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
                 
                 media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
@@ -2427,6 +2683,7 @@ class TestClientAPI( unittest.TestCase ):
             hide_service_names_tags_metadata = []
             metadata = []
             detailed_known_urls_metadata = []
+            with_notes_metadata = []
             
             services_manager = HG.client_controller.services_manager
             
@@ -2434,43 +2691,39 @@ class TestClientAPI( unittest.TestCase ):
             
             for media_result in media_results:
                 
-                metadata_row = {}
-                
                 file_info_manager = media_result.GetFileInfoManager()
                 
-                metadata_row[ 'file_id' ] = file_info_manager.hash_id
-                metadata_row[ 'hash' ] = file_info_manager.hash.hex()
-                metadata_row[ 'size' ] = file_info_manager.size
-                metadata_row[ 'mime' ] = HC.mime_mimetype_string_lookup[ file_info_manager.mime ]
-                metadata_row[ 'ext' ] = HC.mime_ext_lookup[ file_info_manager.mime ]
-                metadata_row[ 'width' ] = file_info_manager.width
-                metadata_row[ 'height' ] = file_info_manager.height
-                metadata_row[ 'duration' ] = file_info_manager.duration
-                metadata_row[ 'has_audio' ] = file_info_manager.has_audio
-                metadata_row[ 'num_frames' ] = file_info_manager.num_frames
-                metadata_row[ 'num_words' ] = file_info_manager.num_words
-                
-                metadata_row[ 'file_services' ] = {
-                    'current' : {
-                        random_file_service_hex_current.hex() : {
-                            'time_imported' : current_import_timestamp
+                metadata_row = {
+                    'file_id' : file_info_manager.hash_id,
+                    'hash' : file_info_manager.hash.hex(),
+                    'size' : file_info_manager.size,
+                    'mime' : HC.mime_mimetype_string_lookup[ file_info_manager.mime ],
+                    'ext' : HC.mime_ext_lookup[ file_info_manager.mime ],
+                    'width' : file_info_manager.width,
+                    'height' : file_info_manager.height,
+                    'duration' : file_info_manager.duration,
+                    'has_audio' : file_info_manager.has_audio,
+                    'num_frames' : file_info_manager.num_frames,
+                    'num_words' : file_info_manager.num_words,
+                    'file_services' : {
+                        'current' : {
+                            random_file_service_hex_current.hex() : {
+                                'time_imported' : current_import_timestamp
+                            }
+                        },
+                        'deleted' : {
+                            random_file_service_hex_deleted.hex() : {
+                                'time_deleted' : deleted_deleted_timestamp,
+                                'time_imported' : deleted_import_timestamp
+                            }
                         }
                     },
-                    'deleted' : {
-                        random_file_service_hex_deleted.hex() : {
-                            'time_deleted' : deleted_deleted_timestamp,
-                            'time_imported' : deleted_import_timestamp
-                        }
-                    }
+                    'time_modified' : file_modified_timestamp,
+                    'is_inbox' : False,
+                    'is_local' : False,
+                    'is_trashed' : False,
+                    'known_urls' : list( sorted_urls )
                 }
-                
-                metadata_row[ 'time_modified' ] = file_modified_timestamp
-                
-                metadata_row[ 'is_inbox' ] = False
-                metadata_row[ 'is_local' ] = False
-                metadata_row[ 'is_trashed' ] = False
-                
-                metadata_row[ 'known_urls' ] = list( sorted_urls )
                 
                 tags_manager = media_result.GetTagsManager()
                 
@@ -2542,10 +2795,17 @@ class TestClientAPI( unittest.TestCase ):
                 
                 detailed_known_urls_metadata.append( detailed_known_urls_metadata_row )
                 
+                with_notes_metadata_row = dict( metadata_row )
+                
+                with_notes_metadata_row[ 'notes' ] = media_result.GetNotesManager().GetNamesToNotes()
+                
+                with_notes_metadata.append( with_notes_metadata_row )
+                
             
             expected_hide_service_names_tags_metadata_result = { 'metadata' : hide_service_names_tags_metadata }
             expected_metadata_result = { 'metadata' : metadata }
             expected_detailed_known_urls_metadata_result = { 'metadata' : detailed_known_urls_metadata }
+            expected_notes_metadata_result = { 'metadata' : with_notes_metadata }
             
         
         HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
@@ -2705,6 +2965,24 @@ class TestClientAPI( unittest.TestCase ):
         d = json.loads( text )
         
         self.assertEqual( d, expected_detailed_known_urls_metadata_result )
+        
+        # metadata from hashes with notes info
+        
+        path = '/get_files/file_metadata?hashes={}&include_notes=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_notes_metadata_result )
         
         # failure on missing file_ids
         
@@ -3030,7 +3308,7 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 404 )
         
-        #
+        # this no longer 404s, it should give the hydrus thumb
         
         path = '/get_files/thumbnail?hash={}'.format( hash_404.hex() )
         
@@ -3040,7 +3318,14 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        self.assertEqual( response.status, 404 )
+        with open( os.path.join( HC.STATIC_DIR, 'hydrus.png' ), 'rb' ) as f:
+            
+            expected_data = f.read()
+            
+        
+        self.assertEqual( response.status, 200 )
+        
+        self.assertEqual( data, expected_data )
         
         #
         
@@ -3068,7 +3353,9 @@ class TestClientAPI( unittest.TestCase ):
         self._test_manage_database( connection, set_up_permissions )
         self._test_add_files_add_file( connection, set_up_permissions )
         self._test_add_files_other_actions( connection, set_up_permissions )
+        self._test_add_notes( connection, set_up_permissions )
         self._test_add_tags( connection, set_up_permissions )
+        self._test_add_tags_search_tags( connection, set_up_permissions )
         self._test_add_urls( connection, set_up_permissions )
         self._test_manage_cookies( connection, set_up_permissions )
         self._test_manage_pages( connection, set_up_permissions )

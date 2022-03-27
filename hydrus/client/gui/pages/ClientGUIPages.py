@@ -122,9 +122,7 @@ class DialogPageChooser( ClientGUIDialogs.Dialog ):
         self.setMinimumWidth( width )
         self.setMinimumHeight( height )
         
-        self._services = HG.client_controller.services_manager.GetServices()
-        
-        self._petition_service_keys = [ service.GetServiceKey() for service in self._services if service.GetServiceType() in HC.REPOSITORIES and True in ( service.HasPermission( content_type, HC.PERMISSION_ACTION_MODERATE ) for content_type in HC.SERVICE_TYPES_TO_CONTENT_TYPES[ service.GetServiceType() ] ) ]
+        self._petition_service_keys = [ service.GetServiceKey() for service in HG.client_controller.services_manager.GetServices( HC.REPOSITORIES ) if True in ( service.HasPermission( content_type, HC.PERMISSION_ACTION_MODERATE ) for content_type in HC.SERVICE_TYPES_TO_CONTENT_TYPES[ service.GetServiceType() ] ) ]
         
         self._InitButtons( 'home' )
         
@@ -280,20 +278,26 @@ class DialogPageChooser( ClientGUIDialogs.Dialog ):
             
         elif menu_keyword == 'files':
             
-            entries.append( ( 'page_query', CC.LOCAL_FILE_SERVICE_KEY ) )
+            for service_key in self._controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) ):
+                
+                if service_key == CC.LOCAL_UPDATE_SERVICE_KEY:
+                    
+                    continue
+                    
+                
+                entries.append( ( 'page_query', service_key ) )
+                
+            
             entries.append( ( 'page_query', CC.TRASH_SERVICE_KEY ) )
             
-            if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+            if self._controller.new_options.GetBoolean( 'advanced_mode' ):
                 
                 entries.append( ( 'page_query', CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
                 
             
-            for service in self._services:
+            for service_key in self._controller.services_manager.GetServiceKeys( ( HC.FILE_REPOSITORY, ) ):
                 
-                if service.GetServiceType() == HC.FILE_REPOSITORY:
-                    
-                    entries.append( ( 'page_query', service.GetServiceKey() ) )
-                    
+                entries.append( ( 'page_query', service_key ) )
                 
             
         elif menu_keyword == 'download':
@@ -492,6 +496,7 @@ class Page( QW.QSplitter ):
         self._media_panel.refreshQuery.connect( self.RefreshQuery )
         self._media_panel.focusMediaChanged.connect( self._preview_canvas.SetMedia )
         self._media_panel.focusMediaCleared.connect( self._preview_canvas.ClearMedia )
+        self._media_panel.focusMediaPaused.connect( self._preview_canvas.PauseMedia )
         self._media_panel.statusTextChanged.connect( self._SetPrettyStatus )
         
         self._management_panel.ConnectMediaPanelSignals( self._media_panel )
@@ -557,6 +562,8 @@ class Page( QW.QSplitter ):
         self._ConnectMediaPanelSignals()
         
         self._controller.pub( 'refresh_page_name', self._page_key )
+        
+        self._controller.pub( 'notify_new_pages_count' )
         
         def clean_up_old_panel():
             
@@ -682,6 +689,25 @@ class Page( QW.QSplitter ):
         return self._management_controller.GetPageName()
         
     
+    def GetNameForMenu( self ) -> str:
+        
+        name_for_menu = self.GetName()
+        
+        ( num_files, ( num_value, num_range ) ) = self.GetNumFileSummary()
+        
+        if num_files > 0:
+            
+            name_for_menu = '{} - {} files'.format( name_for_menu, HydrusData.ToHumanInt( num_files ) )
+            
+        
+        if num_value != num_range:
+            
+            name_for_menu = '{} - {}'.format( name_for_menu, HydrusData.ConvertValueRangeToPrettyString( num_value, num_range ) )
+            
+        
+        return HydrusText.ElideText( name_for_menu, 32, elide_center = True )
+        
+    
     def GetNumFileSummary( self ):
         
         if self._initialised:
@@ -716,6 +742,11 @@ class Page( QW.QSplitter ):
     def GetParentNotebook( self ):
         
         return self._parent_notebook
+        
+    
+    def GetPrettyStatusForStatusBar( self ):
+        
+        return self._pretty_status
         
     
     def GetSerialisablePage( self, only_changed_page_data, about_to_save ):
@@ -761,11 +792,6 @@ class Page( QW.QSplitter ):
         root[ 'focused' ] = is_selected
         
         return root
-        
-    
-    def GetPrettyStatus( self ):
-        
-        return self._pretty_status
         
     
     def GetSashPositions( self ):
@@ -1389,14 +1415,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
         else:
             
-            tab_index = ClientGUIFunctions.NotebookScreenToHitTest( self, screen_position )
-            
-            if tab_index == -1:
-                
-                return self
-                
-            
-            on_child_notebook_somewhere = screen_position.y() > current_page.pos().y()
+            on_child_notebook_somewhere = current_page.mapFromGlobal( screen_position ).y() > current_page.pos().y()
             
             if on_child_notebook_somewhere:
                 
@@ -1754,7 +1773,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
             for selectable_media_page in selectable_media_pages:
                 
-                label = '{} - {}'.format( selectable_media_page.GetName(), selectable_media_page.GetPrettyStatus() )
+                label = selectable_media_page.GetNameForMenu()
                 
                 ClientGUIMenus.AppendMenuItem( select_menu, label, 'select this page', self.ShowPage, selectable_media_page )
                 
@@ -2231,6 +2250,25 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         return self._name
         
     
+    def GetNameForMenu( self ) -> str:
+        
+        name_for_menu = self.GetName()
+        
+        ( num_files, ( num_value, num_range ) ) = self.GetNumFileSummary()
+        
+        if num_files > 0:
+            
+            name_for_menu = '{} - {} files'.format( name_for_menu, HydrusData.ToHumanInt( num_files ) )
+            
+        
+        if num_value != num_range:
+            
+            name_for_menu = '{} - {}'.format( name_for_menu, HydrusData.ConvertValueRangeToPrettyString( num_value, num_range ) )
+            
+        
+        return HydrusText.ElideText( name_for_menu, 32, elide_center = True )
+        
+    
     def GetNumFileSummary( self ):
         
         total_num_files = 0
@@ -2425,6 +2463,25 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         return self._parent_notebook
         
     
+    def GetPages( self ):
+        
+        return self._GetPages()
+        
+    
+    def GetPrettyStatusForStatusBar( self ):
+        
+        ( num_files, ( num_value, num_range ) ) = self.GetNumFileSummary()
+        
+        num_string = HydrusData.ToHumanInt( num_files )
+        
+        if num_range > 0 and num_value != num_range:
+            
+            num_string += ', ' + HydrusData.ConvertValueRangeToPrettyString( num_value, num_range )
+            
+        
+        return HydrusData.ToHumanInt( self.count() ) + ' pages, ' + num_string + ' files'
+        
+    
     def GetSerialisablePage( self, only_changed_page_data, about_to_save ):
         
         page_containers = []
@@ -2472,25 +2529,6 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         root[ 'pages' ] = my_pages_list
         
         return root
-        
-    
-    def GetPages( self ):
-        
-        return self._GetPages()
-        
-    
-    def GetPrettyStatus( self ):
-        
-        ( num_files, ( num_value, num_range ) ) = self.GetNumFileSummary()
-        
-        num_string = HydrusData.ToHumanInt( num_files )
-        
-        if num_range > 0 and num_value != num_range:
-            
-            num_string += ', ' + HydrusData.ConvertValueRangeToPrettyString( num_value, num_range )
-            
-        
-        return HydrusData.ToHumanInt( self.count() ) + ' pages, ' + num_string + ' files'
         
     
     def GetTestAbleToCloseStatement( self ):
@@ -2906,7 +2944,6 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             return False
             
         
-        current_index = self.currentIndex()
         current_page = self.currentWidget()
         
         if isinstance( current_page, PagesNotebook ):
@@ -3018,6 +3055,16 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         # in some unusual circumstances, this gets out of whack
         insertion_index = min( insertion_index, self.count() )
+        
+        if self._controller.new_options.GetBoolean( 'force_hide_page_signal_on_new_page' ):
+            
+            current_gui_page = self._controller.gui.GetCurrentPage()
+            
+            if current_gui_page is not None:
+                
+                current_gui_page.PageHidden()
+                
+            
         
         self.insertTab( insertion_index, page, page_name )
         
@@ -3179,7 +3226,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         if give_it_a_blank_page:
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             page.NewPageQuery( default_location_context )
             
@@ -3389,4 +3436,3 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         pass
         
-    

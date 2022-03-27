@@ -149,6 +149,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'maintain_similar_files_duplicate_pairs_during_idle' ] = False
         
         self._dictionary[ 'booleans' ][ 'show_namespaces' ] = True
+        self._dictionary[ 'booleans' ][ 'show_number_namespaces' ] = True
         self._dictionary[ 'booleans' ][ 'replace_tag_underscores_with_spaces' ] = False
         
         self._dictionary[ 'booleans' ][ 'verify_regular_https' ] = True
@@ -173,6 +174,7 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'tag_display_maintenance_during_active' ] = True
         
         self._dictionary[ 'booleans' ][ 'save_page_sort_on_change' ] = False
+        self._dictionary[ 'booleans' ][ 'force_hide_page_signal_on_new_page' ] = False
         
         self._dictionary[ 'booleans' ][ 'pause_all_new_network_traffic' ] = False
         self._dictionary[ 'booleans' ][ 'boot_with_network_traffic_paused' ] = False
@@ -245,6 +247,8 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'booleans' ][ 'save_default_tag_service_tab_on_change' ] = True
         
         self._dictionary[ 'booleans' ][ 'force_animation_scanbar_show' ] = False
+        
+        self._dictionary[ 'booleans' ][ 'call_mouse_buttons_primary_secondary' ] = False
         
         #
         
@@ -493,6 +497,10 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         self._dictionary[ 'custom_default_predicates' ] = HydrusSerialisable.SerialisableList()
         
         self._dictionary[ 'predicate_types_to_recent_predicates' ] = HydrusSerialisable.SerialisableDictionary()
+        
+        from hydrus.client import ClientLocation
+        
+        self._dictionary[ 'default_local_location_context' ] = ClientLocation.LocationContext.STATICCreateSimple( CC.LOCAL_FILE_SERVICE_KEY )
         
         #
         
@@ -928,6 +936,14 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def GetDefaultLocalLocationContext( self ):
+        
+        with self._lock:
+            
+            return self._dictionary[ 'default_local_location_context' ]
+            
+        
+    
     def GetDefaultMediaViewOptions( self ):
         
         with self._lock:
@@ -1340,19 +1356,11 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def SetDefaultSort( self, media_sort ):
+    def SetDefaultLocalLocationContext( self, location_context ):
         
         with self._lock:
             
-            self._dictionary[ 'default_sort' ] = media_sort
-            
-        
-    
-    def SetDefaultSubscriptionCheckerOptions( self, checker_options ):
-        
-        with self._lock:
-            
-            self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ] = checker_options
+            self._dictionary[ 'default_local_location_context' ] = location_context
             
         
     
@@ -1376,6 +1384,22 @@ class ClientOptions( HydrusSerialisable.SerialisableBase ):
         with self._lock:
             
             self._dictionary[ 'default_tag_sort' ] = tag_sort
+            
+        
+    
+    def SetDefaultSort( self, media_sort ):
+        
+        with self._lock:
+            
+            self._dictionary[ 'default_sort' ] = media_sort
+            
+        
+    
+    def SetDefaultSubscriptionCheckerOptions( self, checker_options ):
+        
+        with self._lock:
+            
+            self._dictionary[ 'misc' ][ 'default_subscription_checker_options' ] = checker_options
             
         
     

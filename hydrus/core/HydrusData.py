@@ -9,7 +9,6 @@ import pstats
 import psutil
 import random
 import re
-import sqlite3
 import struct
 import subprocess
 import sys
@@ -327,6 +326,12 @@ def TimeDeltaToPrettyTimeDelta( seconds, show_seconds = True ):
             
             seconds %= duration
             
+            # little rounding thing if you get 364th day with 30 day months
+            if time_string == 'month' and time_quantity > 11:
+                
+                time_quantity = 11
+                
+            
             if time_quantity > 0:
                 
                 s = ToHumanInt( time_quantity ) + ' ' + time_string
@@ -598,7 +603,7 @@ def DebugPrint( debug_info ):
     sys.stdout.flush()
     sys.stderr.flush()
     
-def DedupeList( xs ):
+def DedupeList( xs: typing.Iterable ):
     
     xs_seen = set()
     
@@ -1658,6 +1663,12 @@ def BaseToHumanBytes( size, sig_figs = 3 ):
     
     suffix_index = 0
     
+    ctx = decimal.getcontext()
+    
+    # yo, ctx is actually a global, you set prec later, it'll hang around for the /= stuff here lmaaaaaoooooo
+    # 188213746 was flipping between 179MB/180MB because the prec = 10 was being triggered later on 180MB
+    ctx.prec = 28
+    
     d = decimal.Decimal( size )
     
     while d >= 1024:
@@ -1668,8 +1679,6 @@ def BaseToHumanBytes( size, sig_figs = 3 ):
         
     
     suffix = suffixes[ suffix_index ]
-    
-    ctx = decimal.getcontext()
     
     # ok, if we have 237KB, we still want all 237, even if user said 2 sf
     while d.log10() >= sig_figs:
@@ -1882,6 +1891,12 @@ class ContentUpdate( object ):
         elif self._data_type == HC.CONTENT_TYPE_URLS:
             
             ( urls, hashes ) = self._row
+            
+        elif self._data_type == HC.CONTENT_TYPE_TIMESTAMP:
+            
+            ( timestamp_type, hash, data ) = self._row
+            
+            hashes = { hash }
             
         elif self._data_type == HC.CONTENT_TYPE_MAPPINGS:
             

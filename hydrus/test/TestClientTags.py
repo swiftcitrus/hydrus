@@ -637,8 +637,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -697,8 +697,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -757,8 +757,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -817,8 +817,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -871,8 +871,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -916,8 +916,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -965,8 +965,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1028,8 +1028,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1083,8 +1083,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1147,8 +1147,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1201,8 +1201,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1254,8 +1254,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1308,8 +1308,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1361,8 +1361,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1415,8 +1415,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1468,8 +1468,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1522,8 +1522,8 @@ class TestTagObjects( unittest.TestCase ):
         
         tag_autocomplete_options.SetTuple(
             tag_autocomplete_options.GetWriteAutocompleteTagDomain(),
-            tag_autocomplete_options.OverridesWriteAutocompleteFileDomain(),
-            tag_autocomplete_options.GetWriteAutocompleteFileDomain(),
+            tag_autocomplete_options.OverridesWriteAutocompleteLocationContext(),
+            tag_autocomplete_options.GetWriteAutocompleteLocationContext(),
             search_namespaces_into_full_tags,
             namespace_bare_fetch_all_allowed,
             namespace_fetch_all_allowed,
@@ -1995,6 +1995,8 @@ class TestTagObjects( unittest.TestCase ):
             ( 'system:md5 hash is in 3 hashes', "system:hash = abcdef01 abcdef, abcdef04 md5" ),
             ( 'system:md5 hash is abcdef01', "system:hash = abcdef01 md5" ),
             ( 'system:md5 hash is abcdef01', "system:Hash = Abcdef01 md5" ),
+            ( 'system:md5 hash is not abcdef01', "system:Hash != Abcdef01 md5" ),
+            ( 'system:md5 hash is not abcdef01', "system:Hash is not Abcdef01 md5" ),
             ( 'system:sha256 hash is abcdef0102', "system:hash = abcdef0102" ),
             ( 'system:modified time: since 7 years 1 month ago', "system:modified date < 7  years 45 days 70h" ),
             ( 'system:modified time: since 2011-06-04', "system:modified date > 2011-06-04" ),

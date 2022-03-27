@@ -20,6 +20,7 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientLocation
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
@@ -38,7 +39,7 @@ from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.pages import ClientGUIResultsSortCollect
 from hydrus.client.gui.search import ClientGUIACDropdown
-from hydrus.client.gui.search import ClientGUISearch
+from hydrus.client.gui.search import ClientGUILocation
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.gui.widgets import ClientGUIControls
 from hydrus.client.media import ClientMedia
@@ -782,7 +783,9 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             vbox = QP.VBoxLayout()
             
-            text = 'Setting a specific web browser path here--like \'C:\\program files\\firefox\\firefox.exe "%path%"\'--can help with the \'share->open->in web browser\' command, which is buggy working with OS defaults, particularly on Windows. It also fixes #anchors, which are dropped in some OSes using default means. Use the same %path% format for the \'open externally\' commands below.'
+            text = 'Setting a specific web browser launch command here that uses %path% for where the url should go--like \'C:\\program files\\firefox\\firefox.exe "%path%"\'--can help with various "launch url" commands across the program, which can be buggy with OS defaults. It also fixes #anchors, which are dropped in some OSes using default means.'
+            text += os.linesep * 2
+            text += 'Use the same %path% format for the \'open externally\' commands below. Hydrus will put the file path in there when it launches the program from terminal. Most programs are "program_exe %path%", but more complicated ones may need a profile switch or "-o" open command or similar.'
             
             st = ClientGUICommon.BetterStaticText( mime_panel, text )
             st.setWordWrap( True )
@@ -791,7 +794,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
-            rows.append( ( 'Manual web browser launch path: ', self._web_browser_path ) )
+            rows.append( ( 'Manual web browser launch command: ', self._web_browser_path ) )
             
             gridbox = ClientGUICommon.WrapInGrid( mime_panel, rows )
             
@@ -826,6 +829,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         def _EditMimeLaunch( self ):
             
+            edited_datas = []
+            
             for ( mime, launch_path ) in self._mime_launch_listctrl.GetData( only_selected = True ):
                 
                 message = 'Enter the new launch path for {}'.format( HC.mime_string_lookup[ mime ] )
@@ -858,7 +863,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                             
                             self._mime_launch_listctrl.DeleteDatas( [ ( mime, launch_path ) ] )
                             
-                            self._mime_launch_listctrl.AddDatas( [ ( mime, new_launch_path ) ] )
+                            edited_data = [ ( mime, new_launch_path ) ]
+                            
+                            self._mime_launch_listctrl.AddDatas( edited_data )
+                            
+                            edited_datas.append( edited_data )
                             
                         
                     else:
@@ -867,6 +876,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
                         
                     
                 
+            
+            self._mime_launch_listctrl.SelectDatas( edited_datas )
             
             self._mime_launch_listctrl.Sort()
             
@@ -898,6 +909,13 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options = HG.client_controller.new_options
             
             self._export_location = QP.DirPickerCtrl( self )
+            
+            location_context = self._new_options.GetDefaultLocalLocationContext()
+            
+            self._default_local_location_context = ClientGUILocation.LocationSearchContextButton( self, location_context )
+            self._default_local_location_context.setToolTip( 'This initialised into a bunch of dialogs across the program. You can probably leave it alone forever, but if you delete or move away from \'my files\' as your main place to do work, please update it here.' )
+            
+            self._default_local_location_context.SetOnlyImportableDomainsAllowed( True )
             
             self._prefix_hash_when_copying = QW.QCheckBox( self )
             self._prefix_hash_when_copying.setToolTip( 'If you often paste hashes into boorus, check this to automatically prefix with the type, like "md5:2496dabcbd69e3c56a5d8caabb7acde5".' )
@@ -978,6 +996,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             rows = []
             
+            rows.append( ( 'Default local file search location: ', self._default_local_location_context ) )
             rows.append( ( 'When copying a file hashes, prefix with booru-friendly hash type: ', self._prefix_hash_when_copying ) )
             rows.append( ( 'Confirm sending files to trash: ', self._confirm_trash ) )
             rows.append( ( 'Confirm sending more than one file to archive or inbox: ', self._confirm_archive ) )
@@ -1060,6 +1079,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
         def UpdateOptions( self ):
             
             HC.options[ 'export_path' ] = HydrusPaths.ConvertAbsPathToPortablePath( self._export_location.GetPath() )
+            
+            self._new_options.SetDefaultLocalLocationContext( self._default_local_location_context.GetValue() )
             
             self._new_options.SetBoolean( 'prefix_hash_when_copying', self._prefix_hash_when_copying.isChecked() )
             
@@ -1404,6 +1425,10 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._reverse_page_shift_drag_behaviour = QW.QCheckBox( self._pages_panel )
             self._reverse_page_shift_drag_behaviour.setToolTip( 'By default, holding down shift when you drop off a page tab means the client will not \'chase\' the page tab. This makes this behaviour default, with shift-drop meaning to chase.' )
             
+            self._force_hide_page_signal_on_new_page = QW.QCheckBox( self._pages_panel )
+            
+            self._force_hide_page_signal_on_new_page.setToolTip( 'If your video still plays with sound in the preview viewer when you create a new page, please try this.' )
+            
             #
             
             self._page_names_panel = ClientGUICommon.StaticBox( self._pages_panel, 'page tab names' )
@@ -1473,9 +1498,11 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._import_page_progress_display.setChecked( self._new_options.GetBoolean( 'import_page_progress_display' ) )
             
+            self._reverse_page_shift_drag_behaviour.setChecked( self._new_options.GetBoolean( 'reverse_page_shift_drag_behaviour' ) )
+            
             self._total_pages_warning.setValue( self._new_options.GetInteger( 'total_pages_warning' ) )
             
-            self._reverse_page_shift_drag_behaviour.setChecked( self._new_options.GetBoolean( 'reverse_page_shift_drag_behaviour' ) )
+            self._force_hide_page_signal_on_new_page.setChecked( self._new_options.GetBoolean( 'force_hide_page_signal_on_new_page' ) )
             
             self._set_search_focus_on_page_change.setChecked( self._new_options.GetBoolean( 'set_search_focus_on_page_change' ) )
             
@@ -1501,6 +1528,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows.append( ( 'Notebook tab alignment: ', self._notebook_tab_alignment ) )
             rows.append( ( 'Reverse page tab shift-drag behaviour: ', self._reverse_page_shift_drag_behaviour ) )
             rows.append( ( 'Warn at this many total pages: ', self._total_pages_warning ) )
+            rows.append( ( 'BUGFIX: Force \'hide page\' signal when creating a new page: ', self._force_hide_page_signal_on_new_page ) )
             
             gridbox = ClientGUICommon.WrapInGrid( self._pages_panel, rows )
             
@@ -1575,6 +1603,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetBoolean( 'import_page_progress_display', self._import_page_progress_display.isChecked() )
             
             self._new_options.SetInteger( 'total_pages_warning', self._total_pages_warning.value() )
+            
+            self._new_options.SetBoolean( 'force_hide_page_signal_on_new_page', self._force_hide_page_signal_on_new_page.isChecked() )
             
             self._new_options.SetBoolean( 'reverse_page_shift_drag_behaviour', self._reverse_page_shift_drag_behaviour.isChecked() )
             
@@ -1931,7 +1961,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._animated_scanbar_height = QP.MakeQSpinBox( self, min=1, max=255 )
             self._animated_scanbar_nub_width = QP.MakeQSpinBox( self, min=1, max=63 )
             
-            self._media_viewer_panel = ClientGUICommon.StaticBox( self, 'media viewer mime handling' )
+            self._media_viewer_panel = ClientGUICommon.StaticBox( self, 'media viewer filetype handling' )
             
             media_viewer_list_panel = ClientGUIListCtrl.BetterListCtrlPanel( self._media_viewer_panel )
             
@@ -3260,7 +3290,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             favourites_st = ClientGUICommon.BetterStaticText( favourites_panel, desc )
             favourites_st.setWordWrap( True )
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             self._favourites = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( favourites_panel, CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE )
             self._favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( favourites_panel, self._favourites.AddTags, default_location_context, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
@@ -3389,6 +3419,8 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             render_st = ClientGUICommon.BetterStaticText( render_panel, label = 'Namespaced tags are stored and directly edited in hydrus as "namespace:subtag", but most presentation windows can display them differently.' )
             
             self._show_namespaces = QW.QCheckBox( render_panel )
+            self._show_number_namespaces = QW.QCheckBox( render_panel )
+            self._show_number_namespaces.setToolTip( 'This lets unnamespaced "16:9" show as that, not hiding the "16".' )
             self._namespace_connector = QW.QLineEdit( render_panel )
             
             self._replace_tag_underscores_with_spaces = QW.QCheckBox( render_panel )
@@ -3408,6 +3440,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             #
             
             self._show_namespaces.setChecked( new_options.GetBoolean( 'show_namespaces' ) )
+            self._show_number_namespaces.setChecked(( new_options.GetBoolean( 'show_number_namespaces' ) ) )
             self._namespace_connector.setText( new_options.GetString( 'namespace_connector' ) )
             self._replace_tag_underscores_with_spaces.setChecked( new_options.GetBoolean( 'replace_tag_underscores_with_spaces' ) )
             
@@ -3438,6 +3471,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             rows = []
             
             rows.append( ( 'Show namespaces: ', self._show_namespaces ) )
+            rows.append( ( 'Unless namespace is a number: ', self._show_number_namespaces ) )
             rows.append( ( 'If shown, namespace connecting string: ', self._namespace_connector ) )
             rows.append( ( 'EXPERIMENTAL: Replace all underscores with spaces: ', self._replace_tag_underscores_with_spaces ) )
             
@@ -3454,7 +3488,16 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             #
             
+            self._NamespacesUpdated()
+            
+            self._show_namespaces.clicked.connect( self._NamespacesUpdated )
+            
             self.setLayout( vbox )
+            
+        
+        def _NamespacesUpdated( self ):
+            
+            self._show_number_namespaces.setEnabled( not self._show_namespaces.isChecked() )
             
         
         def EventEditNamespaceColour( self ):
@@ -3493,6 +3536,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             self._new_options.SetTagSummaryGenerator( 'media_viewer_top', self._media_viewer_top.GetValue() )
             
             self._new_options.SetBoolean( 'show_namespaces', self._show_namespaces.isChecked() )
+            self._new_options.SetBoolean( 'show_number_namespaces', self._show_number_namespaces.isChecked() )
             self._new_options.SetString( 'namespace_connector', self._namespace_connector.text() )
             self._new_options.SetBoolean( 'replace_tag_underscores_with_spaces', self._replace_tag_underscores_with_spaces.isChecked() )
             
@@ -3540,7 +3584,7 @@ class ManageOptionsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             self._suggested_favourites_dict = {}
             
-            default_location_context = HG.client_controller.services_manager.GetDefaultLocationContext()
+            default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
             
             self._suggested_favourites_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( suggested_tags_favourites_panel, self._suggested_favourites.AddTags, default_location_context, CC.COMBINED_TAG_SERVICE_KEY, show_paste_button = True )
             

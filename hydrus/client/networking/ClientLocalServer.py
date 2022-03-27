@@ -64,6 +64,7 @@ class HydrusServiceClientAPI( HydrusClientService ):
         add_tags.putChild( b'add_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsAddTags( self._service, self._client_requests_domain ) )
         add_tags.putChild( b'clean_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsCleanTags( self._service, self._client_requests_domain ) )
         add_tags.putChild( b'get_tag_services', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsGetTagServices( self._service, self._client_requests_domain ) )
+        add_tags.putChild( b'search_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsSearchTags( self._service, self._client_requests_domain ) )
         
         add_urls = NoResource()
         
@@ -82,6 +83,13 @@ class HydrusServiceClientAPI( HydrusClientService ):
         get_files.putChild( b'file_metadata', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesFileMetadata( self._service, self._client_requests_domain ) )
         get_files.putChild( b'file', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesGetFile( self._service, self._client_requests_domain ) )
         get_files.putChild( b'thumbnail', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( self._service, self._client_requests_domain ) )
+        
+        add_notes = NoResource()
+        
+        root.putChild( b'add_notes', add_notes )
+        
+        add_notes.putChild( b'set_notes', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddNotesSetNotes( self._service, self._client_requests_domain ) )
+        add_notes.putChild( b'delete_notes', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddNotesDeleteNotes( self._service, self._client_requests_domain ) )
         
         manage_cookies = NoResource()
         

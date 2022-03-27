@@ -344,20 +344,32 @@ class EditDefaultTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
 class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
+    SPECIAL_CHOICE_CUSTOM = 0
+    SPECIAL_CHOICE_NO_REASON = 1
+    
     def __init__( self, parent: QW.QWidget, media, default_reason, suggested_file_service_key = None ):
         
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
         
+        local_file_services = list( HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
+        
+        if suggested_file_service_key is None:
+            
+            suggested_file_service_key = local_file_services[0].GetServiceKey()
+            
+        
         self._media = self._FilterForDeleteLock( ClientMedia.FlattenMedia( media ), suggested_file_service_key )
         
         self._question_is_already_resolved = len( self._media ) == 0
+        
+        ( self._all_files_have_existing_file_deletion_reasons, self._existing_shared_file_deletion_reason ) = self._GetExistingSharedFileDeletionReason()
         
         self._simple_description = ClientGUICommon.BetterStaticText( self, label = 'init' )
         
         self._permitted_action_choices = []
         self._this_dialog_includes_service_keys = False
         
-        self._InitialisePermittedActionChoices( suggested_file_service_key = suggested_file_service_key )
+        self._InitialisePermittedActionChoices( suggested_file_service_key )
         
         self._action_radio = ClientGUICommon.BetterRadioBox( self, choices = self._permitted_action_choices, vertical = True )
         
@@ -389,9 +401,20 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._reason_panel = ClientGUICommon.StaticBox( self, 'reason' )
         
+        existing_reason_was_in_list = False
+        
         permitted_reason_choices = []
         
-        permitted_reason_choices.append( ( default_reason, default_reason ) )
+        if self._existing_shared_file_deletion_reason is not None and default_reason == self._existing_shared_file_deletion_reason:
+            
+            existing_reason_was_in_list = True
+            
+            permitted_reason_choices.append( ( 'keep existing reason: {}'.format( default_reason ), default_reason ) )
+            
+        else:
+            
+            permitted_reason_choices.append( ( default_reason, default_reason ) )
+            
         
         if HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ):
             
@@ -413,7 +436,16 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         for ( i, s ) in enumerate( HG.client_controller.new_options.GetStringList( 'advanced_file_deletion_reasons' ) ):
             
-            permitted_reason_choices.append( ( s, s ) )
+            if self._existing_shared_file_deletion_reason is not None and s == self._existing_shared_file_deletion_reason and not existing_reason_was_in_list:
+                
+                existing_reason_was_in_list = True
+                
+                permitted_reason_choices.append( ( 'keep existing reason: {}'.format( s ), s ) )
+                
+            else:
+                
+                permitted_reason_choices.append( ( s, s ) )
+                
             
             if last_advanced_file_deletion_reason is not None and s == last_advanced_file_deletion_reason:
                 
@@ -421,7 +453,19 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             
         
-        permitted_reason_choices.append( ( 'custom', None ) )
+        if self._existing_shared_file_deletion_reason is not None and not existing_reason_was_in_list:
+            
+            permitted_reason_choices.append( ( 'keep existing reason: {}'.format( self._existing_shared_file_deletion_reason ), self._existing_shared_file_deletion_reason ) )
+            
+        
+        custom_index = len( permitted_reason_choices )
+        
+        permitted_reason_choices.append( ( 'custom', self.SPECIAL_CHOICE_CUSTOM ) )
+        
+        if self._all_files_have_existing_file_deletion_reasons and self._existing_shared_file_deletion_reason is None:
+            
+            permitted_reason_choices.append( ( '(all files have existing file deletion reasons and they differ): do not alter them.', self.SPECIAL_CHOICE_NO_REASON ) )
+            
         
         self._reason_radio = ClientGUICommon.BetterRadioBox( self._reason_panel, choices = permitted_reason_choices, vertical = True )
         
@@ -429,7 +473,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if selection_index is None:
             
-            selection_index = len( permitted_reason_choices ) - 1 # custom
+            selection_index = custom_index
             
             self._custom_reason.setText( last_advanced_file_deletion_reason )
             
@@ -488,16 +532,11 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         self.widget().setLayout( vbox )
         
     
-    def _FilterForDeleteLock( self, media, suggested_file_service_key ):
+    def _FilterForDeleteLock( self, media, suggested_file_service_key: bytes ):
         
         delete_lock_for_archived_files = HG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' )
         
         if delete_lock_for_archived_files:
-            
-            if suggested_file_service_key is None:
-                
-                suggested_file_service_key = CC.LOCAL_FILE_SERVICE_KEY
-                
             
             service = HG.client_controller.services_manager.GetService( suggested_file_service_key )
             
@@ -510,15 +549,50 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         return media
         
     
+    def _GetExistingSharedFileDeletionReason( self ):
+        
+        all_files_have_existing_file_deletion_reasons = True
+        reasons = set()
+        
+        for m in self._media:
+            
+            lm = m.GetLocationsManager()
+            
+            if not lm.HasLocalFileDeletionReason():
+                
+                all_files_have_existing_file_deletion_reasons = False
+                
+                return ( all_files_have_existing_file_deletion_reasons, None )
+                
+            
+            reason = lm.GetLocalFileDeletionReason()
+            
+            reasons.add( reason )
+            
+        
+        shared_reason = None
+        
+        if all_files_have_existing_file_deletion_reasons and len( reasons ) == 1:
+            
+            shared_reason = list( reasons )[0]
+            
+        
+        return ( all_files_have_existing_file_deletion_reasons, shared_reason )
+        
+    
     def _GetReason( self ):
         
         if self._reason_panel.isEnabled():
             
             reason = self._reason_radio.GetValue()
             
-            if reason is None:
+            if reason == self.SPECIAL_CHOICE_CUSTOM:
                 
                 reason = self._custom_reason.text()
+                
+            elif reason == self.SPECIAL_CHOICE_NO_REASON:
+                
+                reason = None
                 
             
         else:
@@ -529,19 +603,20 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         return reason
         
     
-    def _InitialisePermittedActionChoices( self, suggested_file_service_key = None ):
+    def _InitialisePermittedActionChoices( self, suggested_file_service_key: bytes ):
         
         possible_file_service_keys = []
         
-        if suggested_file_service_key is None:
-            
-            suggested_file_service_key = CC.LOCAL_FILE_SERVICE_KEY
-            
+        local_file_services = list( HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
         
         if suggested_file_service_key not in ( CC.TRASH_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ):
             
             possible_file_service_keys.append( ( suggested_file_service_key, suggested_file_service_key ) )
             
+        
+        local_file_services = [ lfs for lfs in local_file_services if lfs.GetServiceKey() != suggested_file_service_key ]
+        
+        possible_file_service_keys.extend( ( lfs.GetServiceKey(), lfs.GetServiceKey() ) for lfs in local_file_services )
         
         possible_file_service_keys.append( ( CC.TRASH_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
         possible_file_service_keys.append( ( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
@@ -555,6 +630,8 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             
             del keys_to_hashes[ trashed_key ]
             
+        
+        num_local_file_services = 0
         
         for fsk in possible_file_service_keys:
             
@@ -571,20 +648,25 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 ( selection_file_service_key, deletee_file_service_key ) = fsk
                 
-                # update this stuff to say 'send to trash?' vs 'remove from blah? (it is still in bleh)'. for multiple local file services
+                deletee_service = HG.client_controller.services_manager.GetService( deletee_file_service_key )
                 
-                if deletee_file_service_key == CC.LOCAL_FILE_SERVICE_KEY:
+                deletee_service_type = deletee_service.GetServiceType()
+                
+                if deletee_service_type == HC.LOCAL_FILE_DOMAIN:
                     
                     self._this_dialog_includes_service_keys = True
                     
-                    if not HC.options[ 'confirm_trash' ]:
-                        
-                        # this dialog will never show
-                        self._question_is_already_resolved = True
-                        
+                    num_local_file_services += 1
                     
-                    if num_to_delete == 1: text = 'Send this file to the trash?'
-                    else: text = 'Send these ' + HydrusData.ToHumanInt( num_to_delete ) + ' files to the trash?'
+                    if num_to_delete == 1: text = 'Send one file from {} to the trash?'.format( deletee_service.GetName() )
+                    else: text = 'Send {} files from {} to the trash?'.format( HydrusData.ToHumanInt( num_to_delete ), deletee_service.GetName() )
+                    
+                elif deletee_service_type == HC.FILE_REPOSITORY:
+                    
+                    self._this_dialog_includes_service_keys = True
+                    
+                    if num_to_delete == 1: text = 'Admin-delete this file?'
+                    else: text = 'Admin-delete these ' + HydrusData.ToHumanInt( num_to_delete ) + ' files?'
                     
                 elif deletee_file_service_key == CC.COMBINED_LOCAL_FILE_SERVICE_KEY:
                     
@@ -603,16 +685,15 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                         else: text = 'Permanently delete these ' + HydrusData.ToHumanInt( num_to_delete ) + ' files?'
                         
                     
-                else:
-                    
-                    self._this_dialog_includes_service_keys = True
-                    
-                    if num_to_delete == 1: text = 'Admin-delete this file?'
-                    else: text = 'Admin-delete these ' + HydrusData.ToHumanInt( num_to_delete ) + ' files?'
-                    
                 
                 self._permitted_action_choices.append( ( text, ( deletee_file_service_key, hashes, text ) ) )
                 
+            
+        
+        if num_local_file_services == 1 and not HC.options[ 'confirm_trash' ]:
+            
+            # this dialog will never show
+            self._question_is_already_resolved = True
             
         
         if HG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
@@ -646,8 +727,10 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         ( file_service_key, hashes, description ) = self._action_radio.GetValue()
         
+        local_file_service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
+        
         # 'this includes service keys' because if we are deleting physically from the trash, then reason is already set
-        reason_permitted = file_service_key in ( CC.LOCAL_FILE_SERVICE_KEY, 'physical_delete' ) and self._this_dialog_includes_service_keys
+        reason_permitted = ( file_service_key in local_file_service_keys or file_service_key == 'physical_delete' ) and self._this_dialog_includes_service_keys
         
         if reason_permitted:
             
@@ -655,7 +738,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             
             reason = self._reason_radio.GetValue()
             
-            if reason is None:
+            if reason == self.SPECIAL_CHOICE_CUSTOM:
                 
                 self._custom_reason.setEnabled( True )
                 
@@ -680,9 +763,9 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         save_reason = False
         
-        local_file_services = ( CC.LOCAL_FILE_SERVICE_KEY, )
+        local_file_service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
         
-        if file_service_key in local_file_services:
+        if file_service_key in local_file_service_keys:
             
             # split them into bits so we don't hang the gui with a huge delete transaction
             
@@ -1545,13 +1628,21 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         control = QW.QPlainTextEdit( self._notebook )
         
-        control.setPlainText( note )
+        try:
+            
+            control.setPlainText( note )
+            
+        except:
+            
+            control.setPlainText( repr( note ) )
+            
         
         self._notebook.addTab( control, name )
         
         self._notebook.setCurrentWidget( control )
         
         ClientGUIFunctions.SetFocusLater( control )
+        
         HG.client_controller.CallAfterQtSafe( control, 'moving cursor to end', control.moveCursor, QG.QTextCursor.End )
         
         self._UpdateButtons()
@@ -2283,6 +2374,8 @@ class EditRegexFavourites( ClientGUIScrolledPanels.EditPanel ):
     
     def _Edit( self ):
         
+        edited_datas = []
+        
         rows = self._regexes.GetData( only_selected = True )
         
         for row in rows:
@@ -2307,6 +2400,8 @@ class EditRegexFavourites( ClientGUIScrolledPanels.EditPanel ):
                             
                             self._regexes.AddDatas( ( edited_row, ) )
                             
+                            edited_datas.append( edited_row )
+                            
                         
                     
                 else:
@@ -2315,6 +2410,8 @@ class EditRegexFavourites( ClientGUIScrolledPanels.EditPanel ):
                     
                 
             
+        
+        self._regexes.SelectDatas( edited_datas )
         
         self._regexes.Sort()
         
@@ -3031,4 +3128,3 @@ class EditServiceTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._UpdateAdditionalTagsButtonLabel()
         
-    

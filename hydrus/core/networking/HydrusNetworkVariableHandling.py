@@ -1,8 +1,17 @@
+import collections
 import json
 import os
 import traceback
 import typing
 import urllib
+
+CBOR_AVAILABLE = False
+try:
+    import cbor2
+    import base64
+    CBOR_AVAILABLE = True
+except:
+    pass
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
@@ -299,6 +308,8 @@ def ParseTwistedRequestGETArgs( requests_args, int_params, byte_params, string_p
     
     args = ParsedRequestArguments()
     
+    cbor_requested = b'cbor' in requests_args
+    
     for name_bytes in requests_args:
         
         values_bytes = requests_args[ name_bytes ]
@@ -365,7 +376,13 @@ def ParseTwistedRequestGETArgs( requests_args, int_params, byte_params, string_p
             
             try:
                 
-                args[ name ] = json.loads( urllib.parse.unquote( value ) )
+                if CBOR_AVAILABLE and cbor_requested:
+                    
+                    args[ name ] = cbor2.loads( base64.urlsafe_b64decode( value ) )
+                    
+                else:
+                    
+                    args[ name ] = json.loads( urllib.parse.unquote( value ) )
                 
             except Exception as e:
                 
@@ -376,7 +393,13 @@ def ParseTwistedRequestGETArgs( requests_args, int_params, byte_params, string_p
             
             try:
                 
-                list_of_hex_strings = json.loads( urllib.parse.unquote( value ) )
+                if CBOR_AVAILABLE and cbor_requested:
+                    
+                    list_of_hex_strings = cbor2.loads( base64.urlsafe_b64decode( value ) )
+                    
+                else:
+                    
+                    list_of_hex_strings = json.loads( urllib.parse.unquote( value ) )
                 
                 args[ name ] = [ bytes.fromhex( hex_string ) for hex_string in list_of_hex_strings ]
                 
@@ -396,14 +419,14 @@ class ParsedRequestArguments( dict ):
         raise HydrusExceptions.BadRequestException( 'It looks like the parameter "{}" was missing!'.format( key ) )
         
     
-    def GetValue( self, key, expected_type, expected_list_type = None, default_value = None ):
+    def GetValue( self, key, expected_type, expected_list_type = None, expected_dict_types = None, default_value = None ):
         
         # not None because in JSON sometimes people put 'null' to mean 'did not enter this optional parameter'
         if key in self and self[ key ] is not None:
             
             value = self[ key ]
             
-            error_text_lookup = {}
+            error_text_lookup = collections.defaultdict( lambda: 'unknown!' )
             
             error_text_lookup[ int ] = 'integer'
             error_text_lookup[ str ] = 'string'
@@ -432,16 +455,25 @@ class ParsedRequestArguments( dict ):
                     
                     if not isinstance( item, expected_list_type ):
                         
-                        if expected_list_type in error_text_lookup:
-                            
-                            type_error_text = error_text_lookup[ expected_list_type ]
-                            
-                        else:
-                            
-                            type_error_text = 'unknown!'
-                            
+                        raise HydrusExceptions.BadRequestException( 'The list parameter "{}" held an item, "{}" that was {} and not the expected type: {}!'.format( key, item, type( item ), error_text_lookup[ expected_list_type ] ) )
                         
-                        raise HydrusExceptions.BadRequestException( 'The list parameter "{}" held an item that was not the expected type: {}!'.format( key, type_error_text ) )
+                    
+                
+            
+            if expected_type is dict and expected_dict_types is not None:
+                
+                ( expected_key_type, expected_value_type ) = expected_dict_types
+                
+                for ( dict_key, dict_value ) in value.items():
+                    
+                    if not isinstance( dict_key, expected_key_type ):
+                        
+                        raise HydrusExceptions.BadRequestException( 'The Object parameter "{}" held a key, "{}" that was {} and not the expected type: {}!'.format( key, dict_key, type( dict_key ), error_text_lookup[ expected_key_type ] ) )
+                        
+                    
+                    if not isinstance( dict_value, expected_value_type ):
+                        
+                        raise HydrusExceptions.BadRequestException( 'The Object parameter "{}" held a value, "{}" that was {} and not the expected type: {}!'.format( key, dict_value, type( dict_value ), error_text_lookup[ expected_value_type ] ) )
                         
                     
                 

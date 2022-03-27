@@ -43,35 +43,88 @@ def CheckFFMPEGError( lines ):
         raise HydrusExceptions.DamagedOrUnusualFileException( 'FFMPEG could not parse.' )
         
     
-def GetAPNGACTLChunk( file_header_bytes: bytes ):
+def GetAPNGChunks( file_header_bytes: bytes ):
     
+    # https://wiki.mozilla.org/APNG_Specification
+    # a chunk is:
+    # 4 bytes of data size, unsigned int
+    # 4 bytes of chunk name
+    # n bytes of data
+    # 4 bytes of CRC
+    
+    # lop off 8 bytes of 'this is a PNG' at the top
+    remaining_chunk_bytes = file_header_bytes[8:]
+    
+    chunks = []
+    
+    while len( remaining_chunk_bytes ) > 12:
+        
+        ( num_data_bytes, ) = struct.unpack( '>I', remaining_chunk_bytes[ : 4 ] )
+        
+        chunk_name = remaining_chunk_bytes[ 4 : 8 ]
+        
+        chunk_data = remaining_chunk_bytes[ 8 : 8 + num_data_bytes ]
+        
+        chunks.append( ( chunk_name, chunk_data ) )
+        
+        remaining_chunk_bytes = remaining_chunk_bytes[ 8 + num_data_bytes + 4 : ]
+        
+    
+    return chunks
+    
+def GetAPNGACTLChunkData( file_header_bytes: bytes ):
+    
+    # the acTL chunk can be in different places, but it has to be near the top
+    # although it is almost always in fixed position (I think byte 29), we have seen both pHYs and sRGB chunks appear before it
+    # so to be proper we need to parse chunks and find the right one
     apng_actl_chunk_header = b'acTL'
-    apng_phys_chunk_header = b'pHYs'
     
-    first_guess_header = file_header_bytes[ 37:128 ]
+    chunks = GetAPNGChunks( file_header_bytes )
     
-    if first_guess_header.startswith( apng_actl_chunk_header ):
+    chunks = dict( chunks )
+    
+    if apng_actl_chunk_header in chunks:
         
-        return first_guess_header
+        return chunks[ apng_actl_chunk_header ]
         
-    elif first_guess_header.startswith( apng_phys_chunk_header ):
+    else:
         
-        # aha, some weird other png chunk
-        # https://wiki.mozilla.org/APNG_Specification
+        return None
         
-        if apng_actl_chunk_header in first_guess_header:
+    
+def GetAPNGDuration( apng_bytes: bytes ):
+    
+    frame_control_chunk_name = b'fcTL'
+    
+    chunks = GetAPNGChunks( apng_bytes )
+    
+    total_duration = 0
+    
+    for ( chunk_name, chunk_data ) in chunks:
+        
+        if chunk_name == frame_control_chunk_name and len( chunk_data ) >= 24:
+    
+            ( delay_numerator, ) = struct.unpack( '>H', chunk_data[20:22] )
+            ( delay_denominator, ) = struct.unpack( '>H', chunk_data[22:24] )
             
-            i = first_guess_header.index( apng_actl_chunk_header )
+            if delay_denominator == 0:
+                
+                duration = 0.1
+                
+            else:
+                
+                duration = delay_numerator / delay_denominator
+                
             
-            return first_guess_header[i:]
+            total_duration += duration
             
         
     
-    return None
+    return total_duration
     
-def GetAPNGNumFrames( apng_actl_bytes ):
+def GetAPNGNumFrames( apng_actl_bytes: bytes ):
     
-    ( num_frames, ) = struct.unpack( '>I', apng_actl_bytes[ 4 : 8 ] )
+    ( num_frames, ) = struct.unpack( '>I', apng_actl_bytes[ : 4 ] )
     
     return num_frames
     
@@ -257,7 +310,7 @@ def GetFFMPEGAPNGProperties( path ):
         file_header_bytes = f.read( 256 )
         
     
-    apng_actl_bytes = GetAPNGACTLChunk( file_header_bytes )
+    apng_actl_bytes = GetAPNGACTLChunkData( file_header_bytes )
     
     if apng_actl_bytes is None:
         
@@ -266,18 +319,16 @@ def GetFFMPEGAPNGProperties( path ):
     
     num_frames = GetAPNGNumFrames( apng_actl_bytes )
     
+    with open( path, 'rb' ) as f:
+        
+        file_bytes = f.read()
+        
+    
+    duration = GetAPNGDuration( file_bytes )
+    
     lines = GetFFMPEGInfoLines( path )
     
     resolution = ParseFFMPEGVideoResolution( lines, png_ok = True )
-    
-    ( fps, confident_fps ) = ParseFFMPEGFPS( lines, png_ok = True )
-    
-    if not confident_fps:
-        
-        fps = 24
-        
-    
-    duration = num_frames / fps
     
     duration_in_ms = int( duration * 1000 )
     
@@ -385,7 +436,6 @@ def GetMime( path ):
         # a webm has at least vp8/vp9 video and optionally vorbis audio
         
         has_webm_video = False
-        has_webm_audio = False
         
         if has_video:
             
@@ -416,7 +466,7 @@ def GetMime( path ):
                 
                 return HC.VIDEO_MKV
                 
-            else:
+            elif has_audio:
                 
                 return HC.AUDIO_MKV
                 
@@ -444,13 +494,39 @@ def GetMime( path ):
         
     elif 'mp4' in mime_text:
         
-        if has_audio and ( not has_video or 'mjpeg' in video_format ):
+        container = ParseFFMPEGMetadataContainer( lines )
+        
+        if container == 'M4A':
             
             return HC.AUDIO_M4A
             
-        else:
+        elif container == 'qt':
+            
+            return HC.VIDEO_MOV
+            
+        elif container in ( 'isom', 'mp42' ): # mp42 is version 2 of mp4 standard
+            
+            if has_video:
+                
+                return HC.VIDEO_MP4
+                
+            elif has_audio:
+                
+                return HC.AUDIO_MP4
+                
+            
+        
+        if has_audio and 'mjpeg' in video_format:
+            
+            return HC.AUDIO_M4A
+            
+        elif has_video:
             
             return HC.VIDEO_MP4
+            
+        elif has_audio:
+            
+            return HC.AUDIO_MP4
             
         
     elif mime_text == 'ogg':
@@ -555,7 +631,7 @@ def ParseFFMPEGDuration( lines ):
         
         if 'start:' in line:
             
-            m = re.search( '(start\\: )' + '-?[0-9]+\\.[0-9]*', line )
+            m = re.search( r'(start: )-?[0-9]+\.[0-9]*', line )
             
             start_offset = float( line[ m.start() + 7 : m.end() ] )
             
@@ -567,6 +643,8 @@ def ParseFFMPEGDuration( lines ):
         match = re.search("[0-9]+:[0-9][0-9]:[0-9][0-9].[0-9][0-9]", line)
         hms = [ float( float_string ) for float_string in line[match.start():match.end()].split(':') ]
         
+        duration = 0
+        
         if len( hms ) == 1:
             
             duration = hms[0]
@@ -575,7 +653,7 @@ def ParseFFMPEGDuration( lines ):
             
             duration = 60 * hms[0] + hms[1]
             
-        elif len( hms ) ==3:
+        elif len( hms ) == 3:
             
             duration = 3600 * hms[0] + 60 * hms[1] + hms[2]
             
@@ -660,7 +738,7 @@ def ParseFFMPEGFPSFromFirstSecond( lines_for_first_second ):
             
             for possible_fps in possible_results:
                 
-                if num_frames_in_first_second - 1 <= possible_fps and possible_fps <= num_frames_in_first_second + 1:
+                if num_frames_in_first_second - 1 <= possible_fps <= num_frames_in_first_second + 1:
                     
                     fps = possible_fps
                     
@@ -749,7 +827,7 @@ def ParseFFMPEGHasVideo( lines ):
     
     try:
         
-        video_line = ParseFFMPEGVideoLine( lines )
+        ParseFFMPEGVideoLine( lines )
         
     except HydrusExceptions.UnsupportedFileException:
         
@@ -757,6 +835,44 @@ def ParseFFMPEGHasVideo( lines ):
         
     
     return True
+    
+def ParseFFMPEGMetadataContainer( lines ) -> str:
+    
+    #  Metadata:
+    #    major_brand     : isom
+    
+    match_metadata_line_re = r'\s*Metadata:\s*'
+    
+    metadata_line_index = None
+    
+    for ( i, line ) in enumerate( lines ):
+        
+        if re.match( match_metadata_line_re, line ) is not None:
+            
+            metadata_line_index = i
+            
+            break
+            
+        
+    
+    if metadata_line_index is None:
+        
+        return ''
+        
+    
+    match_major_brand_re = r'\s*major_brand\s*:.+'
+    
+    for line in lines[ metadata_line_index : ]:
+        
+        if re.match( match_major_brand_re, line ) is not None:
+            
+            container = line.split( ':', 1 )[1].strip()
+            
+            return container
+            
+        
+    
+    return ''
     
 def ParseFFMPEGMimeText( lines ):
     
@@ -779,7 +895,7 @@ def ParseFFMPEGMimeText( lines ):
     
 def ParseFFMPEGNumFramesManually( lines ):
     
-    frame_lines = [ l for l in lines if l.startswith( 'frame=' ) ]
+    frame_lines = [ line for line in lines if line.startswith( 'frame=' ) ]
     
     if len( frame_lines ) == 0:
         
@@ -788,18 +904,18 @@ def ParseFFMPEGNumFramesManually( lines ):
     
     final_line = frame_lines[-1] # there will be many progress rows, counting up as the file renders. we hence want the final one
     
-    l = final_line
+    line = final_line
     
-    l = l.replace( 'frame=', '' )
+    line = line.replace( 'frame=', '' )
     
-    while l.startswith( ' ' ):
+    while line.startswith( ' ' ):
         
-        l = l[1:]
+        line = line[1:]
         
     
     try:
         
-        frames_string = l.split( ' ' )[0]
+        frames_string = line.split( ' ' )[0]
         
         num_frames = int( frames_string )
         
@@ -823,7 +939,7 @@ def ParseFFMPEGVideoFormat( lines ):
     
     try:
         
-        match = re.search( r'(?<=Video\:\s).+?(?=,)', line )
+        match = re.search( r'(?<=Video:\s).+?(?=,)', line )
         
         video_format = match.group()
         
@@ -865,7 +981,7 @@ def ParseFFMPEGVideoResolution( lines, png_ok = False ):
         line = ParseFFMPEGVideoLine( lines, png_ok = png_ok )
         
         # get the size, of the form 460x320 (w x h)
-        match = re.search(" [0-9]*x[0-9]*(,| )", line)
+        match = re.search(" [0-9]*x[0-9]*([, ])", line)
         
         resolution_string = line[match.start():match.end()-1]
         
@@ -874,7 +990,14 @@ def ParseFFMPEGVideoResolution( lines, png_ok = False ):
         width = int( width_string )
         height = int( height_string )
         
-        sar_match = re.search( "[\\[\\s]SAR [0-9]*:[0-9]* ", line )
+        # if a vid has an SAR, this 'sample' aspect ratio basically just stretches it
+        # when you convert the width using SAR, the resulting resolution should match the DAR, 'display' aspect ratio, which is what we actually want in final product
+        # MPC-HC seems to agree with this calculation, Firefox does not
+        # examples:
+        # '  Stream #0:0: Video: hevc (Main), yuv420p(tv, bt709), 1280x720 [SAR 69:80 DAR 23:15], 30 fps, 30 tbr, 1k tbn (default)'
+        # '  Stream #0:0: Video: vp9 (Profile 0), yuv420p(tv, progressive), 1120x1080, SAR 10:11 DAR 280:297, 30 fps, 30 tbr, 1k tbn (default)'
+        
+        sar_match = re.search( "[\\[\\s]SAR [0-9]*:[0-9]*[,\\s]", line )
         
         if sar_match is not None:
             
@@ -1078,7 +1201,7 @@ class VideoRendererFFMPEG( object ):
             '-vcodec', 'rawvideo',
             '-'
         ] )
-            
+        
         
         sbp_kwargs = HydrusData.GetSubprocessKWArgs()
         
