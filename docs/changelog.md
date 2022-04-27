@@ -3,6 +3,144 @@
 !!! note
     This is the new changelog, only the most recent builds. For all versions, see the [old changelog](old_changelog.html).
 
+## [Version 482](https://github.com/hydrusnetwork/hydrus/releases/tag/v482)
+
+### misc
+* fixed the stupid taglist scrolled-click position problem--sorry! I have a new specific weekly test for this, so it shouldn't happen again (issue #1120)
+* I made it so middle-clicking on a tag list does a select event again
+* the duplicate action options now let you say to archive both files regardless of their current archive status (issue #472)
+* the duplicate filter is now hooked into the media prefetch system. as soon as 'A' is displayed, the 'B' file will now be queued to be loaded, so with luck you will see very little flicker on the first transition from A->B.
+* I updated the duplicate filter's queue to store more information and added the next pair to the new prefetch queue, so when you action a pair, the A of the next pair should also load up quickly
+* boosted the default sizes of the thumbnail and image caches up to 32MB and 384MB (from 25/150)  and gave them nicer 'bytes quantity' widgets in the options panel
+* when popup windows show network jobs, they now have delayed hide. with luck, this will make subscriptions more stable in height, less flickering as jobs are loaded and unloaded
+* reduced the extremes of the new auto-throttled pending upload. it will now change speed slower, on less strict of a schedule, and won't go as fast or slow max
+* the text colour of hyperlinks across the program, most significantly in the top-right media hover window, can now be customised in QSS. I have set some ok defaults for all the QSS styles that come with the client, if you have a custom QSS, check out my default to see what you need to do. also hyperlinks are no longer underlined and you can't 'select' their text with the mouse any more (this was a weird rich-text flag)
+* the client api and local booru now have a checkbox in their manage services panel for 'normie-friendly welcome page', which switches the default ascii art for an alternate
+* fixed an issue with the hydrus server not explicitly saying it is utf-8 when rendering html
+* may have fixed some issues with autocomplete dropdowns getting hung up in the wrong position and not fixing themselves until parent resize event or similar
+
+### code cleanup
+* about 80KB of code moved out of the main ClientDB.py file:
+* refactored all combined files display mappings cache code from the code database to a new database module
+* refactored all combined files storage mappings cache code from the code database to a new database module
+* refactored all specific storage mappings cache code from the code database to a new database module
+* more misc refactoring of tag count estimate, tag search, and other code down to modules
+* hooked up specific display mappings cache to the repair system correctly--it had been left unregistered by accident
+* some misc duplicate action options code cleanup
+* migrated some ancient pause states--repository, subscriptions, import&export folders--to the newer options structure
+* migrated the image and thumbnail cache sizes to the newer options structure
+* removed some ancient db and dialog code from the retired dumper system
+
+## [Version 481](https://github.com/hydrusnetwork/hydrus/releases/tag/v481)
+
+### fixes and improvements after last week's hover and note work
+* fixed the text colour behind the top middle hover window
+* stopped clicks on the taglist and hover greyspace being duplicated up to the main canvas (this affected the archive/delete and duplicate filter shortcuts)
+* fixed the background colour of the hover windows when using non-default stylesheets
+* fixed the notes hover window--after having shown some notes--could then lurk in the top-left corner when it should have been hidden completely
+* cleaned up some old focus test logic that weas used when hovers were separate windows
+* rewrote how each note panel in the new hover is stored. a bunch of sizing and event handling code is less hacked
+* significantly improved the accuracy of the 'how high should the note window be?' calculation, so notes shouldn't spill over so much or have a bunch of greyspace below
+* right- or middle-clicking a note now hides its text. repeat on its name to restore. this should persist through an edit, although it won't be reflected in the background atm. let's see how it works as a simple way to quickly browse a whole stack of big notes
+* a new 'notes' option panel lets you choose if you want the text caret to start at the beginning or end of the document when editing
+* you can now double-click a note tab in 'edit notes' to rename the note. some styles may let you double-click in note greyspace to create a new note, but not all will handle this (yet)
+* as an experiment, all the buttons on the media viewer hover windows now do not take focus when you click them. this should let you, for instance, click a duplicate filter processing button and then use the arrow keys and space to continue to navigate. previously, clicking a button would focus it, and navigation keys would be intercepted to navigate the 'form' of the buttons on the hover window. you can still focus buttons with tab. if this affects you, let me know how this goes!
+
+### misc
+* added checkboxes to _options->gui pages_ to control whether ctrl- and shift- selects will highlight media in the preview viewer. you can choose to only do it for files with no duration if you prefer
+* the 'advanced mode' tag autocomplete dropdown now has 'OR' and 'OR*' buttons. the former opens a new empty OR search predicate in the edit dialog, the latter opens the advanced text parser as before
+* the edit OR predicate panel now starts wider and with the text box having focus
+* hydrus is now more careful about deciding whether to make a png or a jpeg thumbnail. now, only thumbnails that have an alpha channel with interesting data in it are saved to png. everything else is jpeg
+* when uploading to a repository, the client will now slow down or speed up depending on how fast things are going. previously it would work on 100 mappings at a time with a forced 0.1s wait, now it can vary between 1-1,000 weight
+* just to be clean, the current files line on the file history chart now initialises at 0 on your first file import time
+* fixed a bug in 'if file is missing, remove record' file maintenance job. if none of the files yet scanned had any urls, it could error out since the 'missing and invalid files' directory was yet to be created
+* linux users who seem to have mpv support yet are set to use the native viewer will get a one-time popup note on update this week just to let them know that mpv is stable on linux now and how to give it a go
+* the macOS App now spits out any mpv import errors when you hit _help->about_, albeit with some different text around it
+* I maybe fixed the 'hold shift to not follow a dragged page' tech for some users for whom it did not work, but maybe not
+* thanks to a user, the new website now has a darkmode-compatible hydrus favicon
+* all file import options now expose their new 'destination locations' object in a new button in the UI. you can only set one destination for now ('my files', obviously), but when we have multiple local file services, you will be able to set other/multiple destinations here. if you set 'nothing', the dialog will moan at you and stop you from ok-ing it.
+* I have updated all import queues and other importing objects in the program to pause their file work with appropriate error messages if their file import options ever has a 'nothing' destination (this could potentially happen if future after a service deletion). there are multiple layers of checks here, including at the final database level
+* misc code cleanup
+
+### client api
+* added 'create_new_file_ids' parameter to the 'file_metadata' call. this governs whether the client should make a new database entry and file_id when you ask about hashes it has never seen before. it defaults to **false**, which is a change on previous behaviour
+* added help talking about this
+* added a unit test to test this
+* added archive timestamp and hash hex sort enum definitions to the 'search_files' client api help
+* client api version is now 31
+
+## [Version 480](https://github.com/hydrusnetwork/hydrus/releases/tag/v480)
+
+### file notes and media viewer hover windows
+* file notes are now shown on the media viewer! this is a first version, pretty ugly, and may have font layout bugs for some systems, but it works. they hang just below the top-right hover, both in the canvas background and with their own hover if you mouseover. clicking on any note will open 'edit notes' on that note
+* the duplicate filter's always-on hover _should_ slide out of the way when there are many notes
+* furthermore, I rewrote the backend of hover windows. they are now embedded into the media viewer rather than being separate frameless toolbar windows. this should relieve several problems different users had--for instance, if you click a hover, you now no longer lose focus on the main media viewer window. I hacked some of this to get it to work, but along the way I undid three other hacks, so overall it should be better. please let me know how this works for you!
+* fixed a long time hover window positioning bug where the top-right window would sometimes pop in for a frame the first time you moved the mouse to the top middle before repositioning and hiding itself again
+* removed the 'notes' icon from the top right hover window
+* refactored a bunch of canvas background code
+
+### client api
+* search_files/get_thumbnail now returns image/jpeg or image/png Content-Type. it _should_ be super fast, but let me know if it lags after 3k thumbs or something
+* you can now ask for CBOR or JSON specifically by using the 'Accept' request header, regardless of your own request Content-Type (issue #1110)
+* if you send or ask for CBOR but it is not available for that client, you now get a new 'Not Acceptable' 406 response (previously it would 500 or 200 but in JSON)
+* updated the help regarding the above and wrote some unit tests to check CBOR/JSON requests and responses
+* client api version is now 30
+
+### misc
+* added a link to 'Hyshare', at https://github.com/floogulinc/hyshare, to the Client API help. it is a neat way to share galleries with friends, just like the the old 'local booru'
+* building on last week's shift-select improvement, I tweaked it and shift-select and ctrl-select are back to not setting the preview focus. you can ctrl-click a bunch of vids in quick silence again
+* the menu on the 'file log' button is now attached to the downloader page lists and the menu when you right-click on the file log panel. you can now access these actions without having to highlight a big query
+* the same is also true of the search/check log!
+* when you select a new downloader in the gallery download page, the keyboard focus now moves immediately to the query text input box
+* tweaked the zoom locking code in the duplicate filter again. the 'don't lock that way if there is spillover' test, which is meant to stop garbage site banners from being hidden just offscreen, is much more strict. it now only cares about 10% or so spillover, assuming that with a large 'B' the spillover will be obvious. this should improve some odd zoom locking situations where the first pair change was ok and the rest were weird
+* if you exit the client before the first session loads (either it is really huge or a problem breaks/delays your boot) the client will not save any 'last/exit session' (previously, it was saving empty here, requiring inconvenient load from a backup)
+* if you have a really really huge session, the client is now more careful about not booting delayed background tasks like subscriptions until the session is in place
+* on 'migrate database', the thumbnail size estimate now has a min-max range and a tooltip to clarify that it is an estimate
+* fixed a bug in the new 'sort by file hash' pre-sort when applying system:limit
+
+## [Version 479](https://github.com/hydrusnetwork/hydrus/releases/tag/v479)
+
+### misc
+* when shift-selecting some thumbnails, you can now reverse the direction of the select and what you just selected will be deselected, basically a full undo (issue #1105)
+* when ctrl-selecting thumbnails, if you add to the selection, the file you click is now focused and always previewed (previously this only happened if there was no focused file already). this is related to the shift-select logic above, but it may be annoying when making a big ctrl-selection of videos etc.. so let me know and I can make this more clever if needed
+* added file sort 'file->hash', which sorts pseudorandomly but repeatably. it sounds not super clever, but it will be useful for certain comparison operations across clients
+* when you hit 'copy->hash' on a file right-click, it now shows the sha256 hash for quick review
+* in the duplicate filter, the zoom locking tech now works better™ when one of the pair is portrait and the other landscape. it now tries to select either width or height to lock both when going AB and BA. it also chooses the 'better' of width or height by choosing the zoom that'll change the size less radically. previously, it could do width on AB and height on BA, which lead to a variety of odd situations. there are probably still some issues here, most likely when one of the files almost exactly fills the whole canvas, so let me know how you get on
+* webps with transparency should now load correct! previously they were going crazy in the transparent area. all webps are scheduled a thumbnail regen this week
+* when import folders run, the count on their progress bar now ignores previous failed and ignored entries. it should always start 0, like 0/100, rather than 20/120 etc...
+* when import folders run, any imports where the status type is set to 'leave the file alone' is now still scanned at the end of a job. if the path does not exist any more, it is removed from the import list
+* fixed a typo bug in the recent delete code cleanup that meant 'delete files after export' after a manual export was only working on the last file in the selection. sorry for the trouble!
+* the delete files dialog now starts with keyboard focus on the action radiobox (it was defaulting to ok button since I added the recent panel disable tech)
+* if a network job has a connection error or serverside bandwidth block and then waits before retrying, it now checks if all network jobs have just been paused and will not reattempt the connection if so (issue #1095)
+* fixed a bug in thumbnail fallback rendering
+* fixed another problem with cloudscraper's new method names. it should work for users still on an old version
+* wrote a little 'extract version' sql and bat file for the db folder that simply pull the version from the client.db file in the same directory. I removed the extract options/subscriptions sql scripts since they are super old and out of date, but this general system may return in future
+
+### file history chart
+* added 'archive' line to the file history chart. this isn't exactly (current_count - inbox_count), but it pretty much is
+* added a 'show deleted' checkbox to the file history chart. it will recalculate the y axis range on click, so if you have loads of deleted files, you can now hide them to see current better
+* improved the way data is aggregated in the file history chart. diagonal lines should be reduced during any periods of client import-inactivity, and spikes should show better
+* also bumped the number of steps up to 8,000, so it should look nice maximised on a 4k
+* the file history chart now remembers its last size and position--it has an entry under options->gui
+
+### client api
+* thanks to a user, the Client API now accepts any file_id, file_ids, hash, or hashes as arguments in any place where you need to specify a file or files
+* like 'return_hashes', the 'search_files' command in the Client API now takes an optional 'return_file_ids' parameter, default true, to turn off the file ids if you only want hashes
+* added 'only_return_basic_information' parameter, default false, to 'get_metadata' call, which is fast for first-time requests (it is slim but not well cached) and just delivers the basics like resolution and file size
+* added unit tests and updated the help to reflect the above
+* client api version is now 29
+
+### help
+* split up the 'more files' help section into 'powerful searching' and 'exporting files', both still under the 'next steps' section
+* moved the semi-advanced 'OR' section from 'tags' to 'searching'
+* brushed up misc help
+* a couple of users added some misc help updates too, thank you!
+
+### misc boring cleanup
+* cleaned up an old wx label patch
+* cleaned up an old wx system colour patch
+* cleaned up some misc initialisation code
+
 ## [Version 478](https://github.com/hydrusnetwork/hydrus/releases/tag/v478)
 
 ### misc
@@ -208,102 +346,3 @@
 * fixed up some upcoming database maintenance code in my new modules
 * updated and cleaned the code in the old wx-converted checkboxlist and replaced some awkward old access routines
 * cleared out some old HTA archive code
-
-## [Version 471](https://github.com/hydrusnetwork/hydrus/releases/tag/v471)
-
-### times
-* if you have file viewing stats turned on (by default it is), the client will now track the 'last viewed time' of your files, both in preview and media viewers. a record is only made assuming they pass the viewtime checks under _options->file viewing statistics_ (so if you scroll through really quick but have it set to only record after five seconds of viewing, it will not save that as the last viewed time). this last viewed time is shown on the right-click menu with the normal file viewing statistics
-* sorting by 'import time' and 'modified time' are moved to a new 'time' subgroup in the sort button menu
-* also added to 'time' is 'last viewed time'. note that this has not been tracked until now, so you will have to look at a bunch of things for a few seconds each to get some data to sort with
-* to go with 'x time' pattern, 'time imported' is renamed to 'import time' across the program. both should work for system predicate parsing
-* system:'import time' and 'modified time' are now bundled into a new 'system:time' stub in the system predicates list. the window launched from here is an experimental new paged panel. I am not sure I really like it, but let's see how it works IRL
-* 'system:last view time' is added to search the new field! give it a go once you have some data
-* also note that the search and sort of last viewed time works on the 'media viewer' number. those users who use preview or combined numbers for stuff, let me know if and how you would like that to work here--sort/search for both media and preview, try to combine based on the logic in the options, or something else?
-
-### loading serialised pngs
-* the client can now load serialised downloader-pngs if they are a perfect RGB conversion of an original greyscale export.
-* the pngs don't technically have to be pngs anymore! if you drag and drop an image from firefox, the temporary bitmap exported and attached to the DnD _should_ work!
-* the lain easy downloader import now has a clipboard paste button. it can take regular json text, and now, bitmap data!
-* the 'import->from clipboard' button action in many multiple column lists across the program (e.g. manage parsers) (but not every list, a couple are working on older code) also now accepts bitmap data on the clipboard
-* the various load errors here are also improved
-
-### custom widget colors
-* (advanced users only for now)
-* after banging my head against it, I finally figured out an ok way to send colors from a QSS style file to python code. this means I can convert my custom widgets to inherit colours from the current QSS. I expect to migrate pretty much everything currently fixed over to this, except tag colours and maybe some thumbnail border stuff, and retire the old darkmode
-* if you are a QSS lad, please check out the new entries at the bottom of default_hydrus.qss and play around with them in your own QSSes. please do not send me any updates to be folded in to the install yet as I still have a bunch of other colours to add. this week is just a test--please let me know how it works for you
-
-### misc
-* mouse release events no longer trigger a command in the shortcuts system if the release happens more than about 20 pixels from the original mouse down. this is tricky, so if you are into clever shortcuts, let me know how it works for you
-* the file maintenance manager (which has been getting a lot of work recently with icc profiles, pixel dupes, some thumb regen, and new audio channel checks), now saves its work and publishes updates faster to the UI, at least once every ten seconds
-* the sort entries in the page sort control are now always sorted according to their full (type, name) string, and the mouse-wheel-to-navigate is now fixed to always mirror this
-* improved some 'delete file reason' handling. currently, a file deletion reason should only be applied when a file is entering trash. there was a bug that force-physical-deleting files from trash would overwrite their original deletion reason. this is now fixed. the advanced delete files dialog now disables the whole reason panel better when needed, never sends a file reason down to the database when there should be no reason, disables the panel if all the files are in the trash, and at the database level when file deletion reasons are being set, all files are filtered for status beforehand to ensure none are accidentally set by other means. I am about to make trash more intelligent as part of multiple local file services, so I expect to revisit this soon
-* the new ICC Profile conversion no longer occurs on I or F mode files. there are weird 32/64 bit monochrome files, and mode/ICC conversion goes whack with current PIL code
-* replaced the critical hamming test in the duplicate files system with a different bit-counting strategy that works about 9% faster. hamming test is used in all duplicate file searching, so this should help out a tiny bit in a lot of places
-
-### boring cleanup
-* cleaned up how media viewer canvas type is stored and tested in many places
-* all across the program, file viewing statistics are now tracked by type rather than a hardcoded double of preview & media viewer. it will take a moment to update the database to reflect this this week
-* cleaned up a ton of file viewing stats code
-* cleared out the last twenty or so uses of the old 'execute many select' database access routine in favour of the new lower-overhead and more query-optimisable temporary integer tables method
-
-## [Version 470](https://github.com/hydrusnetwork/hydrus/releases/tag/v470b)
-
-### multiple file services
-* I finished the conversion of all UI search to the new multiple location object. everything from back- to frontend now supports cleverer search. since searching deleted files is simple to add, users in advanced mode will now see 'deleted from...' in a new list in the tag autocomplete dropdown file domain button
-* the next step is writing a widget that allows multiple selection, and then all this should work right out of the box, and we'll be an important step closer to allowing multiple local file services
-
-### misc
-* the video parsing routine is better at detecting when a present audio track is actually silent (and hence when it should mark a video as 'no audio'). all video with audio will be requeued for a metadata reparse in the files maintenance system on update
-* fixed an error from last week when trying to create a new page from the tags (e.g. middle-clicking them) in the active search list
-* added 'audio mkv' format to the client, to represent mkvs without a video track. I think most of the time this is going to be audio track webms from youtube-dl and similar
-* added 'file relationships: set files as potential duplicates' command to the 'media actions' shortcut set
-* I expanded the 'backing up' section in 'installing and updating' help
-* I wrote an 'anti-virus' section for 'installing and updating' help, since I kept writing the same basic spiel about false positives. please feel free to point people there in future to relieve their concerns
-* improved some shutdown tests, the client and server should exit faster in some cases (e.g. when a hydrus repository network job is hanging on reconnection attempts, holding up the 'synchronise_repository' daemon shutdown)
-* the 'file was xxx at (y timestamp), which was (z time units) before this check' line in file import notes now always puts 'z time units' as that, ignoring the 'always show ISO time' setting, which was just substituting it with 'y timestamp' again. let me know if you spot other bad grammar with this setting on, I'll fix it!
-* fingers crossed, images in the LAB colourspace _should_ now normalise to sRGB with the correct whitepoint. thanks to the user who provided example test tiff images here. this now uses the new PIL-based colourspace conversion I used to make ICC profiles work, just on LAB->sRGB. as far as I understand, OpenCV uses a fixed whitepoint of D65, resulting in yellow/warm conversions for some formats, but PIL may be able to figure out if D50 is needed??? if you have some crazy LUV or YPbPr or YIQ image that shows up wrong, please send it in and I'll see what I can do!
-
-### boring rewrites and cleanup while doing file service work
-* many more UI objects now store and do file service logic using a more complicated 'location context', which can store a mix of multiple services and 'deleted from service' data. all the search code that works on this can now propagate to display:
-* the management objects behind every page now store a multiple location object, not a single file service id
-* all media panels (the thumbnail grid on a page) are now instantiated by a multiple location object, and when they serve a highlighted downloader, they now inherit that from the file import options, which in future will dictate import destinations
-* all canvases are now the same, inheriting their new location context from their parents
-* all tag lists are the same. mostly they don't care much about file domain, but when you middle-click to create new pages from the autocomplete dropdown list or active search list, it can matter, so they now propagate it along
-* the underlying medialist objects are now the same, and various delete logic (e.g. 'should we remove this thumb we just deleted?') is updated to work on complex domains
-* some duplicate lookup code now works on location context
-* renamed 'location search context' object to 'location context' since it is used all over now and put it in its own file. also wrote it some neater initialisation and meta object code
-* mr bones now gives duplicate data based on the union of all non-trash local services sans update files (another case of now supporting n services but n is fixed for the moment at 1, 'my files')
-* a bunch of places across the program that used to default to 'my files' or 'all local files' (which is everything on disk, including trash and repository update files) now default to this new union of all non-trash local media services
-* when doing page-to-page file drag and drops, the location context is now preserved (previously, the new page would always be 'my files')
-* whole heap of other cleanup in these systems
-* when a thumbnail cannot be provided (for deleted files or many 'all known files' situations), the thumbnail cache now provides the hydrus icon stand-in instantly, no delayed waterfall
-* fixed an unusual situation where the file search could not provide a file in a tagless search when that file had no detailed file info row in the database. this seems to effect a legacy borked row or two in the new deleted file domain searches
-* removed some ancient dumper status code from thumbnail objects
-
-## [Version 469](https://github.com/hydrusnetwork/hydrus/releases/tag/v469)
-
-### misc
-* the 'search log' button and the window panel now let you delete log entries. you can delete by completion status from the menu or specifically by row in the panel (just like the file log)
-* fixed the new 'file is writable' checks for Linux/macOS, which were testing permissions overbroadly and messing with users with user-only permissions set. the code now hands off specific user/group negotiation to the OS. thanks to the maintainer of the AUR package for helping me out here (issue #1042)
-* the various places where a file's permission bits are set are also cleaned up--hydrus now makes a distinction between double-checking a file is set user-writable before deleting/overwriting vs making a file's permission bits (which were potentially messed up in the past) 'nice' for human use after export. in the latter case, which still defaults to 644 on linux/macOS, the user's umask is now applied, so it should be 600 if you prefer that
-* fixed a bug where the media viewer could have trouble initialising video when the player window instantiation was delayed (e.g. with embed button)
-
-### client api
-* added 'return_hashes' boolean parameter to GET /get_files/search_files, which makes the command return hashes instead of file ids. this is documented in the help and has a new unit test
-* client api version is now 25
-
-### multiple local file services work
-* I rewrote a lot of code this week, but it proved more complex than I expected. I also discovered I'll have to switch the pages and canvases over too before I can nicely switch the top level UI over to allow multiple search. rather than release a borked feature, I decided not to rush the final phase, so this remains boring for now! the good news is that it works well when I hack it in, so I just need to keep pushing
-* rewrote the caller side of tag autocomplete lookup to work on the new multiple file search domain
-* rewrote the main database level tag lookup code to work on the new multiple file search domain
-* certain types of complicated tag autocomplete lookup, particularly on all known tags and any client with lots of siblings, will be faster now
-* an unusual and complicated too-expansive sibling lookup on autocomplete lookups on 'all known tags' is now fixed
-
-### boring cleanup and refactoring
-* predicate counts are now managed by a new object. predicates also support 0 minimum count for x-y count ranges, which is now possible when fetching count results from non-cross-referenced file domains (for now this means searching deleted files)
-* cleaned up a ton of predicate instantiation code
-* updated autocomplete, predicate, and pred count unit tests to handle the new objects and bug fixes
-* wrote new classess to cover convenient multiple file search domain at the database level and updated a bunch of tag autocomplete search code to use it
-* misc cleanup and refactoring for file domain search code
-* purged more single file service inspection code from file search systems
-* refactored most duplicate files storage code (about 70KB) to a new client db module

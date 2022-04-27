@@ -287,6 +287,15 @@ class Controller( HydrusController.HydrusController ):
         self._doing_fast_exit = True
         
     
+    def _ReportShutdownManagersStatus( self ):
+        
+        managers = [ self.subscriptions_manager, self.tag_display_maintenance_manager ]
+        
+        names = sorted( ( manager.GetName() for manager in managers if not manager.IsShutdown() ) )
+        
+        self.frame_splash_status.SetSubtext( ', '.join( names ) )
+        
+    
     def _ShowJustWokeToUser( self ):
         
         def do_it( job_key: ClientThreading.JobKey ):
@@ -349,6 +358,8 @@ class Controller( HydrusController.HydrusController ):
         started = HydrusData.GetNow()
         
         while False in ( manager.IsShutdown() for manager in managers ):
+            
+            self._ReportShutdownManagersStatus()
             
             time.sleep( 0.1 )
             
@@ -752,7 +763,7 @@ class Controller( HydrusController.HydrusController ):
         
         self.MaintainDB( maintenance_mode = HC.MAINTENANCE_SHUTDOWN, stop_time = stop_time )
         
-        if not self.options[ 'pause_repo_sync' ]:
+        if not self.new_options.GetBoolean( 'pause_repo_sync' ):
             
             services = self.services_manager.GetServices( HC.REPOSITORIES, randomised = True )
             
@@ -1472,7 +1483,7 @@ class Controller( HydrusController.HydrusController ):
             
         
     
-    def ReportFirstSessionLoaded( self ):
+    def ReportFirstSessionInitialised( self ):
         
         job = self.CallRepeating( 5.0, 3600.0, self.SynchroniseAccounts )
         job.ShouldDelayOnWakeup( True )
@@ -2015,7 +2026,7 @@ class Controller( HydrusController.HydrusController ):
             return
             
         
-        if not self.options[ 'pause_repo_sync' ]:
+        if not self.new_options.GetBoolean( 'pause_repo_sync' ):
             
             services = self.services_manager.GetServices( HC.REPOSITORIES, randomised = True )
             
@@ -2026,7 +2037,7 @@ class Controller( HydrusController.HydrusController ):
                     return
                     
                 
-                if self.options[ 'pause_repo_sync' ]:
+                if self.new_options.GetBoolean( 'pause_repo_sync' ):
                     
                     return
                     

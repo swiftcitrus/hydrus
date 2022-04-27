@@ -1027,7 +1027,8 @@ class MediaContainer( QW.QWidget ):
         
         self._controls_bar = QW.QWidget( self )
         
-        QP.SetBackgroundColour( self._controls_bar, QP.GetSystemColour( QG.QPalette.Shadow ) )
+        # We need this to force-fill some blanks at times
+        self.setAutoFillBackground( True )
         
         self._animation_bar = AnimationBar( self._controls_bar )
         self._volume_control = ClientGUIMediaControls.VolumeControl( self._controls_bar, self._canvas_type, direction = 'up' )
@@ -1595,11 +1596,11 @@ class EmbedButton( QW.QWidget ):
             painter.setTransform( QG.QTransform().scale( 1.0, 1.0 ) )
             
         
-        painter.setBrush( QG.QBrush( QP.GetSystemColour( QG.QPalette.Button ) ) )
+        painter.setBrush( QG.QBrush( QG.QPalette().color( QG.QPalette.Button ) ) )
         
         painter.drawEllipse( QC.QPointF( center_x, center_y ), radius, radius )
         
-        painter.setBrush( QG.QBrush( QP.GetSystemColour( QG.QPalette.Window ) ) )
+        painter.setBrush( QG.QBrush( QG.QPalette().color( QG.QPalette.Window ) ) )
         
         # play symbol is a an equilateral triangle
         
@@ -1623,7 +1624,7 @@ class EmbedButton( QW.QWidget ):
         
         #
         
-        painter.setPen( QG.QPen( QP.GetSystemColour( QG.QPalette.Shadow ) ) )
+        painter.setPen( QG.QPen( QG.QPalette().color( QG.QPalette.Shadow ) ) )
 
         painter.setBrush( QC.Qt.NoBrush )
         

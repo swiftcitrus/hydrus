@@ -33,6 +33,144 @@
 		<div class="content">
 			<h3 id="changelog"><a href="#changelog">changelog</a></h3>
 			<ul>
+				<li><h3 id="version_482"><a href="#version_482">version 482</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>fixed the stupid taglist scrolled-click position problem--sorry! I have a new specific weekly test for this, so it shouldn't happen again (issue #1120)</li>
+					<li>I made it so middle-clicking on a tag list does a select event again</li>
+					<li>the duplicate action options now let you say to archive both files regardless of their current archive status (issue #472)</li>
+					<li>the duplicate filter is now hooked into the media prefetch system. as soon as 'A' is displayed, the 'B' file will now be queued to be loaded, so with luck you will see very little flicker on the first transition from A->B.</li>
+					<li>I updated the duplicate filter's queue to store more information and added the next pair to the new prefetch queue, so when you action a pair, the A of the next pair should also load up quickly</li>
+					<li>boosted the default sizes of the thumbnail and image caches up to 32MB and 384MB (from 25/150)  and gave them nicer 'bytes quantity' widgets in the options panel</li>
+					<li>when popup windows show network jobs, they now have delayed hide. with luck, this will make subscriptions more stable in height, less flickering as jobs are loaded and unloaded</li>
+					<li>reduced the extremes of the new auto-throttled pending upload. it will now change speed slower, on less strict of a schedule, and won't go as fast or slow max</li>
+					<li>the text colour of hyperlinks across the program, most significantly in the top-right media hover window, can now be customised in QSS. I have set some ok defaults for all the QSS styles that come with the client, if you have a custom QSS, check out my default to see what you need to do. also hyperlinks are no longer underlined and you can't 'select' their text with the mouse any more (this was a weird rich-text flag)</li>
+					<li>the client api and local booru now have a checkbox in their manage services panel for 'normie-friendly welcome page', which switches the default ascii art for an alternate</li>
+					<li>fixed an issue with the hydrus server not explicitly saying it is utf-8 when rendering html</li>
+					<li>may have fixed some issues with autocomplete dropdowns getting hung up in the wrong position and not fixing themselves until parent resize event or similar</li>
+					<li>.</li>
+					<li>code cleanup:</li>
+					<li>about 80KB of code moved out of the main ClientDB.py file:</li>
+					<li>refactored all combined files display mappings cache code from the code database to a new database module</li>
+					<li>refactored all combined files storage mappings cache code from the code database to a new database module</li>
+					<li>refactored all specific storage mappings cache code from the code database to a new database module</li>
+					<li>more misc refactoring of tag count estimate, tag search, and other code down to modules</li>
+					<li>hooked up specific display mappings cache to the repair system correctly--it had been left unregistered by accident</li>
+					<li>some misc duplicate action options code cleanup</li>
+					<li>migrated some ancient pause states--repository, subscriptions, import&export folders--to the newer options structure</li>
+					<li>migrated the image and thumbnail cache sizes to the newer options structure</li>
+					<li>removed some ancient db and dialog code from the retired dumper system</li>
+				</ul>
+				<li><h3 id="version_481"><a href="#version_481">version 481</a></h3></li>
+				<ul>
+					<li>fixes and improvements after last week's hover and note work:</li>
+					<li>fixed the text colour behind the top middle hover window</li>
+					<li>stopped clicks on the taglist and hover greyspace being duplicated up to the main canvas (this affected the archive/delete and duplicate filter shortcuts)</li>
+					<li>fixed the background colour of the hover windows when using non-default stylesheets</li>
+					<li>fixed the notes hover window--after having shown some notes--could then lurk in the top-left corner when it should have been hidden completely</li>
+					<li>cleaned up some old focus test logic that weas used when hovers were separate windows</li>
+					<li>rewrote how each note panel in the new hover is stored. a bunch of sizing and event handling code is less hacked</li>
+					<li>significantly improved the accuracy of the 'how high should the note window be?' calculation, so notes shouldn't spill over so much or have a bunch of greyspace below</li>
+					<li>right- or middle-clicking a note now hides its text. repeat on its name to restore. this should persist through an edit, although it won't be reflected in the background atm. let's see how it works as a simple way to quickly browse a whole stack of big notes</li>
+					<li>a new 'notes' option panel lets you choose if you want the text caret to start at the beginning or end of the document when editing</li>
+					<li>you can now double-click a note tab in 'edit notes' to rename the note. some styles may let you double-click in note greyspace to create a new note, but not all will handle this (yet)</li>
+					<li>as an experiment, all the buttons on the media viewer hover windows now do not take focus when you click them. this should let you, for instance, click a duplicate filter processing button and then use the arrow keys and space to continue to navigate. previously, clicking a button would focus it, and navigation keys would be intercepted to navigate the 'form' of the buttons on the hover window. you can still focus buttons with tab. if this affects you, let me know how this goes!</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>added checkboxes to _options->gui pages_ to control whether ctrl- and shift- selects will highlight media in the preview viewer. you can choose to only do it for files with no duration if you prefer</li>
+					<li>the 'advanced mode' tag autocomplete dropdown now has 'OR' and 'OR*' buttons. the former opens a new empty OR search predicate in the edit dialog, the latter opens the advanced text parser as before</li>
+					<li>the edit OR predicate panel now starts wider and with the text box having focus</li>
+					<li>hydrus is now more careful about deciding whether to make a png or a jpeg thumbnail. now, only thumbnails that have an alpha channel with interesting data in it are saved to png. everything else is jpeg</li>
+					<li>when uploading to a repository, the client will now slow down or speed up depending on how fast things are going. previously it would work on 100 mappings at a time with a forced 0.1s wait, now it can vary between 1-1,000 weight</li>
+					<li>just to be clean, the current files line on the file history chart now initialises at 0 on your first file import time</li>
+					<li>fixed a bug in 'if file is missing, remove record' file maintenance job. if none of the files yet scanned had any urls, it could error out since the 'missing and invalid files' directory was yet to be created</li>
+					<li>linux users who seem to have mpv support yet are set to use the native viewer will get a one-time popup note on update this week just to let them know that mpv is stable on linux now and how to give it a go</li>
+					<li>the macOS App now spits out any mpv import errors when you hit _help->about_, albeit with some different text around it</li>
+					<li>I maybe fixed the 'hold shift to not follow a dragged page' tech for some users for whom it did not work, but maybe not</li>
+					<li>thanks to a user, the new website now has a darkmode-compatible hydrus favicon</li>
+					<li>all file import options now expose their new 'destination locations' object in a new button in the UI. you can only set one destination for now ('my files', obviously), but when we have multiple local file services, you will be able to set other/multiple destinations here. if you set 'nothing', the dialog will moan at you and stop you from ok-ing it.</li>
+					<li>I have updated all import queues and other importing objects in the program to pause their file work with appropriate error messages if their file import options ever has a 'nothing' destination (this could potentially happen if future after a service deletion). there are multiple layers of checks here, including at the final database level</li>
+					<li>misc code cleanup</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>added 'create_new_file_ids' parameter to the 'file_metadata' call. this governs whether the client should make a new database entry and file_id when you ask about hashes it has never seen before. it defaults to **false**, which is a change on previous behaviour</li>
+					<li>added help talking about this</li>
+					<li>added a unit test to test this</li>
+					<li>added archive timestamp and hash hex sort enum definitions to the 'search_files' client api help</li>
+					<li>client api version is now 31</li>
+				</ul>
+				<li><h3 id="version_480"><a href="#version_480">version 480</a></h3></li>
+				<ul>
+					<li>file notes and media viewer hover windows:</li>
+					<li>file notes are now shown on the media viewer! this is a first version, pretty ugly, and may have font layout bugs for some systems, but it works. they hang just below the top-right hover, both in the canvas background and with their own hover if you mouseover. clicking on any note will open 'edit notes' on that note</li>
+					<li>the duplicate filter's always-on hover _should_ slide out of the way when there are many notes</li>
+					<li>furthermore, I rewrote the backend of hover windows. they are now embedded into the media viewer rather than being separate frameless toolbar windows. this should relieve several problems different users had--for instance, if you click a hover, you now no longer lose focus on the main media viewer window. I hacked some of this to get it to work, but along the way I undid three other hacks, so overall it should be better. please let me know how this works for you!</li>
+					<li>fixed a long time hover window positioning bug where the top-right window would sometimes pop in for a frame the first time you moved the mouse to the top middle before repositioning and hiding itself again</li>
+					<li>removed the 'notes' icon from the top right hover window</li>
+					<li>refactored a bunch of canvas background code</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>search_files/get_thumbnail now returns image/jpeg or image/png Content-Type. it _should_ be super fast, but let me know if it lags after 3k thumbs or something</li>
+					<li>you can now ask for CBOR or JSON specifically by using the 'Accept' request header, regardless of your own request Content-Type (issue #1110)</li>
+					<li>if you send or ask for CBOR but it is not available for that client, you now get a new 'Not Acceptable' 406 response (previously it would 500 or 200 but in JSON)</li>
+					<li>updated the help regarding the above and wrote some unit tests to check CBOR/JSON requests and responses</li>
+					<li>client api version is now 30</li>
+					<li>.</li>
+					<li>misc:</li>
+					<li>added a link to 'Hyshare', at https://github.com/floogulinc/hyshare, to the Client API help. it is a neat way to share galleries with friends, just like the the old 'local booru'</li>
+					<li>building on last week's shift-select improvement, I tweaked it and shift-select and ctrl-select are back to not setting the preview focus. you can ctrl-click a bunch of vids in quick silence again</li>
+					<li>the menu on the 'file log' button is now attached to the downloader page lists and the menu when you right-click on the file log panel. you can now access these actions without having to highlight a big query</li>
+					<li>the same is also true of the search/check log!</li>
+					<li>when you select a new downloader in the gallery download page, the keyboard focus now moves immediately to the query text input box</li>
+					<li>tweaked the zoom locking code in the duplicate filter again. the 'don't lock that way if there is spillover' test, which is meant to stop garbage site banners from being hidden just offscreen, is much more strict. it now only cares about 10% or so spillover, assuming that with a large 'B' the spillover will be obvious. this should improve some odd zoom locking situations where the first pair change was ok and the rest were weird</li>
+					<li>if you exit the client before the first session loads (either it is really huge or a problem breaks/delays your boot) the client will not save any 'last/exit session' (previously, it was saving empty here, requiring inconvenient load from a backup)</li>
+					<li>if you have a really really huge session, the client is now more careful about not booting delayed background tasks like subscriptions until the session is in place</li>
+					<li>on 'migrate database', the thumbnail size estimate now has a min-max range and a tooltip to clarify that it is an estimate</li>
+					<li>fixed a bug in the new 'sort by file hash' pre-sort when applying system:limit</li>
+				</ul>
+				<li><h3 id="version_479"><a href="#version_479">version 479</a></h3></li>
+				<ul>
+					<li>misc:</li>
+					<li>when shift-selecting some thumbnails, you can now reverse the direction of the select and what you just selected will be deselected, basically a full undo (issue #1105)</li>
+					<li>when ctrl-selecting thumbnails, if you add to the selection, the file you click is now focused and always previewed (previously this only happened if there was no focused file already). this is related to the shift-select logic above, but it may be annoying when making a big ctrl-selection of videos etc.. so let me know and I can make this more clever if needed</li>
+					<li>added file sort 'file->hash', which sorts pseudorandomly but repeatably. it sounds not super clever, but it will be useful for certain comparison operations across clients</li>
+					<li>when you hit 'copy->hash' on a file right-click, it now shows the sha256 hash for quick review</li>
+					<li>in the duplicate filter, the zoom locking tech now works better™ when one of the pair is portrait and the other landscape. it now tries to select either width or height to lock both when going AB and BA. it also chooses the 'better' of width or height by choosing the zoom that'll change the size less radically. previously, it could do width on AB and height on BA, which lead to a variety of odd situations. there are probably still some issues here, most likely when one of the files almost exactly fills the whole canvas, so let me know how you get on</li>
+					<li>webps with transparency should now load correct! previously they were going crazy in the transparent area. all webps are scheduled a thumbnail regen this week</li>
+					<li>when import folders run, the count on their progress bar now ignores previous failed and ignored entries. it should always start 0, like 0/100, rather than 20/120 etc...</li>
+					<li>when import folders run, any imports where the status type is set to 'leave the file alone' is now still scanned at the end of a job. if the path does not exist any more, it is removed from the import list</li>
+					<li>fixed a typo bug in the recent delete code cleanup that meant 'delete files after export' after a manual export was only working on the last file in the selection. sorry for the trouble!</li>
+					<li>the delete files dialog now starts with keyboard focus on the action radiobox (it was defaulting to ok button since I added the recent panel disable tech)</li>
+					<li>if a network job has a connection error or serverside bandwidth block and then waits before retrying, it now checks if all network jobs have just been paused and will not reattempt the connection if so (issue #1095)</li>
+					<li>fixed a bug in thumbnail fallback rendering</li>
+					<li>fixed another problem with cloudscraper's new method names. it should work for users still on an old version</li>
+					<li>wrote a little 'extract version' sql and bat file for the db folder that simply pull the version from the client.db file in the same directory. I removed the extract options/subscriptions sql scripts since they are super old and out of date, but this general system may return in future</li>
+					<li>.</li>
+					<li>file history chart:</li>
+					<li>added 'archive' line to the file history chart. this isn't exactly (current_count - inbox_count), but it pretty much is</li>
+					<li>added a 'show deleted' checkbox to the file history chart. it will recalculate the y axis range on click, so if you have loads of deleted files, you can now hide them to see current better</li>
+					<li>improved the way data is aggregated in the file history chart. diagonal lines should be reduced during any periods of client import-inactivity, and spikes should show better</li>
+					<li>also bumped the number of steps up to 8,000, so it should look nice maximised on a 4k</li>
+					<li>the file history chart now remembers its last size and position--it has an entry under options->gui</li>
+					<li>.</li>
+					<li>client api:</li>
+					<li>thanks to a user, the Client API now accepts any file_id, file_ids, hash, or hashes as arguments in any place where you need to specify a file or files</li>
+					<li>like 'return_hashes', the 'search_files' command in the Client API now takes an optional 'return_file_ids' parameter, default true, to turn off the file ids if you only want hashes</li>
+					<li>added 'only_return_basic_information' parameter, default false, to 'get_metadata' call, which is fast for first-time requests (it is slim but not well cached) and just delivers the basics like resolution and file size</li>
+					<li>added unit tests and updated the help to reflect the above</li>
+					<li>client api version is now 29</li>
+					<li>.</li>
+					<li>help:</li>
+					<li>split up the 'more files' help section into 'powerful searching' and 'exporting files', both still under the 'next steps' section</li>
+					<li>moved the semi-advanced 'OR' section from 'tags' to 'searching'</li>
+					<li>brushed up misc help</li>
+					<li>a couple of users added some misc help updates too, thank you!</li>
+					<li>.</li>
+					<li>misc boring cleanup:</li>
+					<li>cleaned up an old wx label patch</li>
+					<li>cleaned up an old wx system colour patch</li>
+					<li>cleaned up some misc initialisation code</li>
+				</ul>
 				<li><h3 id="version_478"><a href="#version_478">version 478</a></h3></li>
 				<ul>
 					<li>misc:</li>

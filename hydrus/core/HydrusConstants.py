@@ -34,6 +34,7 @@ else:
         
         BASE_DIR = os.getcwd()
         
+    
 
 muh_platform = sys.platform.lower()
 
@@ -79,8 +80,8 @@ options = {}
 # Misc
 
 NETWORK_VERSION = 20
-SOFTWARE_VERSION = 478
-CLIENT_API_VERSION = 28
+SOFTWARE_VERSION = 482
+CLIENT_API_VERSION = 31
 
 SERVER_THUMBNAIL_DIMENSIONS = ( 200, 200 )
 

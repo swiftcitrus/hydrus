@@ -4,7 +4,6 @@ import time
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
@@ -345,6 +344,21 @@ class HDDImport( HydrusSerialisable.SerialisableBase ):
                 return False
                 
             
+            try:
+                
+                self._file_import_options.CheckReadyToImport()
+                
+            except Exception as e:
+                
+                self._current_action = str( e )
+                
+                HydrusData.ShowText( str( e ) )
+                
+                self._paused = True
+                
+                return False
+                
+            
             work_to_do = self._file_seed_cache.WorkToDo()
             
             if not work_to_do:
@@ -554,7 +568,24 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                 
             elif status == CC.IMPORT_FOLDER_IGNORE:
                 
-                pass
+                file_seeds = self._file_seed_cache.GetFileSeeds( status )
+                
+                for file_seed in file_seeds:
+                    
+                    path = file_seed.file_seed_data
+                    
+                    try:
+                        
+                        if not os.path.exists( path ):
+                            
+                            self._file_seed_cache.RemoveFileSeeds( ( file_seed, ) )
+                            
+                        
+                    except Exception as e:
+                        
+                        raise Exception( 'Tried to check existence of "{}", but could not.'.format( path ) )
+                        
+                    
                 
             
         
@@ -621,15 +652,15 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         
         i = 0
         
-        num_total = len( self._file_seed_cache )
-        num_total_unknown = self._file_seed_cache.GetFileSeedCount( CC.STATUS_UNKNOWN )
-        num_total_done = num_total - num_total_unknown
+        # don't want to start at 23/100 because of carrying over failed results or whatever
+        # num_to_do is num currently unknown
+        num_total = self._file_seed_cache.GetFileSeedCount( CC.STATUS_UNKNOWN )
         
         while True:
             
             file_seed = self._file_seed_cache.GetNextFileSeed( CC.STATUS_UNKNOWN )
             
-            p1 = HC.options[ 'pause_import_folders_sync' ] or self._paused
+            p1 = HG.client_controller.new_options.GetBoolean( 'pause_import_folders_sync' ) or self._paused
             p2 = HydrusThreading.IsThreadShuttingDown()
             p3 = job_key.IsCancelled()
             
@@ -647,7 +678,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                 time_to_save = HydrusData.GetNow() + 600
                 
             
-            gauge_num_done = num_total_done + num_files_imported + 1
+            gauge_num_done = num_files_imported + 1
             
             job_key.SetVariable( 'popup_text_1', 'importing file ' + HydrusData.ConvertValueRangeToPrettyString( gauge_num_done, num_total ) )
             job_key.SetVariable( 'popup_gauge_1', ( gauge_num_done, num_total ) )
@@ -657,6 +688,8 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
             file_seed.ImportPath( self._file_seed_cache, self._file_import_options, limited_mimes = self._mimes )
             
             if file_seed.status in CC.SUCCESSFUL_IMPORT_STATES:
+                
+                hash = None
                 
                 if file_seed.HasHash():
                     
@@ -856,7 +889,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
             return
             
         
-        if HC.options[ 'pause_import_folders_sync' ] or self._paused:
+        if HG.client_controller.new_options.GetBoolean( 'pause_import_folders_sync' ) or self._paused:
             
             return
             
@@ -872,6 +905,8 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         job_key = ClientThreading.JobKey( pausable = False, cancellable = True, stop_time = stop_time )
         
         try:
+            
+            self._file_import_options.CheckReadyToImport()
             
             if not os.path.exists( self._path ) or not os.path.isdir( self._path ):
                 

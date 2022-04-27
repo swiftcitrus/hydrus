@@ -11,6 +11,7 @@ nav:
     - gettingStartedOverview.md
     - getting_started_installing.md
     - getting_started_files.md
+    - getting_started_searching.md
     - getting_started_tags.md
     - getting_started_downloading.md
     - getting_started_ratings.md
@@ -19,7 +20,7 @@ nav:
       - PTR.md
       - petitionPractices.md
     - Next Steps:
-      - getting_started_more_files.md
+      - getting_started_exporting.md
       - adding_new_downloaders.md
       - getting_started_subscriptions.md
       - filtering duplicates: duplicates.md
@@ -83,7 +84,7 @@ theme:
         icon: material/toggle-switch
         name: Switch to light mode
   logo: assets/hydrus-white.svg
-  favicon: assets/hydrus-black.svg
+  favicon: assets/favicon.svg
   font: false
   features:
     - navigation.instant
@@ -142,7 +143,11 @@ markdown_extensions:
   - pymdownx.keys
   - pymdownx.mark
   - pymdownx.smartsymbols
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.tasklist:

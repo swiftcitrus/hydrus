@@ -719,7 +719,6 @@ class AutoCompleteDropdown( QW.QWidget ):
         self._UpdateBackgroundColour()
         
         self._last_attempted_dropdown_width = 0
-        self._last_attempted_dropdown_position = ( None, None )
         
         self._text_ctrl_widget_event_filter = QP.WidgetEventFilter( self._text_ctrl )
         
@@ -834,6 +833,9 @@ class AutoCompleteDropdown( QW.QWidget ):
         self._ScheduleResultsRefresh( 0.0 )
         
         HG.client_controller.CallLaterQtSafe( self, 0.05, 'hide/show dropdown', self._DropdownHideShow )
+        
+        # trying a second go to see if that improves some positioning
+        HG.client_controller.CallLaterQtSafe( self, 0.25, 'hide/show dropdown', self._DropdownHideShow )
         
     
     def _BroadcastChoices( self, predicates, shift_down ):
@@ -1007,11 +1009,9 @@ class AutoCompleteDropdown( QW.QWidget ):
             
             desired_dropdown_position = ClientGUIFunctions.ClientToScreen( self._text_input_panel, QC.QPoint( 0, text_input_height ) )
             
-            if self._last_attempted_dropdown_position != desired_dropdown_position:
+            if self.pos() != desired_dropdown_position:
                 
                 self._dropdown_window.move( desired_dropdown_position )
-                
-                self._last_attempted_dropdown_position = desired_dropdown_position
                 
             
         
@@ -1604,8 +1604,16 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         self._search_pause_play = ClientGUICommon.OnOffButton( self._dropdown_window, on_label = 'searching immediately', off_label = 'search paused', start_on = synchronised )
         self._search_pause_play.setToolTip( 'select whether to renew the search as soon as a new predicate is entered' )
         
-        self._or_advanced = ClientGUICommon.BetterButton( self._dropdown_window, 'OR', self._AdvancedORInput )
-        self._or_advanced.setToolTip( 'Advanced OR Search input.' )
+        self._or_basic = ClientGUICommon.BetterButton( self._dropdown_window, 'OR', self._CreateNewOR )
+        self._or_basic.setToolTip( 'Create a new empty OR predicate in the dialog.' )
+        
+        if not HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+            
+            self._or_basic.hide()
+            
+        
+        self._or_advanced = ClientGUICommon.BetterButton( self._dropdown_window, 'OR*', self._AdvancedORInput )
+        self._or_advanced.setToolTip( 'Advanced OR input.' )
         
         if not HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
@@ -1628,6 +1636,7 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         sync_button_hbox = QP.HBoxLayout()
         
         QP.AddToLayout( sync_button_hbox, self._search_pause_play, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( sync_button_hbox, self._or_basic, CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( sync_button_hbox, self._or_advanced, CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( sync_button_hbox, self._or_cancel, CC.FLAGS_CENTER_PERPENDICULAR )
         QP.AddToLayout( sync_button_hbox, self._or_rewind, CC.FLAGS_CENTER_PERPENDICULAR )
@@ -1732,15 +1741,6 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         self._ClearInput()
         
     
-    def _SignalNewSearchState( self ):
-        
-        self._file_search_context.SetPredicates( self._predicates_listbox.GetPredicates() )
-        
-        file_search_context = self._file_search_context.Duplicate()
-        
-        self.searchChanged.emit( file_search_context )
-        
-    
     def _CancelORConstruction( self ):
         
         self._under_construction_or_predicate = None
@@ -1748,6 +1748,24 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         self._UpdateORButtons()
         
         self._ClearInput()
+        
+    
+    def _CreateNewOR( self ):
+        
+        predicates = { ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_OR_CONTAINER, value = [ ] ) }
+        
+        try:
+            
+            predicates = ClientGUISearch.EditPredicates( self, predicates )
+            
+        except HydrusExceptions.CancelledException:
+            
+            return
+            
+        
+        shift_down = False
+        
+        self._BroadcastChoices( predicates, shift_down )
         
     
     def _FavouriteSearchesMenu( self ):
@@ -1979,6 +1997,15 @@ class AutoCompleteDropdownTagsRead( AutoCompleteDropdownTags ):
         self._predicates_listbox = ListBoxTagsActiveSearchPredicates( self, self._page_key )
         
         QP.AddToLayout( self._main_vbox, self._predicates_listbox, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+    
+    def _SignalNewSearchState( self ):
+        
+        self._file_search_context.SetPredicates( self._predicates_listbox.GetPredicates() )
+        
+        file_search_context = self._file_search_context.Duplicate()
+        
+        self.searchChanged.emit( file_search_context )
         
     
     def _StartSearchResultsFetchJob( self, job_key ):

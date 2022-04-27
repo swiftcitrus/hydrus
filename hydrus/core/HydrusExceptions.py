@@ -50,7 +50,9 @@ class DirectoryMissingException( HydrusException ): pass
 class SerialisationException( HydrusException ): pass
 class NameException( HydrusException ): pass
 class ShutdownException( HydrusException ): pass
-class QtDeadWindowException(HydrusException): pass
+class QtDeadWindowException( HydrusException ): pass
+
+class FileImportBlockException( HydrusException ): pass
 
 class UnsupportedFileException( HydrusException ): pass
 class ZeroSizeFileException( UnsupportedFileException ): pass
@@ -89,6 +91,7 @@ class StreamTimeoutException( NetworkException ): pass
 class NetworkVersionException( NetworkException ): pass
 class NoContentException( NetworkException ): pass
 class NotFoundException( NetworkException ): pass
+class NotAcceptable( NetworkException ): pass
 class NotModifiedException( NetworkException ): pass
 class BadRequestException( NetworkException ): pass
 class ConflictException( NetworkException ): pass

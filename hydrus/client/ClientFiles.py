@@ -247,8 +247,8 @@ class ClientFilesManager( object ):
     
     def _HandleCriticalDriveError( self ):
         
-        HC.options['pause_import_folders_sync'] = True
-        HC.options[ 'pause_subs_sync' ] = True
+        self._controller.new_options.SetBoolean( 'pause_import_folders_sync', True )
+        self._controller.new_options.SetBoolean( 'pause_subs_sync', True )
         self._controller.new_options.SetBoolean( 'pause_all_file_queues', True )
         
         HydrusData.ShowText( 'All paged file import queues, subscriptions, and import folders have been paused. Resume them after restart under the file and network menus!' )
@@ -1622,6 +1622,8 @@ class FilesMaintenanceManager( object ):
             do_export = file_is_invalid and ( job_type in ( REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE ) or ( job_type == REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL and try_redownload ) )
             
             if do_export or delete_record:
+                
+                HydrusPaths.MakeSureDirectoryExists( error_dir )
                 
                 pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( self._controller.GetBootTime() ) )
                 

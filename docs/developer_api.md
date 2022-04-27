@@ -57,7 +57,9 @@ On 200 OK, the API returns JSON for everything except actual file/thumbnail requ
 
 The API now tentatively supports CBOR, which is basically 'byte JSON'. If you are in a lower level language or need to do a lot of heavy work quickly, try it out!
 
-To work in CBOR, use CBOR to encode any parameters that you would previously put in JSON, and put Content-Type `application/cbor` in your request header. For POST requests, just print the pure bytes in the body, like this:
+To send CBOR, for POST put Content-Type `application/cbor` in your request header instead of `application/json`, and for GET just add a `cbor=1` parameter to the URL string. Use CBOR to encode any parameters that you would previously put in JSON:
+
+For POST requests, just print the pure bytes in the body, like this:
 
 ```py
 cbor2.dumps( arg_dict )
@@ -72,6 +74,15 @@ base64.urlsafe_b64encode( cbor2.dumps( argument ) )
 
 str( base64.urlsafe_b64encode( cbor2.dumps( argument ) ), 'ascii' )
 ```
+
+If you send CBOR, the client will return CBOR. If you want to send CBOR and get JSON back, or _vice versa_ (or you are uploading a file and can't set CBOR Content-Type), send the Accept request header, like so:
+
+```
+Accept: application/cbor
+Accept: application/json
+```
+
+If the client does not support CBOR, you'll get 406.
 
 ## Access and permissions
 
@@ -1242,7 +1253,8 @@ Arguments (in percent-encoded JSON):
     *   `tag_service_key`: (optional, selective, hexadecimal, the tag domain on which to search)
     *   `file_sort_type`: (optional, integer, the results sort method)
     *   `file_sort_asc`: true or false (optional, the results sort order)
-    *   `return_hashes`: true or false (optional, default false, returns hex hashes in addition to file ids, hashes and file ids are in the same order)
+    *   `return_file_ids`: true or false (optional, default true, returns file id results)
+    *   `return_hashes`: true or false (optional, default false, returns hex hash results)
     *   _`system_inbox`: true or false (obsolete, use tags)_
     *   _`system_archive`: true or false (obsolete, use tags)_
 
@@ -1357,24 +1369,26 @@ file\_sort\_asc is 'true' for ascending, and 'false' for descending. The default
 
 file\_sort\_type is by default _import time_. It is an integer according to the following enum, and I have written the semantic (asc/desc) meaning for each type after:
 
-*   0 - file size (smallest first/largest first)
-*   1 - duration (shortest first/longest first)
-*   2 - import time (oldest first/newest first)
-*   3 - filetype (N/A)
-*   4 - random (N/A)
-*   5 - width (slimmest first/widest first)
-*   6 - height (shortest first/tallest first)
-*   7 - ratio (tallest first/widest first)
-*   8 - number of pixels (ascending/descending)
-*   9 - number of tags (on the current tag domain) (ascending/descending)
-*   10 - number of media views (ascending/descending)
-*   11 - total media viewtime (ascending/descending)
-*   12 - approximate bitrate (smallest first/largest first)
-*   13 - has audio (audio first/silent first)
-*   14 - modified time (oldest first/newest first)
-*   15 - framerate (slowest first/fastest first)
-*   16 - number of frames (smallest first/largest first)
-*   18 - last viewed time (oldest first/newest first)
+* 0 - file size (smallest first/largest first)
+* 1 - duration (shortest first/longest first)
+* 2 - import time (oldest first/newest first)
+* 3 - filetype (N/A)
+* 4 - random (N/A)
+* 5 - width (slimmest first/widest first)
+* 6 - height (shortest first/tallest first)
+* 7 - ratio (tallest first/widest first)
+* 8 - number of pixels (ascending/descending)
+* 9 - number of tags (on the current tag domain) (ascending/descending)
+* 10 - number of media views (ascending/descending)
+* 11 - total media viewtime (ascending/descending)
+* 12 - approximate bitrate (smallest first/largest first)
+* 13 - has audio (audio first/silent first)
+* 14 - modified time (oldest first/newest first)
+* 15 - framerate (slowest first/fastest first)
+* 16 - number of frames (smallest first/largest first)
+* 18 - last viewed time (oldest first/newest first)
+* 19 - archive timestamp (oldest first/newest first)
+* 20 - hash hex (N/A)
 
 Response:
 :   The full list of numerical file ids that match the search.
@@ -1394,7 +1408,9 @@ Response:
 }
 ```
 
-    File ids are internal and specific to an individual client. For a client, a file with hash H always has the same file id N, but two clients will have different ideas about which N goes with which H. They are a bit faster than hashes to retrieve and search with _en masse_, which is why they are exposed here.
+    You can of course also specify `return_hashes=true&return_file_ids=false` just to get the hashes. The order of both lists is the same.
+
+    File ids are internal and specific to an individual client. For a client, a file with hash H always has the same file id N, but two clients will have different ideas about which N goes with which H. IDs are a bit faster to retrieve than hashes and search with _en masse_, which is why they are exposed here.
 
     This search does **not** apply the implicit limit that most clients set to all searches (usually 10,000), so if you do system:everything on a client with millions of files, expect to get boshed. Even with a system:limit included, complicated queries with large result sets may take several seconds to respond. Just like the client itself.
 
@@ -1413,7 +1429,9 @@ Arguments (in percent-encoded JSON):
     *   `file_ids`: (selective, a list of numerical file ids)
     *   `hash`: (selective, a hexadecimal SHA256 hash)
     *   `hashes`: (selective, a list of hexadecimal SHA256 hashes)
+    *   `create_new_file_ids`: true or false (optional if asking with hash(es), defaulting to false)
     *   `only_return_identifiers`: true or false (optional, defaulting to false)
+    *   `only_return_basic_information`: true or false (optional, defaulting to false)
     *   `detailed_url_information`: true or false (optional, defaulting to false)
     *   `hide_service_names_tags`: true or false (optional, defaulting to false)
     *   `include_notes`: true or false (optional, defaulting to false)
@@ -1559,6 +1577,38 @@ Response:
   ]
 }
 ```
+```json title="And where only_return_basic_information is true"
+{
+  "metadata": [
+    {
+      "file_id": 123,
+      "hash": "4c77267f93415de0bc33b7725b8c331a809a924084bee03ab2f5fae1c6019eb2",
+      "size": 63405,
+      "mime": "image/jpg",
+      "ext": ".jpg",
+      "width": 640,
+      "height": 480,
+      "duration": null,
+      "has_audio": false,
+      "num_frames": null,
+      "num_words": null,
+    },
+    {
+      "file_id": 4567,
+      "hash": "3e7cb9044fe81bda0d7a84b5cb781cba4e255e4871cba6ae8ecd8207850d5b82",
+      "size": 199713,
+      "mime": "video/webm",
+      "ext": ".webm",
+      "width": 1920,
+      "height": 1080,
+      "duration": 4040,
+      "has_audio": true,
+      "num_frames": 102,
+      "num_words": null,
+    }
+  ]
+}
+```
 
 Size is in bytes. Duration is in milliseconds, and may be an int or a float.
 
@@ -1577,6 +1627,25 @@ The tag structure is duplicated for both `name` and `key`. The use of `name` is 
     Since JSON Object keys must be strings, these status numbers are strings, not ints.
 
 While `service_XXX_to_statuses_to_tags` represent the actual tags stored on the database for a file, the <code>service_XXX_to_statuses_to_<i>display</i>_tags</code> structures reflect how tags appear in the UI, after siblings are collapsed and parents are added. If you want to edit a file's tags, start with `service_keys_to_statuses_to_tags`. If you want to render to the user, use `service_keys_to_statuses_to_displayed_tags`.
+
+If you ask with hashes rather than file_ids, hydrus will, by default, only return results when it has seen those hashes before. This is to stop the client making thousands of new file_id records in its database if you perform a scanning operation. If you ask about a hash the client has never encountered before--for which there is no file_id--you will get this style of result:
+
+```json title="Missing file_id example"
+{
+    "metadata": [
+        {
+            "file_id": null,
+            "hash": "766da61f81323629f982bc1b71b5c1f9bba3f3ed61caf99906f7f26881c3ae93"
+        }
+    ]
+}
+```
+
+You can change this behaviour with `create_new_file_ids=true`, but bear in mind you will get a fairly 'empty' metadata result with lots of 'null' lines, so this is only useful for gathering the numerical ids for later Client API work.
+
+If you ask about any file_ids that do not exist, you'll get 404.
+
+If you set `only_return_basic_information=true`, this will be much faster for first-time requests than the full metadata result, but it will be slower for repeat requests. The full metadata object is cached after first fetch, the limited file info object is not.
 
 If you add `hide_service_names_tags=true`, the `service_names_to_statuses_to_tags` and `service_names_to_statuses_to_display_tags` Objects will not be included. Use this to save data/CPU on large queries.
 
@@ -1653,7 +1722,7 @@ Arguments:
 ```
 
 Response:
-:   The thumbnail for the file. It will give application/octet-stream as the mime type. Some hydrus thumbs are jpegs, some are pngs.
+:   The thumbnail for the file. Some hydrus thumbs are jpegs, some are pngs. It should give you the correct image/jpeg or image/png Content-Type.
 
     If hydrus keeps no thumbnail for the filetype, for instance with pdfs, then you will get the same default 'pdf' icon you see in the client. If the file does not exist in the client, or the thumbnail was expected but is missing from storage, you will get the fallback 'hydrus' icon, again just as you would in the client itself. This request should never give a 404.
 

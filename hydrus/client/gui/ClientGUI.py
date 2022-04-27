@@ -238,13 +238,17 @@ def THREADUploadPending( service_key ):
         initial_num_pending = sum( nums_pending_for_this_service.values() )
         num_to_do = initial_num_pending
         
-        result = HG.client_controller.Read( 'pending', service_key, content_types_to_request )
+        current_ideal_weight = 100
+        
+        result = HG.client_controller.Read( 'pending', service_key, content_types_to_request, ideal_weight = current_ideal_weight )
         
         HG.client_controller.pub( 'message', job_key )
         
         no_results_found = result is None
     
         while result is not None:
+            
+            time_started_this_loop = HydrusData.GetNowPrecise()
             
             nums_pending = HG.client_controller.Read( 'nums_pending' )
             
@@ -361,7 +365,18 @@ def THREADUploadPending( service_key ):
             
             HG.client_controller.WaitUntilViewFree()
             
-            result = HG.client_controller.Read( 'pending', service_key, content_types_to_request )
+            total_time_this_loop_took = HydrusData.GetNowPrecise() - time_started_this_loop
+            
+            if total_time_this_loop_took > 1.5:
+                
+                current_ideal_weight = max( 25, int( current_ideal_weight * 0.95 ) )
+                
+            elif total_time_this_loop_took < 0.5:
+                
+                current_ideal_weight = min( 500, int( current_ideal_weight * 1.05 ) )
+                
+            
+            result = HG.client_controller.Read( 'pending', service_key, content_types_to_request, ideal_weight = current_ideal_weight )
             
         
         finished_all_uploads = result == None
@@ -653,17 +668,18 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         else:
             
+            library_versions.append( ( 'mpv', 'not available' ) )
+            
             if HC.RUNNING_FROM_FROZEN_BUILD and HC.PLATFORM_MACOS:
                 
-                library_versions.append( ( 'mpv: ', 'is not currently available on macOS' ) )
+                HydrusData.ShowText( 'The macOS App does not come with MPV support on its own, but if your system has the dev library, libmpv1, it will try to import it. It seems your system does not have this or it failed to import. The specific error follows:' )
                 
             else:
                 
                 HydrusData.ShowText( 'If this information helps, MPV failed to import because:' )
-                HydrusData.ShowText( ClientGUIMPV.mpv_failed_reason )
                 
-                library_versions.append( ( 'mpv', 'not available' ) )
-                
+            
+            HydrusData.ShowText( ClientGUIMPV.mpv_failed_reason )
             
         
         library_versions.append( ( 'FFMPEG', HydrusVideoHandling.GetFFMPEGVersion() ) )
@@ -992,7 +1008,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
     
     def _CheckImportFolder( self, name = None ):
         
-        if self._controller.options[ 'pause_import_folders_sync' ]:
+        if self._controller.new_options.GetBoolean( 'pause_import_folders_sync' ):
             
             HydrusData.ShowText( 'Import folders are currently paused under the \'file\' menu. Please unpause them and try this again.' )
             
@@ -1740,7 +1756,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 
                 service = self._controller.services_manager.GetService( service_key )
                 
-                with QP.BusyCursor(): response = service.Request( HC.GET, 'ip', { 'hash' : hash } )
+                with ClientGUICommon.BusyCursor(): response = service.Request( HC.GET, 'ip', { 'hash' : hash } )
                 
                 ip = response[ 'ip' ]
                 timestamp = response[ 'timestamp' ]
@@ -2276,7 +2292,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             HG.client_controller.pub( 'message', job_key )
             
-            num_steps = 2000
+            num_steps = 7680
             
             file_history = HG.client_controller.Read( 'file_history', num_steps )
             
@@ -2289,7 +2305,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             job_key.Delete()
             
-            frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'file history' )
+            frame = ClientGUITopLevelWindowsPanels.FrameThatTakesScrollablePanel( self, 'file history', frame_key = 'file_history_chart' )
             
             panel = ClientGUIScrolledPanelsReview.ReviewFileHistory( frame, file_history )
             
@@ -2424,7 +2440,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             self._menubar_network_all_traffic_paused.setChecked( HG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' ) )
             
-            self._menubar_network_subscriptions_paused.setChecked( HC.options[ 'pause_subs_sync' ] )
+            self._menubar_network_subscriptions_paused.setChecked( HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) )
             
             self._menubar_network_paged_import_queues_paused.setChecked( HG.client_controller.new_options.GetBoolean( 'pause_all_file_queues' ) )
             
@@ -3049,8 +3065,8 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         submenu = QW.QMenu( i_and_e_submenu )
         
-        ClientGUIMenus.AppendMenuCheckItem( submenu, 'import folders', 'Pause the client\'s import folders.', HC.options['pause_import_folders_sync'], self._PausePlaySync, 'import_folders' )
-        ClientGUIMenus.AppendMenuCheckItem( submenu, 'export folders', 'Pause the client\'s export folders.', HC.options['pause_export_folders_sync'], self._PausePlaySync, 'export_folders' )
+        ClientGUIMenus.AppendMenuCheckItem( submenu, 'import folders', 'Pause the client\'s import folders.', self._controller.new_options.GetBoolean( 'pause_import_folders_sync' ), self._PausePlaySync, 'import_folders' )
+        ClientGUIMenus.AppendMenuCheckItem( submenu, 'export folders', 'Pause the client\'s export folders.', self._controller.new_options.GetBoolean( 'pause_export_folders_sync' ), self._PausePlaySync, 'export_folders' )
         
         ClientGUIMenus.AppendMenu( i_and_e_submenu, submenu, 'pause' )
         
@@ -3307,7 +3323,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         ClientGUIMenus.AppendSeparator( submenu )
         
-        self._menubar_network_subscriptions_paused = ClientGUIMenus.AppendMenuCheckItem( submenu, 'subscriptions', 'Pause the client\'s synchronisation with website subscriptions.', HC.options[ 'pause_subs_sync' ], self.FlipSubscriptionsPaused )
+        self._menubar_network_subscriptions_paused = ClientGUIMenus.AppendMenuCheckItem( submenu, 'subscriptions', 'Pause the client\'s synchronisation with website subscriptions.', self._controller.new_options.GetBoolean( 'pause_subs_sync' ), self.FlipSubscriptionsPaused )
         
         self._menubar_network_nudge_subs = ClientGUIMenus.AppendMenuItem( submenu, 'nudge subscriptions awake', 'Tell the subs daemon to wake up, just in case any subs are due.', self._controller.subscriptions_manager.Wake )
         
@@ -3514,7 +3530,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         submenu = QW.QMenu( menu )
         
-        ClientGUIMenus.AppendMenuCheckItem( submenu, 'all repository synchronisation', 'Pause the client\'s synchronisation with hydrus repositories.', HC.options['pause_repo_sync'], self._PausePlaySync, 'repo' )
+        ClientGUIMenus.AppendMenuCheckItem( submenu, 'all repository synchronisation', 'Pause the client\'s synchronisation with hydrus repositories.', self._controller.new_options.GetBoolean( 'pause_repo_sync' ), self._PausePlaySync, 'repo' )
         
         ClientGUIMenus.AppendMenu( menu, submenu, 'pause' )
         
@@ -3638,6 +3654,10 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                     self._notebook.NewPageQuery( default_location_context, on_deepest_notebook = True )
                     
+                    self._first_session_loaded = True
+                    
+                    self._controller.ReportFirstSessionInitialised()
+                    
                 else:
                     
                     self._notebook.LoadGUISession( default_gui_session )
@@ -3652,8 +3672,6 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                 self._controller.CallLaterQtSafe(self, last_session_save_period_minutes * 60, 'auto save session', self.AutoSaveLastSession )
                 
                 self._BootOrStopClipboardWatcherIfNeeded()
-                
-                self._controller.ReportFirstSessionLoaded()
                 
             
         
@@ -3867,9 +3885,9 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             with self._delayed_dialog_lock:
                 
-                original_pause_status = controller.options[ 'pause_export_folders_sync' ]
+                original_pause_status = controller.new_options.GetBoolean( 'pause_export_folders_sync' )
                 
-                controller.options[ 'pause_export_folders_sync' ] = True
+                controller.new_options.SetBoolean( 'pause_export_folders_sync', True )
                 
                 try:
                     
@@ -3910,7 +3928,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                 finally:
                     
-                    controller.options[ 'pause_export_folders_sync' ] = original_pause_status
+                    controller.new_options.SetBoolean( 'pause_export_folders_sync', original_pause_status )
                     
                     controller.pub( 'notify_new_export_folders' )
                     
@@ -3986,9 +4004,9 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
             with self._delayed_dialog_lock:
                 
-                original_pause_status = controller.options[ 'pause_import_folders_sync' ]
+                original_pause_status = controller.new_options.GetBoolean( 'pause_import_folders_sync' )
                 
-                controller.options[ 'pause_import_folders_sync' ] = True
+                controller.new_options.SetBoolean( 'pause_import_folders_sync', True )
                 
                 try:
                     
@@ -4029,7 +4047,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
                     
                 finally:
                     
-                    controller.options[ 'pause_import_folders_sync' ] = original_pause_status
+                    controller.new_options.SetBoolean( 'pause_import_folders_sync', original_pause_status )
                     
                     controller.pub( 'notify_new_import_folders' )
                     
@@ -4231,9 +4249,9 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
     
     def _ManageServices( self, auto_account_creation_service_key = None ):
         
-        original_pause_status = HC.options[ 'pause_repo_sync' ]
+        original_pause_status = self._controller.new_options.GetBoolean( 'pause_repo_sync' )
         
-        HC.options[ 'pause_repo_sync' ] = True
+        self._controller.new_options.SetBoolean( 'pause_repo_sync', True )
         
         try:
             
@@ -4250,7 +4268,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
             
         finally:
             
-            HC.options[ 'pause_repo_sync' ] = original_pause_status
+            self._controller.new_options.SetBoolean( 'pause_repo_sync', original_pause_status )
             
         
     
@@ -4830,19 +4848,19 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
         
         if sync_type == 'repo':
             
-            HC.options[ 'pause_repo_sync' ] = not HC.options[ 'pause_repo_sync' ]
+            self._controller.new_options.FlipBoolean( 'pause_repo_sync' )
             
             self._controller.pub( 'notify_restart_repo_sync' )
             
         elif sync_type == 'export_folders':
             
-            HC.options[ 'pause_export_folders_sync' ] = not HC.options[ 'pause_export_folders_sync' ]
+            self._controller.new_options.FlipBoolean( 'pause_export_folders_sync' )
             
             self._controller.pub( 'notify_restart_export_folders_daemon' )
             
         elif sync_type == 'import_folders':
             
-            HC.options[ 'pause_import_folders_sync' ] = not HC.options[ 'pause_import_folders_sync' ]
+            self._controller.new_options.FlipBoolean( 'pause_import_folders_sync' )
             
             self._controller.pub( 'notify_restart_import_folders_daemon' )
             
@@ -5405,7 +5423,7 @@ class FrameGUI( ClientGUITopLevelWindows.MainFrameThatResizes ):
     
     def _RunExportFolder( self, name = None ):
         
-        if self._controller.options[ 'pause_export_folders_sync' ]:
+        if self._controller.new_options.GetBoolean( 'pause_export_folders_sync' ):
             
             HydrusData.ShowText( 'Export folders are currently paused under the \'file\' menu. Please unpause them and try this again.' )
             
@@ -6549,7 +6567,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             self._system_tray_icon.SetShouldAlwaysShow( always_show_system_tray_icon )
             self._system_tray_icon.SetUIIsCurrentlyShown( not self._currently_minimised_to_system_tray )
             self._system_tray_icon.SetNetworkTrafficPaused( new_options.GetBoolean( 'pause_all_new_network_traffic' ) )
-            self._system_tray_icon.SetSubscriptionsPaused( HC.options[ 'pause_subs_sync' ] )
+            self._system_tray_icon.SetSubscriptionsPaused( new_options.GetBoolean( 'pause_subs_sync' ) )
             
         else:
             
@@ -6953,7 +6971,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
     
     def FlipSubscriptionsPaused( self ):
         
-        HC.options[ 'pause_subs_sync' ] = not HC.options[ 'pause_subs_sync' ]
+        self._controller.new_options.FlipBoolean( 'pause_subs_sync' )
         
         self._controller.subscriptions_manager.Wake()
         
@@ -7588,7 +7606,7 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             bandwidth_status += ' (' + HydrusData.ToHumanBytes( current_usage ) + '/s)'
             
         
-        if HC.options[ 'pause_subs_sync' ]:
+        if self._controller.new_options.GetBoolean( 'pause_subs_sync' ):
             
             bandwidth_status += ', subs paused'
             
@@ -7741,6 +7759,13 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
     
     def ReportFreshSessionLoaded( self, gui_session: ClientGUISession.GUISessionContainer ):
         
+        if not self._first_session_loaded:
+            
+            self._first_session_loaded = True
+            
+            self._controller.ReportFirstSessionInitialised()
+            
+        
         if gui_session.GetName() == CC.LAST_SESSION_SESSION_NAME:
             
             self._controller.ReportLastSessionLoaded( gui_session )
@@ -7887,18 +7912,21 @@ The password is cleartext here but obscured in the entry dialog. Enter a blank p
             
             #
             
-            only_changed_page_data = True
-            about_to_save = True
-            
-            session = self._notebook.GetCurrentGUISession( CC.LAST_SESSION_SESSION_NAME, only_changed_page_data, about_to_save )
-            
-            session = self._FleshOutSessionWithCleanDataIfNeeded( self._notebook, CC.LAST_SESSION_SESSION_NAME, session )
-            
-            self._controller.SaveGUISession( session )
-            
-            session.SetName( CC.EXIT_SESSION_SESSION_NAME )
-            
-            self._controller.SaveGUISession( session )
+            if self._first_session_loaded:
+                
+                only_changed_page_data = True
+                about_to_save = True
+                
+                session = self._notebook.GetCurrentGUISession( CC.LAST_SESSION_SESSION_NAME, only_changed_page_data, about_to_save )
+                
+                session = self._FleshOutSessionWithCleanDataIfNeeded( self._notebook, CC.LAST_SESSION_SESSION_NAME, session )
+                
+                self._controller.SaveGUISession( session )
+                
+                session.SetName( CC.EXIT_SESSION_SESSION_NAME )
+                
+                self._controller.SaveGUISession( session )
+                
             
             #
             

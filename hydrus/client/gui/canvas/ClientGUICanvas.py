@@ -389,8 +389,6 @@ class Canvas( QW.QWidget ):
         self._last_motion_pos = QC.QPoint( 0, 0 )
         self._media_window_pos = QC.QPoint( 0, 0 )
         
-        self._UpdateBackgroundColour()
-        
         self._widget_event_filter = QP.WidgetEventFilter( self )
         
         self._media_container.readyForNeighbourPrefetch.connect( self._PrefetchNeighbours )
@@ -399,10 +397,8 @@ class Canvas( QW.QWidget ):
         HG.client_controller.sub( self, 'ZoomOut', 'canvas_zoom_out' )
         HG.client_controller.sub( self, 'ZoomSwitch', 'canvas_zoom_switch' )
         HG.client_controller.sub( self, 'OpenExternally', 'canvas_open_externally' )
-        HG.client_controller.sub( self, 'ManageNotes', 'canvas_manage_notes' )
         HG.client_controller.sub( self, 'ManageTags', 'canvas_manage_tags' )
         HG.client_controller.sub( self, 'ProcessApplicationCommand', 'canvas_application_command' )
-        HG.client_controller.sub( self, '_UpdateBackgroundColour', 'notify_new_colourset' )
         HG.client_controller.sub( self, 'update', 'notify_new_colourset' )
         
     
@@ -603,7 +599,7 @@ class Canvas( QW.QWidget ):
         self._DrawCurrentMedia()
         
     
-    def _DrawBackgroundBitmap( self, painter ):
+    def _DrawBackgroundBitmap( self, painter: QG.QPainter ):
         
         background_colour = self._GetBackgroundColour()
         
@@ -740,6 +736,7 @@ class Canvas( QW.QWidget ):
             
             ( previous_width, previous_height ) = CalculateMediaSize( previous_media, self._current_zoom )
             
+            ( previous_media_100_width, previous_media_100_height ) = previous_media.GetResolution()
             ( current_media_100_width, current_media_100_height ) = self._current_media.GetResolution()
             
             width_locked_zoom = previous_width / current_media_100_width
@@ -748,32 +745,47 @@ class Canvas( QW.QWidget ):
             width_locked_size = CalculateMediaContainerSize( self._current_media, width_locked_zoom, media_show_action )
             height_locked_size = CalculateMediaContainerSize( self._current_media, height_locked_zoom, media_show_action )
             
-            # if we have both landscape, we'll go height, otherwise default width
-            if previous_width > previous_height and current_media_100_width > current_media_100_height:
+            # if landscape, go height, portrait, go width
+            if previous_media_100_width > previous_media_100_height and current_media_100_width > current_media_100_height:
                 
                 lock_height = True
                 
-            else:
+            elif previous_media_100_width < previous_media_100_height and current_media_100_width < current_media_100_height:
                 
                 lock_height = False
                 
+            else:
+                
+                # for weird stuff, we'll choose the smaller of the two ratios
+                
+                width_difference = max( previous_media_100_width, current_media_100_width ) / min( previous_media_100_width, current_media_100_width )
+                height_difference = max( previous_media_100_height, current_media_100_height ) / min( previous_media_100_height, current_media_100_height )
+                
+                lock_height = height_difference <= width_difference
+                
             
-            if previous_current_zoom == previous_default_zoom and previous_current_zoom <= previous_canvas_zoom * 1.02:
+            # however we don't want to accidentally zoom in if the media we are switching to is larger. it'll spill over the bottom of the canvas
+            # therefore let's have a little safety check
+            
+            if previous_current_zoom == previous_default_zoom and previous_current_zoom <= previous_canvas_zoom * 1.05:
                 
                 # we were looking at the default zoom, near or at canvas edge(s), probably hadn't zoomed before switching comparison
                 # we want to make sure our comparison does not spill over the canvas edge
                 
-                width_a_concern = self._media_container.width() >= self.width() * 0.95
-                height_a_concern = self._media_container.height() >= self.height() * 0.95
+                close_to_vertical_edge = self.height() * 0.95 <= self._media_container.height() <= self.height() * 1.05
+                vertical_spillover_could_be_deceptive = self._media_container.height() < width_locked_size.height() < self._media_container.height() * 1.1
                 
                 # locking by width will spill over bottom of screen
-                if height_a_concern and width_locked_size.height() > self._media_container.height():
+                if close_to_vertical_edge and vertical_spillover_could_be_deceptive:
                     
                     lock_height = True
                     
                 
+                close_to_horizontal_edge = self.width() * 0.95 <= self._media_container.width() <= self.width() * 1.05
+                horizontal_spillover_could_be_deceptive = self._media_container.width() < height_locked_size.width() < self._media_container.width() * 1.1
+                
                 # locking by height will spill over right of screen
-                if width_a_concern and height_locked_size.width() > self._media_container.width():
+                if close_to_horizontal_edge and horizontal_spillover_could_be_deceptive:
                     
                     lock_height = False
                     
@@ -794,14 +806,14 @@ class Canvas( QW.QWidget ):
             
         
     
-    def _ManageNotes( self ):
+    def _ManageNotes( self, name_to_start_on = None ):
         
         if self._current_media is None:
             
             return
             
         
-        ClientGUIMediaActions.EditFileNotes( self, self._current_media )
+        ClientGUIMediaActions.EditFileNotes( self, self._current_media, name_to_start_on = name_to_start_on )
         
     
     def _ManageRatings( self ):
@@ -1229,15 +1241,6 @@ class Canvas( QW.QWidget ):
         ClientGUIMediaActions.UndeleteMedia( self, ( self._current_media, ) )
         
     
-    def _UpdateBackgroundColour( self ):
-        
-        colour = self._GetBackgroundColour()
-        
-        QP.SetBackgroundColour( self, colour )
-        
-        self.update()
-        
-    
     def _ZoomIn( self, zoom_center_type_override = None ):
         
         if self._current_media is not None and self._IsZoomable():
@@ -1419,11 +1422,11 @@ class Canvas( QW.QWidget ):
         return self._my_shortcuts_handler.GetCustomShortcutNames()
         
     
-    def ManageNotes( self, canvas_key ):
+    def ManageNotes( self, canvas_key, name_to_start_on = None ):
         
         if canvas_key == self._canvas_key:
             
-            self._ManageNotes()
+            self._ManageNotes( name_to_start_on = name_to_start_on )
             
         
     
@@ -1997,7 +2000,7 @@ class CanvasPanel( Canvas ):
             
             copy_hash_menu = QW.QMenu( copy_menu )
 
-            ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha256 (hydrus default)', 'Copy this file\'s SHA256 hash.', self._CopyHashToClipboard, 'sha256' )
+            ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha256 ({})'.format( self._current_media.GetHash().hex() ), 'Copy this file\'s SHA256 hash.', self._CopyHashToClipboard, 'sha256' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'md5', 'Copy this file\'s MD5 hash.', self._CopyHashToClipboard, 'md5' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha1', 'Copy this file\'s SHA1 hash.', self._CopyHashToClipboard, 'sha1' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha512', 'Copy this file\'s SHA512 hash.', self._CopyHashToClipboard, 'sha512' )
@@ -2083,12 +2086,12 @@ class CanvasWithDetails( Canvas ):
         HG.client_controller.sub( self, 'RedrawDetails', 'refresh_all_tag_presentation_gui' )
         
     
-    def _DrawAdditionalTopMiddleInfo( self, painter, current_y ):
+    def _DrawAdditionalTopMiddleInfo( self, painter: QG.QPainter, current_y ):
         
         pass
         
     
-    def _DrawBackgroundDetails( self, painter ):
+    def _DrawBackgroundDetails( self, painter: QG.QPainter ):
         
         my_size = self.size()
         
@@ -2108,214 +2111,354 @@ class CanvasWithDetails( Canvas ):
             
         else:
             
-            # tags on the top left
+            self._DrawTags( painter )
             
-            painter.setFont( QW.QApplication.font() )
+            self._DrawTopMiddle( painter )
             
-            tags_manager = self._current_media.GetTagsManager()
+            current_y = self._DrawTopRight( painter )
             
-            current = tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
-            pending = tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
-            petitioned = tags_manager.GetPetitioned( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
+            self._DrawNotes( painter, current_y )
             
-            tags_i_want_to_display = set()
+            self._DrawIndexAndZoom( painter )
             
-            tags_i_want_to_display.update( current )
-            tags_i_want_to_display.update( pending )
-            tags_i_want_to_display.update( petitioned )
+        
+    
+    def _DrawIndexAndZoom( self, painter: QG.QPainter ):
+        
+        my_size = self.size()
+        
+        my_width = my_size.width()
+        my_height = my_size.height()
+        
+        # bottom-right index
+        
+        bottom_right_string = ClientData.ConvertZoomToPercentage( self._current_zoom )
+        
+        index_string = self._GetIndexString()
+        
+        if len( index_string ) > 0:
             
-            tags_i_want_to_display = list( tags_i_want_to_display )
+            bottom_right_string = '{} - {}'.format( bottom_right_string, index_string )
             
-            tag_sort = HG.client_controller.new_options.GetDefaultTagSort()
+        
+        ( text_size, bottom_right_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, bottom_right_string )
+        
+        ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, my_height - text_size.height() - 3, bottom_right_string )
+        
+    
+    def _DrawNotes( self, painter: QG.QPainter, current_y: int ):
+        
+        notes_manager = self._current_media.GetNotesManager()
+        
+        names_to_notes = notes_manager.GetNamesToNotes()
+        
+        if len( names_to_notes ) == 0:
             
-            ClientTagSorting.SortTags( tag_sort, tags_i_want_to_display )
+            return
             
-            current_y = 3
+        
+        my_size = self.size()
+        
+        my_width = my_size.width()
+        my_height = my_size.height()
+        
+        max_notes_width_percentage = 20
+        
+        PADDING = 4
+        
+        max_notes_width = int( my_width * ( max_notes_width_percentage / 100 ) ) - ( PADDING * 2 )
+        
+        notes_width = 0
+        
+        original_font = painter.font()
+        
+        name_font = QG.QFont( original_font )
+        name_font.setBold( True )
+        
+        notes_font = QG.QFont( original_font )
+        notes_font.setBold( False )
+        
+        for ( name, note ) in names_to_notes.items():
             
-            namespace_colours = HC.options[ 'namespace_colours' ]
+            # without wrapping, let's see if we fit into a smaller box than the max possible
             
-            for tag in tags_i_want_to_display:
+            painter.setFont( name_font )
+            
+            name_text_size = painter.fontMetrics().size( 0, name )
+            
+            painter.setFont( notes_font )
+            
+            note_text_size = painter.fontMetrics().size( 0, note )
+            
+            notes_width = max( notes_width, name_text_size.width(), note_text_size.width() )
+            
+            if notes_width > max_notes_width:
                 
-                display_string = ClientTags.RenderTag( tag, True )
+                notes_width = max_notes_width
                 
-                if tag in pending:
-                    
-                    display_string += ' (+)'
-                    
-                
-                if tag in petitioned:
-                    
-                    display_string += ' (-)'
-                    
-                
-                ( namespace, subtag ) = HydrusTags.SplitTag( tag )
-                
-                if namespace in namespace_colours:
-                    
-                    ( r, g, b ) = namespace_colours[ namespace ]
-                    
-                else:
-                    
-                    ( r, g, b ) = namespace_colours[ None ]
-                    
-                
-                painter.setPen( QG.QPen( QG.QColor( r, g, b ) ) )
-                
-                ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
-                
-                ClientGUIFunctions.DrawText( painter, 5, current_y, display_string )
-                
-                current_y += text_size.height()
-                
-            
-            # top right
-            
-            current_y = 2
-            
-            # ratings
-            
-            services_manager = HG.client_controller.services_manager
-            
-            like_services = services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
-            
-            like_services.reverse()
-            
-            like_rating_current_x = my_width - 16 - 2 # -2 to line up exactly with the floating panel
-            
-            for like_service in like_services:
-                
-                service_key = like_service.GetServiceKey()
-                
-                rating_state = ClientRatings.GetLikeStateFromMedia( ( self._current_media, ), service_key )
-                
-                ClientGUIRatings.DrawLike( painter, like_rating_current_x, current_y, service_key, rating_state )
-                
-                like_rating_current_x -= 16
-                
-            
-            if len( like_services ) > 0:
-                
-                current_y += 18
+                break
                 
             
-            numerical_services = services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
+        
+        left_x = my_width - ( notes_width + PADDING )
+        
+        current_y += PADDING * 2
+        
+        draw_a_test_rect = False
+        
+        if draw_a_test_rect:
             
-            for numerical_service in numerical_services:
-                
-                service_key = numerical_service.GetServiceKey()
-                
-                ( rating_state, rating ) = ClientRatings.GetNumericalStateFromMedia( ( self._current_media, ), service_key )
-                
-                numerical_width = ClientGUIRatings.GetNumericalWidth( service_key )
-                
-                ClientGUIRatings.DrawNumerical( painter, my_width - numerical_width - 2, current_y, service_key, rating_state, rating ) # -2 to line up exactly with the floating panel
-                
-                current_y += 18
-                
+            painter.setPen( QG.QPen( QG.QColor( 20, 20, 20 ) ) )
+            painter.setBrush( QC.Qt.NoBrush )
             
-            # icons
+            painter.drawRect( left_x, current_y, notes_width, 100 )
             
-            icons_to_show = []
+        
+        for name in sorted( names_to_notes.keys() ):
             
-            if self._current_media.HasNotes():
-                
-                icons_to_show.append( CC.global_pixmaps().notes )
-                
+            painter.setFont( name_font )
             
-            if self._current_media.GetLocationsManager().IsTrashed():
-                
-                icons_to_show.append( CC.global_pixmaps().trash )
-                
+            text_rect = painter.fontMetrics().boundingRect( left_x, current_y, notes_width, 100, QC.Qt.AlignHCenter | QC.Qt.TextWordWrap, name )
             
-            if self._current_media.HasInbox():
-                
-                icons_to_show.append( CC.global_pixmaps().inbox )
-                
+            painter.drawText( text_rect, QC.Qt.AlignHCenter | QC.Qt.TextWordWrap, name )
             
-            if len( icons_to_show ) > 0:
+            current_y += text_rect.height() + PADDING
+            
+            #
+            
+            painter.setFont( notes_font )
+            
+            note = notes_manager.GetNote( name )
+            
+            text_rect = painter.fontMetrics().boundingRect( left_x, current_y, notes_width, 100, QC.Qt.AlignJustify | QC.Qt.TextWordWrap, note )
+            
+            painter.drawText( text_rect, QC.Qt.AlignJustify | QC.Qt.TextWordWrap, note )
+            
+            current_y += text_rect.height() + PADDING
+            
+            if current_y >= my_height:
                 
-                icon_x = 0
-                
-                for icon in icons_to_show:
-                    
-                    painter.drawPixmap( my_width + icon_x - 18, current_y, icon )
-                    
-                    icon_x -= 18
-                    
-                
-                current_y += 18
+                break
                 
             
-            painter.setPen( QG.QPen( self._new_options.GetColour( CC.COLOUR_MEDIA_TEXT ) ) )
+            # draw a horizontal line
             
-            # repo strings
             
-            remote_strings = self._current_media.GetLocationsManager().GetRemoteLocationStrings()
+        
+        painter.setFont( original_font )
+        
+    
+    def _DrawTags( self, painter: QG.QPainter ):
+        
+        # tags on the top left
+        
+        original_pen = painter.pen()
+        
+        painter.setFont( QW.QApplication.font() )
+        
+        tags_manager = self._current_media.GetTagsManager()
+        
+        current = tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
+        pending = tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
+        petitioned = tags_manager.GetPetitioned( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_SINGLE_MEDIA )
+        
+        tags_i_want_to_display = set()
+        
+        tags_i_want_to_display.update( current )
+        tags_i_want_to_display.update( pending )
+        tags_i_want_to_display.update( petitioned )
+        
+        tags_i_want_to_display = list( tags_i_want_to_display )
+        
+        tag_sort = HG.client_controller.new_options.GetDefaultTagSort()
+        
+        ClientTagSorting.SortTags( tag_sort, tags_i_want_to_display )
+        
+        current_y = 3
+        
+        namespace_colours = HC.options[ 'namespace_colours' ]
+        
+        for tag in tags_i_want_to_display:
             
-            for remote_string in remote_strings:
+            display_string = ClientTags.RenderTag( tag, True )
+            
+            if tag in pending:
                 
-                ( text_size, remote_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, remote_string )
-                
-                ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, remote_string )
-                
-                current_y += text_size.height()
+                display_string += ' (+)'
                 
             
-            # urls
-            
-            urls = self._current_media.GetLocationsManager().GetURLs()
-            
-            url_tuples = HG.client_controller.network_engine.domain_manager.ConvertURLsToMediaViewerTuples( urls )
-            
-            for ( display_string, url ) in url_tuples:
+            if tag in petitioned:
                 
-                ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
-                
-                ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, display_string )
-                
-                current_y += text_size.height() + 2
+                display_string += ' (-)'
                 
             
-            # top-middle
+            ( namespace, subtag ) = HydrusTags.SplitTag( tag )
             
-            current_y = 3
-            
-            title_string = self._current_media.GetTitleString()
-            
-            if len( title_string ) > 0:
+            if namespace in namespace_colours:
                 
-                ( text_size, title_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, title_string )
+                ( r, g, b ) = namespace_colours[ namespace ]
                 
-                ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, title_string )
+            else:
                 
-                current_y += text_size.height() + 3
+                ( r, g, b ) = namespace_colours[ None ]
                 
             
-            info_string = self._GetInfoString()
+            painter.setPen( QG.QPen( QG.QColor( r, g, b ) ) )
             
-            ( text_size, info_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, info_string )
+            ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
             
-            ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, info_string )
+            ClientGUIFunctions.DrawText( painter, 5, current_y, display_string )
+            
+            current_y += text_size.height()
+            
+        
+        painter.setPen( original_pen )
+        
+    
+    def _DrawTopMiddle( self, painter: QG.QPainter ):
+        
+        my_size = self.size()
+        
+        my_width = my_size.width()
+        my_height = my_size.height()
+        
+        # top-middle
+        
+        painter.setPen( QG.QPen( self._new_options.GetColour( CC.COLOUR_MEDIA_TEXT ) ) )
+        
+        current_y = 3
+        
+        title_string = self._current_media.GetTitleString()
+        
+        if len( title_string ) > 0:
+            
+            ( text_size, title_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, title_string )
+            
+            ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, title_string )
             
             current_y += text_size.height() + 3
             
-            self._DrawAdditionalTopMiddleInfo( painter, current_y )
+        
+        info_string = self._GetInfoString()
+        
+        ( text_size, info_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, info_string )
+        
+        ClientGUIFunctions.DrawText( painter, ( my_width - text_size.width() ) // 2, current_y, info_string )
+        
+        current_y += text_size.height() + 3
+        
+        self._DrawAdditionalTopMiddleInfo( painter, current_y )
+        
+    
+    def _DrawTopRight( self, painter: QG.QPainter ) -> int:
+        
+        my_size = self.size()
+        
+        my_width = my_size.width()
+        my_height = my_size.height()
+        
+        current_y = 2
+        
+        # ratings
+        
+        services_manager = HG.client_controller.services_manager
+        
+        like_services = services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
+        
+        like_services.reverse()
+        
+        like_rating_current_x = my_width - 16 - 2 # -2 to line up exactly with the floating panel
+        
+        for like_service in like_services:
             
-            # bottom-right index
+            service_key = like_service.GetServiceKey()
             
-            bottom_right_string = ClientData.ConvertZoomToPercentage( self._current_zoom )
+            rating_state = ClientRatings.GetLikeStateFromMedia( ( self._current_media, ), service_key )
             
-            index_string = self._GetIndexString()
+            ClientGUIRatings.DrawLike( painter, like_rating_current_x, current_y, service_key, rating_state )
             
-            if len( index_string ) > 0:
+            like_rating_current_x -= 16
+            
+        
+        if len( like_services ) > 0:
+            
+            current_y += 18
+            
+        
+        numerical_services = services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
+        
+        for numerical_service in numerical_services:
+            
+            service_key = numerical_service.GetServiceKey()
+            
+            ( rating_state, rating ) = ClientRatings.GetNumericalStateFromMedia( ( self._current_media, ), service_key )
+            
+            numerical_width = ClientGUIRatings.GetNumericalWidth( service_key )
+            
+            ClientGUIRatings.DrawNumerical( painter, my_width - numerical_width - 2, current_y, service_key, rating_state, rating ) # -2 to line up exactly with the floating panel
+            
+            current_y += 18
+            
+        
+        # icons
+        
+        icons_to_show = []
+        
+        if self._current_media.GetLocationsManager().IsTrashed():
+            
+            icons_to_show.append( CC.global_pixmaps().trash )
+            
+        
+        if self._current_media.HasInbox():
+            
+            icons_to_show.append( CC.global_pixmaps().inbox )
+            
+        
+        if len( icons_to_show ) > 0:
+            
+            icon_x = 0
+            
+            for icon in icons_to_show:
                 
-                bottom_right_string = '{} - {}'.format( bottom_right_string, index_string )
+                painter.drawPixmap( my_width + icon_x - 18, current_y, icon )
+                
+                icon_x -= 18
                 
             
-            ( text_size, bottom_right_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, bottom_right_string )
+            current_y += 18
             
-            ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, my_height - text_size.height() - 3, bottom_right_string )
+        
+        painter.setPen( QG.QPen( self._new_options.GetColour( CC.COLOUR_MEDIA_TEXT ) ) )
+        
+        # repo strings
+        
+        remote_strings = self._current_media.GetLocationsManager().GetRemoteLocationStrings()
+        
+        for remote_string in remote_strings:
             
+            ( text_size, remote_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, remote_string )
+            
+            ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, remote_string )
+            
+            current_y += text_size.height()
+            
+        
+        # urls
+        
+        urls = self._current_media.GetLocationsManager().GetURLs()
+        
+        url_tuples = HG.client_controller.network_engine.domain_manager.ConvertURLsToMediaViewerTuples( urls )
+        
+        for ( display_string, url ) in url_tuples:
+            
+            ( text_size, display_string ) = ClientGUIFunctions.GetTextSizeFromPainter( painter, display_string )
+            
+            ClientGUIFunctions.DrawText( painter, my_width - text_size.width() - 3, current_y, display_string )
+            
+            current_y += text_size.height() + 2
+            
+        
+        return current_y
         
     
     def _GetInfoString( self ):
@@ -2352,17 +2495,31 @@ class CanvasWithHovers( CanvasWithDetails ):
         
         CanvasWithDetails.__init__( self, parent, location_context )
         
+        self._hovers = []
+        
         top_hover = self._GenerateHoverTopFrame()
+        
+        self._hovers.append( top_hover )
         
         self._my_shortcuts_handler.AddWindowToFilter( top_hover )
         
-        hover = ClientGUICanvasHoverFrames.CanvasHoverFrameTags( self, self, top_hover, self._canvas_key )
+        tags_hover = ClientGUICanvasHoverFrames.CanvasHoverFrameTags( self, self, top_hover, self._canvas_key )
         
-        self._my_shortcuts_handler.AddWindowToFilter( hover )
+        self._hovers.append( tags_hover )
         
-        hover = ClientGUICanvasHoverFrames.CanvasHoverFrameTopRight( self, self, top_hover, self._canvas_key )
+        self._my_shortcuts_handler.AddWindowToFilter( tags_hover )
         
-        self._my_shortcuts_handler.AddWindowToFilter( hover )
+        top_right_hover = ClientGUICanvasHoverFrames.CanvasHoverFrameTopRight( self, self, top_hover, self._canvas_key )
+        
+        self._hovers.append( top_right_hover )
+        
+        self._my_shortcuts_handler.AddWindowToFilter( top_right_hover )
+        
+        self._right_notes_hover = ClientGUICanvasHoverFrames.CanvasHoverFrameRightNotes( self, self, top_right_hover, self._canvas_key )
+        
+        self._hovers.append( self._right_notes_hover )
+        
+        self._my_shortcuts_handler.AddWindowToFilter( self._right_notes_hover )
         
         for name in self._new_options.GetStringList( 'default_media_viewer_custom_shortcuts' ):
             
@@ -2381,6 +2538,8 @@ class CanvasWithHovers( CanvasWithDetails ):
         
         HG.client_controller.sub( self, 'CloseFromHover', 'canvas_close' )
         HG.client_controller.sub( self, 'FullscreenSwitch', 'canvas_fullscreen_switch' )
+        
+        HG.client_controller.gui.RegisterUIUpdateWindow( self )
         
     
     def _GenerateHoverTopFrame( self ):
@@ -2606,6 +2765,13 @@ class CanvasWithHovers( CanvasWithDetails ):
         return command_processed
         
     
+    def TIMERUIUpdate( self ):
+        
+        for hover in self._hovers:
+            
+            hover.DoRegularHideShow()
+            
+        
 class CanvasFilterDuplicates( CanvasWithHovers ):
     
     CANVAS_TYPE = CC.CANVAS_MEDIA_VIEWER_DUPLICATES
@@ -2616,7 +2782,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         CanvasWithHovers.__init__( self, parent, location_context )
         
-        hover = ClientGUICanvasHoverFrames.CanvasHoverFrameRightDuplicates( self, self, self._canvas_key )
+        hover = ClientGUICanvasHoverFrames.CanvasHoverFrameRightDuplicates( self, self, self._right_notes_hover, self._canvas_key )
+        
+        self._hovers.append( hover )
         
         self._my_shortcuts_handler.AddWindowToFilter( hover )
         
@@ -2659,7 +2827,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         pair_info = []
         
-        for ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs:
+        for ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs:
             
             if duplicate_type is None or was_auto_skipped:
                 
@@ -2919,7 +3087,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     def _GetNumCommittableDecisions( self ):
         
-        return len( [ 1 for ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs if duplicate_type is not None and not was_auto_skipped ] )
+        return len( [ 1 for ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs if duplicate_type is not None and not was_auto_skipped ] )
         
     
     def _GoBack( self ):
@@ -2928,9 +3096,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             self._unprocessed_pairs.append( self._current_pair )
             
-            ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
+            ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
             
-            self._unprocessed_pairs.append( hash_pair )
+            self._unprocessed_pairs.append( media_result_pair )
             
             while was_auto_skipped:
                 
@@ -2943,13 +3111,17 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     return
                     
                 
-                ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
+                ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                 
-                self._unprocessed_pairs.append( hash_pair )
+                self._unprocessed_pairs.append( media_result_pair )
                 
             
-            self._hashes_due_to_be_deleted_in_this_batch.difference_update( hash_pair )
-            self._hashes_processed_in_this_batch.difference_update( hash_pair )
+            # only want this for the one that wasn't auto-skipped
+            for hash in ( first_media.GetHash(), second_media.GetHash() ):
+                
+                self._hashes_due_to_be_deleted_in_this_batch.discard( hash )
+                self._hashes_processed_in_this_batch.discard( hash )
+                
             
             self._ShowNewPair()
             
@@ -2968,6 +3140,42 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     def _MediaAreTheSame( self ):
         
         self._ProcessPair( HC.DUPLICATE_SAME_QUALITY )
+        
+    
+    def _PrefetchNeighbours( self ):
+        
+        if self._current_media is None:
+            
+            return
+            
+        
+        other_media = self._media_list.GetNext( self._current_media )
+        
+        media_to_prefetch = [ other_media ]
+        
+        # this doesn't handle big skip events, but that's a job for later
+        if len( self._unprocessed_pairs ) > 0:
+            
+            media_to_prefetch.extend( self._unprocessed_pairs[-1] )
+            
+        
+        image_cache = HG.client_controller.GetCache( 'images' )
+        
+        for media in media_to_prefetch:
+            
+            hash = media.GetHash()
+            mime = media.GetMime()
+            
+            if media.IsStaticImage():
+                
+                if not image_cache.HasImageRenderer( hash ):
+                    
+                    # we do qt safe to make sure the job is cancelled if we are destroyed
+                    
+                    HG.client_controller.CallAfterQtSafe( self, 'image pre-fetch', image_cache.PrefetchImageRenderer, media )
+                    
+                
+            
         
     
     def _ProcessPair( self, duplicate_type, delete_first = False, delete_second = False, delete_both = False, duplicate_action_options = None ):
@@ -3080,9 +3288,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                 
             else:
                 
-                ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
+                ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                 
-                self._unprocessed_pairs.append( hash_pair )
+                self._unprocessed_pairs.append( media_result_pair )
                 
                 while was_auto_skipped:
                     
@@ -3097,13 +3305,16 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                         return
                         
                     
-                    ( hash_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
+                    ( media_result_pair, duplicate_type, first_media, second_media, service_keys_to_content_updates, was_auto_skipped ) = self._processed_pairs.pop()
                     
-                    self._unprocessed_pairs.append( hash_pair )
+                    self._unprocessed_pairs.append( media_result_pair )
                     
                 
-                self._hashes_due_to_be_deleted_in_this_batch.difference_update( hash_pair )
-                self._hashes_processed_in_this_batch.difference_update( hash_pair )
+                for hash in ( first_media.GetHash(), second_media.GetHash() ):
+                    
+                    self._hashes_due_to_be_deleted_in_this_batch.difference_update( hash )
+                    self._hashes_processed_in_this_batch.difference_update( hash )
+                    
                 
             
         
@@ -3139,7 +3350,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
                     return False
                     
                 
-                ( first_media_result, second_media_result ) = HG.client_controller.Read( 'media_results', pair )
+                ( first_media_result, second_media_result ) = pair
                 
                 first_media = ClientMedia.MediaSingleton( first_media_result )
                 second_media = ClientMedia.MediaSingleton( second_media_result )
@@ -3185,7 +3396,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             self._current_pair = potential_pair
             
-            ( first_media_result, second_media_result ) = HG.client_controller.Read( 'media_results', self._current_pair )
+            ( first_media_result, second_media_result ) = self._current_pair
             
             if not ( first_media_result.GetLocationsManager().IsLocal() and second_media_result.GetLocationsManager().IsLocal() ):
                 
@@ -3653,7 +3864,7 @@ class CanvasMediaList( ClientMedia.ListeningMediaList, CanvasWithHovers ):
         self.SetMedia( self._GetPrevious( self._current_media ) )
         
     
-    def _StartSlideshow( self, interval ):
+    def _StartSlideshow( self, interval: float ):
         
         pass
         
@@ -4165,7 +4376,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
         CanvasMediaListNavigable.__init__( self, parent, page_key, location_context, media_results )
         
         self._timer_slideshow_job = None
-        self._timer_slideshow_interval = 0
+        self._timer_slideshow_interval = 0.0
         
         if first_hash is None:
             
@@ -4199,7 +4410,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             
         elif self._timer_slideshow_interval > 0:
             
-            self._StartSlideshow( self._timer_slideshow_interval )
+            self._StartSlideshow( interval = self._timer_slideshow_interval )
             
         
     
@@ -4208,37 +4419,35 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
         return self._timer_slideshow_job is not None
         
     
-    def _StartSlideshow( self, interval = None ):
+    def _StartSlideshow( self, interval: float ):
         
         self._StopSlideshow()
-        
-        if interval is None:
-            
-            with ClientGUIDialogs.DialogTextEntry( self, 'Enter the interval, in seconds.', default = '15', min_char_width = 12 ) as dlg:
-                
-                if dlg.exec() == QW.QDialog.Accepted:
-                    
-                    try:
-                        
-                        interval = float( dlg.GetValue() )
-                        
-                    except:
-                        
-                        return
-                        
-                    
-                else:
-                    
-                    return
-                    
-                
-            
         
         if interval > 0:
             
             self._timer_slideshow_interval = interval
             
             self._timer_slideshow_job = HG.client_controller.CallLaterQtSafe( self, self._timer_slideshow_interval, 'slideshow', self.DoSlideshow )
+            
+        
+    
+    def _StartSlideshowCustomInterval( self ):
+        
+        with ClientGUIDialogs.DialogTextEntry( self, 'Enter the interval, in seconds.', default = '15', min_char_width = 12 ) as dlg:
+            
+            if dlg.exec() == QW.QDialog.Accepted:
+                
+                try:
+                    
+                    interval = float( dlg.GetValue() )
+                    
+                    self._StartSlideshow( interval )
+                    
+                except:
+                    
+                    pass
+                    
+                
             
         
     
@@ -4413,7 +4622,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             ClientGUIMenus.AppendMenuItem( slideshow, '30 second', 'Start a slideshow with a thirty second interval.', self._StartSlideshow, 30.0 )
             ClientGUIMenus.AppendMenuItem( slideshow, '60 second', 'Start a slideshow with a one minute interval.', self._StartSlideshow, 60.0 )
             ClientGUIMenus.AppendMenuItem( slideshow, 'very fast', 'Start a very fast slideshow.', self._StartSlideshow, 0.08 )
-            ClientGUIMenus.AppendMenuItem( slideshow, 'custom interval', 'Start a slideshow with a custom interval.', self._StartSlideshow )
+            ClientGUIMenus.AppendMenuItem( slideshow, 'custom interval', 'Start a slideshow with a custom interval.', self._StartSlideshowCustomInterval )
             
             ClientGUIMenus.AppendMenu( menu, slideshow, 'start slideshow' )
             
@@ -4514,7 +4723,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             
             copy_hash_menu = QW.QMenu( copy_menu )
 
-            ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha256 (hydrus default)', 'Copy this file\'s SHA256 hash to your clipboard.', self._CopyHashToClipboard, 'sha256' )
+            ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha256 ({})'.format( self._current_media.GetHash().hex() ), 'Copy this file\'s SHA256 hash to your clipboard.', self._CopyHashToClipboard, 'sha256' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'md5', 'Copy this file\'s MD5 hash to your clipboard.', self._CopyHashToClipboard, 'md5' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha1', 'Copy this file\'s SHA1 hash to your clipboard.', self._CopyHashToClipboard, 'sha1' )
             ClientGUIMenus.AppendMenuItem( copy_hash_menu, 'sha512', 'Copy this file\'s SHA512 hash to your clipboard.', self._CopyHashToClipboard, 'sha512' )

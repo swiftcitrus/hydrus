@@ -197,10 +197,10 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
             limits_max = 1000
             
         
-        self._initial_file_limit = QP.MakeQSpinBox( self._file_limits_panel, min=1, max=limits_max )
+        self._initial_file_limit = ClientGUICommon.BetterSpinBox( self._file_limits_panel, min=1, max=limits_max )
         self._initial_file_limit.setToolTip( 'The first sync will add no more than this many URLs.' )
         
-        self._periodic_file_limit = QP.MakeQSpinBox( self._file_limits_panel, min=1, max=limits_max )
+        self._periodic_file_limit = ClientGUICommon.BetterSpinBox( self._file_limits_panel, min=1, max=limits_max )
         self._periodic_file_limit.setToolTip( 'Normal syncs will add no more than this many URLs, stopping early if they find several URLs the query has seen before.' )
         
         self._this_is_a_random_sample_sub = QW.QCheckBox( self._file_limits_panel )
@@ -1369,7 +1369,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         QP.AddToLayout( vbox, help_hbox, CC.FLAGS_ON_RIGHT )
         
-        if HG.client_controller.options[ 'pause_subs_sync' ]:
+        if HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ):
             
             message = 'SUBSCRIPTIONS ARE CURRENTLY GLOBALLY PAUSED! CHECK THE NETWORK MENU TO UNPAUSE THEM.'
             

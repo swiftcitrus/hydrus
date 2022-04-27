@@ -2,7 +2,7 @@ import os
 import re
 import typing
 
-from qtpy import QtCore as QC
+from qtpy import QtCore as QC, QtWidgets as QW
 from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
@@ -559,6 +559,33 @@ class BetterNotebook( QW.QTabWidget ):
         self._ShiftSelection( 1 )
         
     
+class BetterSpinBox( QW.QSpinBox ):
+    
+    def __init__( self, parent: QW.QWidget, initial = None, min = None, max = None, width = None ):
+        
+        QW.QSpinBox.__init__( self, parent )
+        
+        if min is not None:
+            
+            self.setMinimum( min )
+            
+        
+        if max is not None:
+            
+            self.setMaximum( max )
+            
+        
+        if initial is not None:
+            
+            self.setValue( initial )
+            
+        
+        if width is not None:
+            
+            self.setMinimumWidth( width )
+            
+        
+    
 class ButtonWithMenuArrow( QW.QToolButton ):
     
     def __init__( self, parent: QW.QWidget, action: QW.QAction ):
@@ -682,11 +709,20 @@ class BetterHyperLink( BetterStaticText ):
         self._url = url
         
         self.setToolTip( self._url )
-
-        self.setTextFormat( QC.Qt.RichText )
-        self.setTextInteractionFlags( QC.Qt.TextBrowserInteraction )
         
-        self.setText( '<a href="{}">{}</a>'.format( url, label ) )
+        self.setTextFormat( QC.Qt.RichText )
+        self.setTextInteractionFlags( QC.Qt.LinksAccessibleByMouse | QC.Qt.LinksAccessibleByKeyboard )
+        
+        self._colours = {
+            'link_color' : QG.QColor( 0, 0, 255 )
+        }
+        
+        self.setObjectName( 'HydrusHyperlink' )
+        
+        # need this polish to load the QSS property and update self._colours
+        self.style().polish( self )
+        
+        self.setText( '<a style="text-decoration:none; color:{};" href="{}">{}</a>'.format( self._colours[ 'link_color' ].name(), url, label ) )
         
         self.linkActivated.connect( self.Activated )
         
@@ -695,7 +731,19 @@ class BetterHyperLink( BetterStaticText ):
         
         ClientPaths.LaunchURLInWebBrowser( self._url )
         
-
+    
+    def get_link_color( self ):
+        
+        return self._colours[ 'link_color' ]
+        
+    
+    def set_link_color( self, colour ):
+        
+        self._colours[ 'link_color' ] = colour
+        
+    
+    link_color = QC.Property( QG.QColor, get_link_color, set_link_color )
+    
 class BufferedWindow( QW.QWidget ):
     
     def __init__( self, *args, **kwargs ):
@@ -763,6 +811,17 @@ class BufferedWindowIcon( BufferedWindow ):
             
             self._click_callable()
             
+        
+    
+class BusyCursor( object ):
+    
+    def __enter__( self ):
+        
+        QW.QApplication.setOverrideCursor( QC.Qt.WaitCursor )
+    
+    def __exit__( self, exc_type, exc_val, exc_tb ):
+        
+        QW.QApplication.restoreOverrideCursor()
         
     
 class CheckboxManager( object ):
@@ -868,7 +927,7 @@ class AlphaColourControl( QW.QWidget ):
         
         self._colour_picker = BetterColourControl( self )
         
-        self._alpha_selector = QP.MakeQSpinBox( self, min=0, max=255 )
+        self._alpha_selector = BetterSpinBox( self, min=0, max=255 )
         
         hbox = QP.HBoxLayout( spacing = 5 )
         
@@ -1409,7 +1468,7 @@ class NoneableSpinCtrl( QW.QWidget ):
         self._checkbox.stateChanged.connect( self.EventCheckBox )
         self._checkbox.setText( none_phrase )
         
-        self._one = QP.MakeQSpinBox( self, min=min, max=max )
+        self._one = BetterSpinBox( self, min=min, max=max )
         
         width = ClientGUIFunctions.ConvertTextToPixelWidth( self._one, len( str( max ) ) + 5 )
         
@@ -1417,7 +1476,7 @@ class NoneableSpinCtrl( QW.QWidget ):
         
         if num_dimensions == 2:
             
-            self._two = QP.MakeQSpinBox( self, initial=0, min=min, max=max )
+            self._two = BetterSpinBox( self, initial=0, min=min, max=max )
             self._two.valueChanged.connect( self._HandleValueChanged )
             
             width = ClientGUIFunctions.ConvertTextToPixelWidth( self._two, len( str( max ) ) + 5 )
@@ -1931,4 +1990,3 @@ class TextAndGauge( QW.QWidget ):
         self._gauge.SetRange( range )
         self._gauge.SetValue( value )
         
-    

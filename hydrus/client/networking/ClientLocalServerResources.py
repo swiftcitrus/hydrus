@@ -24,6 +24,7 @@ from twisted.web.static import File as FileResource
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
+from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusTags
@@ -55,13 +56,18 @@ LOCAL_BOORU_JSON_BYTE_LIST_PARAMS = set()
 CLIENT_API_INT_PARAMS = { 'file_id', 'file_sort_type' }
 CLIENT_API_BYTE_PARAMS = { 'hash', 'destination_page_key', 'page_key', 'Hydrus-Client-API-Access-Key', 'Hydrus-Client-API-Session-Key', 'tag_service_key', 'file_service_key' }
 CLIENT_API_STRING_PARAMS = { 'name', 'url', 'domain', 'search', 'file_service_name', 'tag_service_name', 'reason' }
-CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'system_inbox', 'system_archive', 'tags', 'file_ids', 'only_return_identifiers', 'detailed_url_information', 'hide_service_names_tags', 'simple', 'file_sort_asc', 'return_hashes', 'include_notes', 'notes', 'note_names' }
+CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'system_inbox', 'system_archive', 'tags', 'file_ids', 'only_return_identifiers', 'only_return_basic_information', 'create_new_file_ids', 'detailed_url_information', 'hide_service_names_tags', 'simple', 'file_sort_asc', 'return_hashes', 'return_file_ids', 'include_notes', 'notes', 'note_names' }
 CLIENT_API_JSON_BYTE_LIST_PARAMS = { 'hashes' }
 CLIENT_API_JSON_BYTE_DICT_PARAMS = { 'service_keys_to_tags', 'service_keys_to_actions_to_tags', 'service_keys_to_additional_tags' }
 
 def Dumps( data, mime ):
     
-    if CBOR_AVAILABLE and mime == HC.APPLICATION_CBOR:
+    if mime == HC.APPLICATION_CBOR:
+        
+        if not CBOR_AVAILABLE:
+            
+            raise HydrusExceptions.NotAcceptable( 'Sorry, this service does not support CBOR!' )
+            
         
         return cbor2.dumps( data )
     
@@ -266,7 +272,7 @@ def ParseClientAPIPOSTArgs( request ):
     
     if not request.requestHeaders.hasHeader( 'Content-Type' ):
         
-        request_mime = HC.APPLICATION_JSON
+        request_content_type_mime = HC.APPLICATION_JSON
         
         parsed_request_args = HydrusNetworkVariableHandling.ParsedRequestArguments()
         
@@ -286,7 +292,7 @@ def ParseClientAPIPOSTArgs( request ):
         
         try:
             
-            request_mime = HC.mime_enum_lookup[ content_type ]
+            request_content_type_mime = HC.mime_enum_lookup[ content_type ]
             
         except:
             
@@ -295,7 +301,7 @@ def ParseClientAPIPOSTArgs( request ):
         
         total_bytes_read = 0
         
-        if request_mime == HC.APPLICATION_JSON:
+        if request_content_type_mime == HC.APPLICATION_JSON:
             
             json_bytes = request.content.read()
             
@@ -307,7 +313,12 @@ def ParseClientAPIPOSTArgs( request ):
             
             parsed_request_args = ParseClientAPIPOSTByteArgs( args )
         
-        elif request_mime == HC.APPLICATION_CBOR and CBOR_AVAILABLE:
+        elif request_content_type_mime == HC.APPLICATION_CBOR:
+            
+            if not CBOR_AVAILABLE:
+                
+                raise HydrusExceptions.NotAcceptable( 'Sorry, this service does not support CBOR!' )
+                
             
             cbor_bytes = request.content.read()
             
@@ -337,7 +348,7 @@ def ParseClientAPIPOSTArgs( request ):
             
         
     
-    return ( parsed_request_args, total_bytes_read, request_mime )
+    return ( parsed_request_args, total_bytes_read )
     
 def ParseClientAPISearchPredicates( request ):
     
@@ -468,6 +479,51 @@ def ParseHashes( request: HydrusServerRequest.HydrusRequest ):
     
     return hashes
     
+def ParseRequestedResponseMime( request: HydrusServerRequest.HydrusRequest ):
+    
+    # let them ask for something specifically, else default to what they asked in, finally default to json
+    
+    if request.requestHeaders.hasHeader( 'Accept' ):
+        
+        accepts = request.requestHeaders.getRawHeaders( 'Accept' )
+        
+        accept = accepts[0]
+        
+        if 'cbor' in accept and 'json' not in accept:
+            
+            return HC.APPLICATION_CBOR
+            
+        elif 'json' in accept and 'cbor' not in accept:
+            
+            return HC.APPLICATION_JSON
+            
+        
+    
+    if request.requestHeaders.hasHeader( 'Content-Type' ):
+        
+        content_types = request.requestHeaders.getRawHeaders( 'Content-Type' )
+        
+        content_type = content_types[0]
+        
+        if 'cbor' in content_type:
+            
+            return HC.APPLICATION_CBOR
+            
+        elif 'json' in content_type:
+            
+            return HC.APPLICATION_JSON
+            
+        
+        
+    
+    if b'cbor' in request.args:
+        
+        return HC.APPLICATION_CBOR
+        
+    
+    return HC.APPLICATION_JSON
+    
+
 def ConvertTagListToPredicates( request, tag_list, do_permission_check = True ) -> list:
     
     or_tag_lists = [ tag for tag in tag_list if isinstance( tag, list ) ]
@@ -855,20 +911,34 @@ class HydrusResourceClientAPI( HydrusServerResources.HydrusResource ):
         
         request.parsed_request_args = parsed_request_args
         
-        request.preferred_mime = HC.APPLICATION_CBOR if CBOR_AVAILABLE and b'cbor' in request.args else HC.APPLICATION_JSON
+        requested_response_mime = ParseRequestedResponseMime( request )
+        
+        if requested_response_mime == HC.APPLICATION_CBOR and not CBOR_AVAILABLE:
+            
+            raise HydrusExceptions.NotAcceptable( 'Sorry, this service does not support CBOR!' )
+            
+        
+        request.preferred_mime = requested_response_mime
         
         return request
         
     
     def _callbackParsePOSTArgs( self, request: HydrusServerRequest.HydrusRequest ):
         
-        ( parsed_request_args, total_bytes_read, request_mime ) = ParseClientAPIPOSTArgs( request )
+        ( parsed_request_args, total_bytes_read ) = ParseClientAPIPOSTArgs( request )
         
         self._reportDataUsed( request, total_bytes_read )
         
         request.parsed_request_args = parsed_request_args
         
-        request.preferred_mime = request_mime
+        requested_response_mime = ParseRequestedResponseMime( request )
+        
+        if requested_response_mime == HC.APPLICATION_CBOR and not CBOR_AVAILABLE:
+            
+            raise HydrusExceptions.NotAcceptable( 'Sorry, this service does not support CBOR!' )
+            
+        
+        request.preferred_mime = requested_response_mime
         
         return request
         
@@ -2108,20 +2178,30 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
             return_hashes = request.parsed_request_args.GetValue( 'return_hashes', bool )
             
         
+        return_file_ids = True
+        
+        if 'return_file_ids' in request.parsed_request_args:
+            
+            return_file_ids = request.parsed_request_args.GetValue( 'return_file_ids', bool )
+            
+        
         hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context, sort_by = sort_by, apply_implicit_limit = False )
         
         request.client_api_permissions.SetLastSearchResults( hash_ids )
+        
+        body_dict = {}
         
         if return_hashes:
             
             hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
             
             # maintain sort
-            body_dict = { 'hashes' : [ hash_ids_to_hashes[ hash_id ].hex() for hash_id in hash_ids ], 'file_ids' : list( hash_ids ) }
+            body_dict[ 'hashes' ] = [ hash_ids_to_hashes[ hash_id ].hex() for hash_id in hash_ids ]
             
-        else:
+        
+        if return_file_ids:
             
-            body_dict = { 'file_ids' : list( hash_ids ) }
+            body_dict[ 'file_ids' ] = list( hash_ids )
             
         
         body = Dumps( body_dict, request.preferred_mime )
@@ -2189,60 +2269,71 @@ class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClien
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
         
+        missing_hashes = set()
+        
         only_return_identifiers = request.parsed_request_args.GetValue( 'only_return_identifiers', bool, default_value = False )
+        only_return_basic_information = request.parsed_request_args.GetValue( 'only_return_basic_information', bool, default_value = False )
         hide_service_names_tags = request.parsed_request_args.GetValue( 'hide_service_names_tags', bool, default_value = False )
         detailed_url_information = request.parsed_request_args.GetValue( 'detailed_url_information', bool, default_value = False )
         include_notes = request.parsed_request_args.GetValue( 'include_notes', bool, default_value = False )
+        create_new_file_ids = request.parsed_request_args.GetValue( 'create_new_file_ids', bool, default_value = False )
+        
+        if 'file_ids' in request.parsed_request_args or 'file_id' in request.parsed_request_args:
+            
+            if 'file_ids' in request.parsed_request_args:
+                
+                file_ids = request.parsed_request_args.GetValue( 'file_ids', list, expected_list_type = int )
+            
+            else:
+                
+                file_ids = [ request.parsed_request_args.GetValue( 'file_id', int ) ]
+            
+            request.client_api_permissions.CheckPermissionToSeeFiles( file_ids )
+            
+        elif 'hashes' in request.parsed_request_args or 'hash' in request.parsed_request_args:
+            
+            request.client_api_permissions.CheckCanSeeAllFiles()
+            
+            if 'hashes' in request.parsed_request_args:
+                
+                hashes = request.parsed_request_args.GetValue( 'hashes', list, expected_list_type = bytes )
+            
+            else:
+                
+                hashes = [ request.parsed_request_args.GetValue( 'hash', bytes ) ]
+                
+            
+            hashes = HydrusData.DedupeList( hashes )
+            
+            CheckHashLength( hashes )
+            
+            file_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hashes = hashes, create_new_hash_ids = create_new_file_ids )
+            
+            file_ids = set( file_ids_to_hashes.keys() )
+            
+            if len( file_ids_to_hashes ) < len( hashes ):
+                
+                missing_hashes = set( hashes ).difference( file_ids_to_hashes.values() )
+                
+            
+        else:
+            
+            raise HydrusExceptions.BadRequestException( 'Please include a file_ids or hashes parameter!' )
+            
         
         try:
             
-            if 'file_ids' in request.parsed_request_args or 'file_id' in request.parsed_request_args:
+            if only_return_identifiers:
                 
-                if 'file_ids' in request.parsed_request_args:
-                    
-                    file_ids = request.parsed_request_args.GetValue( 'file_ids', list, expected_list_type = int )
+                file_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = file_ids )
                 
-                else:
-                    
-                    file_ids = [ request.parsed_request_args.GetValue( 'file_id', int ) ]
+            elif only_return_basic_information:
                 
-                request.client_api_permissions.CheckPermissionToSeeFiles( file_ids )
-                
-                if only_return_identifiers:
-                    
-                    file_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = file_ids )
-                    
-                else:
-                    
-                    media_results = HG.client_controller.Read( 'media_results_from_ids', file_ids, sorted = True )
-                    
-                
-            elif 'hashes' in request.parsed_request_args or 'hash' in request.parsed_request_args:
-                
-                request.client_api_permissions.CheckCanSeeAllFiles()
-                
-                if 'hashes' in request.parsed_request_args:
-                    
-                    hashes = request.parsed_request_args.GetValue( 'hashes', list, expected_list_type = bytes )
-                
-                else:
-                    
-                    hashes = [ request.parsed_request_args.GetValue( 'hash', bytes ) ]
-                
-                CheckHashLength( hashes )
-                
-                if only_return_identifiers:
-                    
-                    file_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hashes = hashes )
-                    
-                else:
-                    
-                    media_results = HG.client_controller.Read( 'media_results', hashes, sorted = True )
-                    
+                file_info_managers = HG.client_controller.Read( 'file_info_managers_from_ids', file_ids, sorted = True )
                 
             else:
                 
-                raise HydrusExceptions.BadRequestException( 'Please include a file_ids or hashes parameter!' )
+                media_results = HG.client_controller.Read( 'media_results_from_ids', file_ids, sorted = True )
                 
             
         except HydrusExceptions.DataMissing as e:
@@ -2254,6 +2345,16 @@ class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClien
         
         metadata = []
         
+        for hash in missing_hashes:
+            
+            metadata_row = {
+                'file_id' : None,
+                'hash' : hash.hex()
+            }
+            
+            metadata.append( metadata_row )
+            
+        
         if only_return_identifiers:
             
             for ( file_id, hash ) in file_ids_to_hashes.items():
@@ -2261,6 +2362,27 @@ class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClien
                 metadata_row = {
                     'file_id' : file_id,
                     'hash' : hash.hex()
+                }
+                
+                metadata.append( metadata_row )
+                
+            
+        elif only_return_basic_information:
+            
+            for file_info_manager in file_info_managers:
+                
+                metadata_row = {
+                    'file_id' : file_info_manager.hash_id,
+                    'hash' : file_info_manager.hash.hex(),
+                    'size' : file_info_manager.size,
+                    'mime' : HC.mime_mimetype_string_lookup[ file_info_manager.mime ],
+                    'ext' : HC.mime_ext_lookup[ file_info_manager.mime ],
+                    'width' : file_info_manager.width,
+                    'height' : file_info_manager.height,
+                    'duration' : file_info_manager.duration,
+                    'num_frames' : file_info_manager.num_frames,
+                    'num_words' : file_info_manager.num_words,
+                    'has_audio' : file_info_manager.has_audio
                 }
                 
                 metadata.append( metadata_row )
@@ -2493,7 +2615,9 @@ class HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( HydrusResourceClien
             path = HydrusPaths.mimes_to_default_thumbnail_paths[ media_result.GetMime() ]
             
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = HC.APPLICATION_OCTET_STREAM, path = path )
+        mime = HydrusFileHandling.GetThumbnailMime( path )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path )
         
         return response_context
         

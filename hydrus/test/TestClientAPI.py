@@ -30,6 +30,14 @@ from hydrus.client.networking import ClientLocalServer
 from hydrus.client.networking import ClientLocalServerResources
 from hydrus.client.networking import ClientNetworkingContexts
 
+CBOR_AVAILABLE = False
+try:
+    import cbor2
+    import base64
+    CBOR_AVAILABLE = True
+except:
+    pass
+
 class TestClientAPI( unittest.TestCase ):
     
     @classmethod
@@ -94,6 +102,108 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( data, favicon )
         
         time.sleep( 3 )
+        
+    
+    def _test_cbor( self, connection, set_up_permissions ):
+        
+        # get url files
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        json_headers = dict( headers )
+        json_headers[ 'Accept' ] = 'application/json'
+        
+        cbor_headers = dict( headers )
+        cbor_headers[ 'Accept' ] = 'application/cbor'
+        
+        url = 'http://safebooru.org/index.php?page=post&s=view&id=2753608'
+        normalised_url = 'https://safebooru.org/index.php?id=2753608&page=post&s=view'
+        
+        expected_answer = {}
+        
+        expected_answer[ 'normalised_url' ] = normalised_url
+        expected_answer[ 'url_type' ] = HC.URL_TYPE_POST
+        expected_answer[ 'url_type_string' ] = 'post url'
+        expected_answer[ 'match_name' ] = 'safebooru file page'
+        expected_answer[ 'can_parse' ] = True
+        
+        hash = os.urandom( 32 )
+        
+        # normal GET json
+        
+        path = '/add_urls/get_url_info?url={}'.format( urllib.parse.quote( url, safe = '' ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.headers[ 'Content-Type' ], 'application/json' )
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_answer )
+        
+        # explicit GET cbor by arg
+        
+        path = '/add_urls/get_url_info?url={}&cbor=1'.format( urllib.parse.quote( url, safe = '' ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.headers[ 'Content-Type' ], 'application/cbor' )
+        self.assertEqual( response.status, 200 )
+        
+        d = cbor2.loads( data )
+        
+        self.assertEqual( d, expected_answer )
+        
+        # explicit GET json by Accept
+        
+        path = '/add_urls/get_url_info?url={}'.format( urllib.parse.quote( url, safe = '' ) )
+        
+        connection.request( 'GET', path, headers = json_headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.headers[ 'Content-Type' ], 'application/json' )
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_answer )
+        
+        # explicit GET cbor by Accept
+        
+        path = '/add_urls/get_url_info?url={}'.format( urllib.parse.quote( url, safe = '' ) )
+        
+        connection.request( 'GET', path, headers = cbor_headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.headers[ 'Content-Type' ], 'application/cbor' )
+        self.assertEqual( response.status, 200 )
+        
+        d = cbor2.loads( data )
+        
+        self.assertEqual( d, expected_answer )
         
     
     def _test_client_api_basics( self, connection ):
@@ -2237,6 +2347,69 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( set( d[ 'hashes' ] ), expected_hashes_set )
         
+        self.assertIn( 'file_ids', d )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'file_query_ids' )
+        
+        ( file_search_context, ) = args
+        
+        self.assertEqual( file_search_context.GetLocationContext().current_service_keys, { CC.LOCAL_FILE_SERVICE_KEY } )
+        self.assertEqual( file_search_context.GetTagSearchContext().service_key, CC.COMBINED_TAG_SERVICE_KEY )
+        self.assertEqual( set( file_search_context.GetPredicates() ), { ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, tag ) for tag in tags } )
+        
+        self.assertIn( 'sort_by', kwargs )
+        
+        sort_by = kwargs[ 'sort_by' ]
+        
+        self.assertEqual( sort_by.sort_type, ( 'system', CC.SORT_FILES_BY_IMPORT_TIME ) )
+        self.assertEqual( sort_by.sort_order, CC.SORT_DESC )
+        
+        self.assertIn( 'apply_implicit_limit', kwargs )
+        
+        self.assertEqual( kwargs[ 'apply_implicit_limit' ], False )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'hash_ids_to_hashes' )
+        
+        hash_ids = kwargs[ 'hash_ids' ]
+        
+        self.assertEqual( set( hash_ids ), sample_hash_ids )
+        
+        self.assertEqual( set( hash_ids ), set( d[ 'file_ids' ] ) )
+        
+        # search files and only get hashes
+        
+        HG.test_controller.ClearReads( 'file_query_ids' )
+        
+        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        
+        hash_ids_to_hashes = { hash_id : os.urandom( 32 ) for hash_id in sample_hash_ids }
+        
+        HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', hash_ids_to_hashes )
+        
+        tags = [ 'kino', 'green' ]
+        
+        path = '/get_files/search_files?tags={}&return_hashes=true&return_file_ids=false'.format( urllib.parse.quote( json.dumps( tags ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_hashes_set = { hash.hex() for hash in hash_ids_to_hashes.values() }
+        
+        self.assertEqual( set( d[ 'hashes' ] ), expected_hashes_set )
+        
+        self.assertNotIn( 'file_ids', d )
+        
         [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'file_query_ids' )
         
         ( file_search_context, ) = args
@@ -2629,6 +2802,7 @@ class TestClientAPI( unittest.TestCase ):
             expected_identifier_result = { 'metadata' : metadata }
             
             media_results = []
+            file_info_managers = []
             
             urls = { "https://gelbooru.com/index.php?page=post&s=view&id=4841557", "https://img2.gelbooru.com//images/80/c8/80c8646b4a49395fb36c805f316c49a9.jpg" }
             
@@ -2652,6 +2826,8 @@ class TestClientAPI( unittest.TestCase ):
                 has_audio = random.choice( [ True, False ] )
                 
                 file_info_manager = ClientMediaManagers.FileInfoManager( file_id, hash, size = size, mime = mime, width = width, height = height, duration = duration, has_audio = has_audio )
+                
+                file_info_managers.append( file_info_manager )
                 
                 service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
                 service_keys_to_statuses_to_display_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit', 'clothing' ] } }
@@ -2684,6 +2860,7 @@ class TestClientAPI( unittest.TestCase ):
             metadata = []
             detailed_known_urls_metadata = []
             with_notes_metadata = []
+            only_return_basic_information_metadata = []
             
             services_manager = HG.client_controller.services_manager
             
@@ -2704,7 +2881,12 @@ class TestClientAPI( unittest.TestCase ):
                     'duration' : file_info_manager.duration,
                     'has_audio' : file_info_manager.has_audio,
                     'num_frames' : file_info_manager.num_frames,
-                    'num_words' : file_info_manager.num_words,
+                    'num_words' : file_info_manager.num_words
+                }
+                
+                only_return_basic_information_metadata.append( dict( metadata_row ) )
+                
+                metadata_row.update( {
                     'file_services' : {
                         'current' : {
                             random_file_service_hex_current.hex() : {
@@ -2723,7 +2905,7 @@ class TestClientAPI( unittest.TestCase ):
                     'is_local' : False,
                     'is_trashed' : False,
                     'known_urls' : list( sorted_urls )
-                }
+                } )
                 
                 tags_manager = media_result.GetTagsManager()
                 
@@ -2806,11 +2988,14 @@ class TestClientAPI( unittest.TestCase ):
             expected_metadata_result = { 'metadata' : metadata }
             expected_detailed_known_urls_metadata_result = { 'metadata' : detailed_known_urls_metadata }
             expected_notes_metadata_result = { 'metadata' : with_notes_metadata }
+            expected_only_return_basic_information_result = { 'metadata' : only_return_basic_information_metadata }
             
         
         HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
         HG.test_controller.SetRead( 'media_results', media_results )
         HG.test_controller.SetRead( 'media_results_from_ids', media_results )
+        HG.test_controller.SetRead( 'file_info_managers', file_info_managers )
+        HG.test_controller.SetRead( 'file_info_managers_from_ids', file_info_managers )
         
         api_permissions.SetLastSearchResults( [ 1, 2, 3, 4, 5, 6 ] )
         
@@ -2856,6 +3041,24 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d, expected_identifier_result )
         
+        # basic metadata from file_ids
+        
+        path = '/get_files/file_metadata?file_ids={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_only_return_basic_information_result )
+        
         # metadata from file_ids
         
         path = '/get_files/file_metadata?file_ids={}'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
@@ -2899,6 +3102,24 @@ class TestClientAPI( unittest.TestCase ):
         d = json.loads( text )
         
         self.assertEqual( d, expected_identifier_result )
+        
+        # basic metadata from hashes
+        
+        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_only_return_basic_information_result )
         
         # metadata from hashes
         
@@ -3006,6 +3227,48 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 404 )
         self.assertIn( 'test missing', text )
+        
+        # no new file_ids
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
+        HG.test_controller.SetRead( 'media_results_from_ids', media_results )
+        
+        hashes_in_test = list( file_ids_to_hashes.values() )
+        
+        novel_hashes = [ os.urandom( 32 ) for i in range( 5 ) ]
+        
+        hashes_in_test.extend( novel_hashes )
+        
+        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in hashes_in_test ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        metadata = d[ 'metadata' ]
+        
+        for hash in novel_hashes:
+            
+            self.assertTrue( True in [ hash.hex() == row[ 'hash' ] for row in metadata ] )
+            
+            for row in metadata:
+                
+                if row[ 'hash' ] == hash.hex():
+                    
+                    self.assertEqual( len( row ), 2 )
+                    
+                    self.assertEqual( row[ 'file_id' ], None )
+                    
+                
+            
         
     
     def _test_get_files( self, connection, set_up_permissions ):
@@ -3360,6 +3623,12 @@ class TestClientAPI( unittest.TestCase ):
         self._test_manage_cookies( connection, set_up_permissions )
         self._test_manage_pages( connection, set_up_permissions )
         self._test_search_files( connection, set_up_permissions )
+        
+        if CBOR_AVAILABLE:
+            
+            self._test_cbor( connection, set_up_permissions )
+            
+        
         self._test_search_files_predicate_parsing( connection, set_up_permissions )
         self._test_file_metadata( connection, set_up_permissions )
         self._test_get_files( connection, set_up_permissions )
