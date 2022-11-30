@@ -25,7 +25,7 @@ from hydrus.client.metadata import ClientRatings
 
 # Option Enums
 
-class DialogManageRatings( ClientGUIDialogs.Dialog ):
+class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProcessorMixin ):
     
     def __init__( self, parent, media ):
         
@@ -36,6 +36,7 @@ class DialogManageRatings( ClientGUIDialogs.Dialog ):
             self._hashes.update( m.GetHashes() )
             
         
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         ClientGUIDialogs.Dialog.__init__( self, parent, 'manage ratings for ' + HydrusData.ToHumanInt( len( self._hashes ) ) + ' files', position = 'topleft' )
         
         #
@@ -250,9 +251,22 @@ class DialogManageRatings( ClientGUIDialogs.Dialog ):
                 
                 if rating_state != original_rating_state:
                     
-                    if rating_state == ClientRatings.LIKE: rating = 1
-                    elif rating_state == ClientRatings.DISLIKE: rating = 0
-                    else: rating = None
+                    if rating_state == ClientRatings.MIXED:
+                        
+                        continue
+                        
+                    elif rating_state == ClientRatings.LIKE:
+                        
+                        rating = 1
+                        
+                    elif rating_state == ClientRatings.DISLIKE:
+                        
+                        rating = 0
+                        
+                    else:
+                        
+                        rating = None
+                        
                     
                     content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
                     
@@ -382,7 +396,11 @@ class DialogManageRatings( ClientGUIDialogs.Dialog ):
                 
                 rating_state = control.GetRatingState()
                 
-                if rating_state == ClientRatings.NULL:
+                if rating_state == ClientRatings.MIXED:
+                    
+                    continue
+                    
+                elif rating_state == ClientRatings.NULL:
                     
                     rating = None
                     

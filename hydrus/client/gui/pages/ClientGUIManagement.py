@@ -26,9 +26,7 @@ from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
-from hydrus.client.gui import ClientGUIImport
 from hydrus.client.gui import ClientGUIMenus
-from hydrus.client.gui import ClientGUIParsing
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIFileSeedCache
 from hydrus.client.gui import ClientGUIGallerySeedLog
@@ -37,6 +35,8 @@ from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.canvas import ClientGUICanvas
 from hydrus.client.gui.canvas import ClientGUICanvasFrame
+from hydrus.client.gui.importing import ClientGUIImport
+from hydrus.client.gui.importing import ClientGUIImportOptions
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
@@ -44,6 +44,7 @@ from hydrus.client.gui.networking import ClientGUIHydrusNetwork
 from hydrus.client.gui.networking import ClientGUINetworkJobControl
 from hydrus.client.gui.pages import ClientGUIResults
 from hydrus.client.gui.pages import ClientGUIResultsSortCollect
+from hydrus.client.gui.parsing import ClientGUIParsingFormulae
 from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.gui.widgets import ClientGUIControls
@@ -57,6 +58,7 @@ from hydrus.client.importing.options import FileImportOptions
 from hydrus.client.importing.options import PresentationImportOptions
 from hydrus.client.media import ClientMedia
 from hydrus.client.metadata import ClientTags
+from hydrus.client.metadata import ClientMetadataMigration
 
 MANAGEMENT_TYPE_DUMPER = 0
 MANAGEMENT_TYPE_IMPORT_MULTIPLE_GALLERY = 1
@@ -110,7 +112,7 @@ def AddPresentationSubmenu( menu: QW.QMenu, importer_name: str, single_selected_
     
     presentation_import_options = PresentationImportOptions.PresentationImportOptions()
     
-    presentation_import_options.SetPresentationLocation( PresentationImportOptions.PRESENTATION_LOCATION_IN_TRASH_TOO )
+    presentation_import_options.SetLocationContext( ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
     
     sets_of_options.append( presentation_import_options )
     
@@ -124,17 +126,13 @@ def AddPresentationSubmenu( menu: QW.QMenu, importer_name: str, single_selected_
         ClientGUIMenus.AppendMenuItem( submenu, presentation_import_options.GetSummary(), description, callable, presentation_import_options = presentation_import_options )
         
     
-    importer_label_template = '{}s\'' if single_selected_presentation_import_options is None else '{}\'s'
-    
-    importer_label = importer_label_template.format( importer_name )
-    
-    ClientGUIMenus.AppendMenu( menu, submenu, 'show {} files'.format( importer_label ) )
+    ClientGUIMenus.AppendMenu( menu, submenu, 'show files' )
     
 def CreateManagementController( page_name, management_type, location_context = None ):
     
     if location_context is None:
         
-        location_context = ClientLocation.GetLocationContextForAllLocalMedia()
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
         
     
     new_options = HG.client_controller.new_options
@@ -155,6 +153,10 @@ def CreateManagementControllerDuplicateFilter():
     management_controller = CreateManagementController( 'duplicates', MANAGEMENT_TYPE_DUPLICATE_FILTER, location_context = default_location_context )
     
     file_search_context = ClientSearch.FileSearchContext( location_context = default_location_context, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) ] )
+    
+    synchronised = HG.client_controller.new_options.GetBoolean( 'default_search_synchronised' )
+    
+    management_controller.SetVariable( 'synchronised', synchronised )
     
     management_controller.SetVariable( 'file_search_context', file_search_context )
     management_controller.SetVariable( 'both_files_match', False )
@@ -198,13 +200,13 @@ def CreateManagementControllerImportSimpleDownloader():
     
     return management_controller
     
-def CreateManagementControllerImportHDD( paths, file_import_options: FileImportOptions.FileImportOptions, paths_to_additional_service_keys_to_tags, delete_after_success ):
+def CreateManagementControllerImportHDD( paths, file_import_options: FileImportOptions.FileImportOptions, metadata_routers: typing.Collection[ ClientMetadataMigration.SingleFileMetadataRouter ], paths_to_additional_service_keys_to_tags, delete_after_success ):
     
     location_context = file_import_options.GetDestinationLocationContext()
     
     management_controller = CreateManagementController( 'import', MANAGEMENT_TYPE_IMPORT_HDD, location_context = location_context )
     
-    hdd_import = ClientImportLocal.HDDImport( paths = paths, file_import_options = file_import_options, paths_to_additional_service_keys_to_tags = paths_to_additional_service_keys_to_tags, delete_after_success = delete_after_success )
+    hdd_import = ClientImportLocal.HDDImport( paths = paths, file_import_options = file_import_options, metadata_routers = metadata_routers, paths_to_additional_service_keys_to_tags = paths_to_additional_service_keys_to_tags, delete_after_success = delete_after_success )
     
     management_controller.SetVariable( 'hdd_import', hdd_import )
     
@@ -914,11 +916,6 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
             p = inverse_predicates
             permit_remove = False
             
-        elif command == 'remove_inverse_predicates':
-            
-            p = predicates
-            permit_add = False
-            
         elif command == 'add_namespace_predicate':
             
             p = ( namespace_predicate, )
@@ -936,10 +933,6 @@ class ListBoxTagsMediaManagementPanel( ClientGUIListBoxes.ListBoxTagsMedia ):
             
         
     
-def managementScrollbarValueChanged( value ):
-    
-    HG.client_controller.pub( 'top_level_window_move_event' )
-    
 class ManagementPanel( QW.QScrollArea ):
     
     locationChanged = QC.Signal( ClientLocation.LocationContext )
@@ -951,14 +944,12 @@ class ManagementPanel( QW.QScrollArea ):
         QW.QScrollArea.__init__( self, parent )
         
         self.setFrameShape( QW.QFrame.NoFrame )
-        self.setWidget( QW.QWidget() )
+        self.setWidget( QW.QWidget( self ) )
         self.setWidgetResizable( True )
         #self.setFrameStyle( QW.QFrame.Panel | QW.QFrame.Sunken )
         #self.setLineWidth( 2 )
         #self.setHorizontalScrollBarPolicy( QC.Qt.ScrollBarAlwaysOff )
         self.setVerticalScrollBarPolicy( QC.Qt.ScrollBarAsNeeded )
-        
-        self.verticalScrollBar().valueChanged.connect( managementScrollbarValueChanged )
         
         self._controller = controller
         self._management_controller = management_controller
@@ -974,6 +965,8 @@ class ManagementPanel( QW.QScrollArea ):
         
         self._media_collect = ClientGUIResultsSortCollect.MediaCollectControl( self, management_controller = self._management_controller, silent = silent_collect )
         
+        self._media_collect.ListenForNewOptions()
+        
         if not self.SHOW_COLLECT:
             
             self._media_collect.hide()
@@ -987,9 +980,14 @@ class ManagementPanel( QW.QScrollArea ):
     
     def _SetLocationContext( self, location_context: ClientLocation.LocationContext ):
         
-        self._management_controller.SetVariable( 'location_context', location_context )
+        current_location_context = self._management_controller.GetVariable( 'location_context' )
         
-        self.locationChanged.emit( location_context )
+        if location_context != current_location_context:
+            
+            self._management_controller.SetVariable( 'location_context', location_context )
+            
+            self.locationChanged.emit( location_context )
+            
         
     
     def ConnectMediaPanelSignals( self, media_panel: ClientGUIResults.MediaPanel ):
@@ -1203,7 +1201,16 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         file_search_context.FixMissingServices( HG.client_controller.services_manager.FilterValidServiceKeys )
         
-        self._tag_autocomplete = ClientGUIACDropdown.AutoCompleteDropdownTagsRead( self._filtering_panel, self._page_key, file_search_context, media_sort_widget = self._media_sort, media_collect_widget = self._media_collect, allow_all_known_files = False, force_system_everything = True )
+        if self._management_controller.HasVariable( 'synchronised' ):
+            
+            synchronised = self._management_controller.GetVariable( 'synchronised' )
+            
+        else:
+            
+            synchronised = True
+            
+        
+        self._tag_autocomplete = ClientGUIACDropdown.AutoCompleteDropdownTagsRead( self._filtering_panel, self._page_key, file_search_context, media_sort_widget = self._media_sort, media_collect_widget = self._media_collect, allow_all_known_files = False, synchronised = synchronised, force_system_everything = True )
         
         self._both_files_match = QW.QCheckBox( self._filtering_panel )
         
@@ -1395,6 +1402,8 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         
         canvas_window = ClientGUICanvas.CanvasFilterDuplicates( canvas_frame, file_search_context, both_files_match, pixel_dupes_preference, max_hamming_distance )
         
+        canvas_window.showPairInPage.connect( self._ShowPairInPage )
+        
         canvas_frame.SetCanvas( canvas_window )
         
     
@@ -1458,6 +1467,11 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         ( file_search_context, both_files_match, pixel_dupes_preference, max_hamming_distance ) = self._GetDuplicateFileSearchData()
         
         self._management_controller.SetVariable( 'file_search_context', file_search_context )
+        
+        synchronised = self._tag_autocomplete.IsSynchronised()
+        
+        self._management_controller.SetVariable( 'synchronised', synchronised )
+        
         self._management_controller.SetVariable( 'both_files_match', both_files_match )
         self._management_controller.SetVariable( 'pixel_dupes_preference', pixel_dupes_preference )
         self._management_controller.SetVariable( 'max_hamming_distance', max_hamming_distance )
@@ -1498,6 +1512,13 @@ class ManagementPanelDuplicateFilter( ManagementPanel ):
         self._search_distance_spinctrl.setValue( value )
         
         self._UpdateMaintenanceStatus()
+        
+    
+    def _ShowPairInPage( self, media: typing.Collection[ ClientMedia.MediaSingleton ] ):
+        
+        media_results = [ m.GetMediaResult() for m in media ]
+        
+        self._page.GetMediaPanel().AddMediaResults( self._page_key, media_results )
         
     
     def _ShowPotentialDupes( self, hashes ):
@@ -1726,8 +1747,6 @@ management_panel_types_to_classes[ MANAGEMENT_TYPE_DUPLICATE_FILTER ] = Manageme
 
 class ManagementPanelImporter( ManagementPanel ):
     
-    SHOW_COLLECT = False
-    
     def __init__( self, parent, page, controller, management_controller ):
         
         ManagementPanel.__init__( self, parent, page, controller, management_controller )
@@ -1773,15 +1792,20 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         self._hdd_import = self._management_controller.GetVariable( 'hdd_import' )
         
         file_import_options = self._hdd_import.GetFileImportOptions()
-        show_downloader_options = False
         
-        self._file_import_options = ClientGUIImport.FileImportOptionsButton( self._import_queue_panel, file_import_options, show_downloader_options, self._hdd_import.SetFileImportOptions )
+        show_downloader_options = False
+        allow_default_selection = True
+        
+        self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
+        
+        self._import_options_button.SetFileImportOptions( file_import_options )
         
         #
         
         vbox = QP.VBoxLayout()
         
         QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         hbox = QP.HBoxLayout()
         
@@ -1790,7 +1814,7 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         
         self._import_queue_panel.Add( hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._import_queue_panel.Add( self._file_seed_cache_control, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._import_queue_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._import_queue_panel.Add( self._import_options_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._import_queue_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -1806,6 +1830,8 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         
         self._UpdateImportStatus()
         
+        self._import_options_button.fileImportOptionsChanged.connect( self._hdd_import.SetFileImportOptions )
+        
     
     def _UpdateImportStatus( self ):
         
@@ -1818,18 +1844,6 @@ class ManagementPanelImporterHDD( ManagementPanelImporter ):
         else:
             
             ClientGUIFunctions.SetBitmapButtonBitmap( self._pause_button, CC.global_pixmaps().file_pause )
-            
-        
-        if paused:
-            
-            if current_action == '':
-                
-                current_action = 'paused'
-                
-            else:
-                
-                current_action = 'pausing - ' + current_action
-                
             
         
         self._current_action.setText( current_action )
@@ -1916,12 +1930,17 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         file_import_options = self._multiple_gallery_import.GetFileImportOptions()
         tag_import_options = self._multiple_gallery_import.GetTagImportOptions()
+        note_import_options = self._multiple_gallery_import.GetNoteImportOptions()
         file_limit = self._multiple_gallery_import.GetFileLimit()
         
         show_downloader_options = True
+        allow_default_selection = True
         
-        self._file_import_options = ClientGUIImport.FileImportOptionsButton( self._gallery_downloader_panel, file_import_options, show_downloader_options, self._multiple_gallery_import.SetFileImportOptions )
-        self._tag_import_options = ClientGUIImport.TagImportOptionsButton( self._gallery_downloader_panel, tag_import_options, show_downloader_options, update_callable = self._multiple_gallery_import.SetTagImportOptions, allow_default_selection = True )
+        self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
+        
+        self._import_options_button.SetFileImportOptions( file_import_options )
+        self._import_options_button.SetTagImportOptions( tag_import_options )
+        self._import_options_button.SetNoteImportOptions( note_import_options )
         
         #
         
@@ -1936,8 +1955,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         self._gallery_downloader_panel.Add( input_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._gallery_downloader_panel.Add( self._gug_key_and_name, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._gallery_downloader_panel.Add( self._file_limit, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._gallery_downloader_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._gallery_downloader_panel.Add( self._tag_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._gallery_downloader_panel.Add( self._import_options_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
         
@@ -1949,7 +1967,8 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         vbox = QP.VBoxLayout()
         
-        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._gallery_downloader_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, self._highlighted_gallery_import_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -1969,6 +1988,10 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         self._UpdateImportStatus()
         
         self._gallery_importers_listctrl.AddMenuCallable( self._GetListCtrlMenu )
+        
+        self._import_options_button.fileImportOptionsChanged.connect( self._multiple_gallery_import.SetFileImportOptions )
+        self._import_options_button.noteImportOptionsChanged.connect( self._multiple_gallery_import.SetNoteImportOptions )
+        self._import_options_button.tagImportOptionsChanged.connect( self._multiple_gallery_import.SetTagImportOptions )
         
     
     def _CanClearHighlight( self ):
@@ -2043,7 +2066,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         
         media_results = []
         
-        location_context = ClientLocation.GetLocationContextForAllLocalMedia()
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
         
         self._SetLocationContext( location_context )
         
@@ -2175,7 +2198,9 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
             
             ( importer, ) = selected_importers
             
-            single_selected_presentation_import_options = importer.GetFileImportOptions().GetPresentationImportOptions()
+            fio = importer.GetFileImportOptions()
+            
+            single_selected_presentation_import_options = FileImportOptions.GetRealPresentationImportOptions( fio, FileImportOptions.IMPORT_TYPE_LOUD )
             
         
         AddPresentationSubmenu( menu, 'downloader', single_selected_presentation_import_options, self._ShowSelectedImportersFiles )
@@ -2248,23 +2273,18 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
             
             if len( hashes ) > 0:
                 
-                media_results = HG.client_controller.Read( 'media_results', hashes )
+                media_results = HG.client_controller.Read( 'media_results', hashes, sorted = True )
                 
             else:
                 
-                hashes = []
                 media_results = []
                 
-            
-            hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
-            
-            sorted_media_results = [ hashes_to_media_results[ hash ] for hash in hashes ]
             
             location_context = self._highlighted_gallery_import.GetFileImportOptions().GetDestinationLocationContext()
             
             self._SetLocationContext( location_context )
             
-            panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, sorted_media_results )
+            panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, media_results )
             
             panel.SetEmptyPageStatusOverride( 'no files for this query and its publishing settings' )
             
@@ -2443,14 +2463,16 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         if result == QW.QDialog.Accepted:
             
             file_limit = self._file_limit.GetValue()
-            file_import_options = self._file_import_options.GetValue()
-            tag_import_options = self._tag_import_options.GetValue()
+            file_import_options = self._import_options_button.GetFileImportOptions()
+            tag_import_options = self._import_options_button.GetTagImportOptions()
+            note_import_options = self._import_options_button.GetNoteImportOptions()
             
             for gallery_import in gallery_imports:
                 
                 gallery_import.SetFileLimit( file_limit )
                 gallery_import.SetFileImportOptions( file_import_options )
                 gallery_import.SetTagImportOptions( tag_import_options )
+                gallery_import.SetNoteImportOptions( note_import_options )
                 
             
         
@@ -2520,7 +2542,7 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
             
             media_results = self._controller.Read( 'media_results', hashes, sorted = True )
             
-            location_context = ClientLocation.GetLocationContextForAllLocalMedia()
+            location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
             
             self._SetLocationContext( location_context )
             
@@ -2654,6 +2676,16 @@ class ManagementPanelImporterMultipleGallery( ManagementPanelImporter ):
         self._multiple_gallery_import.SetFileLimit( self._file_limit.GetValue() )
         
     
+    def PendSubscriptionGapDownloader( self, gug_key_and_name, query_text, file_import_options, tag_import_options, note_import_options, file_limit ):
+        
+        new_query = self._multiple_gallery_import.PendSubscriptionGapDownloader( gug_key_and_name, query_text, file_import_options, tag_import_options, note_import_options, file_limit )
+        
+        if new_query is not None and self._highlighted_gallery_import is None and HG.client_controller.new_options.GetBoolean( 'highlight_new_query' ):
+            
+            self._HighlightGalleryImport( new_query )
+            
+        
+    
     def SetSearchFocus( self ):
         
         ClientGUIFunctions.SetFocusLater( self._query_input )
@@ -2679,7 +2711,10 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         self._highlighted_watcher = self._multiple_watcher_import.GetHighlightedWatcher()
         
-        ( checker_options, file_import_options, tag_import_options ) = self._multiple_watcher_import.GetOptions()
+        checker_options = self._multiple_watcher_import.GetCheckerOptions()
+        file_import_options = self._multiple_watcher_import.GetFileImportOptions()
+        tag_import_options = self._multiple_watcher_import.GetTagImportOptions()
+        note_import_options = self._multiple_watcher_import.GetNoteImportOptions()
         
         #
         
@@ -2716,11 +2751,16 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         self._watcher_url_input.setPlaceholderText( 'watcher url' )
         
-        show_downloader_options = True
+        self._checker_options = ClientGUIImport.CheckerOptionsButton( self._watchers_panel, checker_options )
         
-        self._checker_options = ClientGUIImport.CheckerOptionsButton( self._watchers_panel, checker_options, self._OptionsUpdated )
-        self._file_import_options = ClientGUIImport.FileImportOptionsButton( self._watchers_panel, file_import_options, show_downloader_options, self._OptionsUpdated )
-        self._tag_import_options = ClientGUIImport.TagImportOptionsButton( self._watchers_panel, tag_import_options, show_downloader_options, update_callable = self._OptionsUpdated, allow_default_selection = True )
+        show_downloader_options = True
+        allow_default_selection = True
+        
+        self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
+        
+        self._import_options_button.SetFileImportOptions( file_import_options )
+        self._import_options_button.SetTagImportOptions( tag_import_options )
+        self._import_options_button.SetNoteImportOptions( note_import_options )
         
         # suck up watchers from elsewhere in the program (presents a checkboxlistdialog)
         
@@ -2737,14 +2777,14 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         self._watchers_panel.Add( self._watchers_listctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         self._watchers_panel.Add( self._watcher_url_input, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._watchers_panel.Add( self._checker_options, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._watchers_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._watchers_panel.Add( self._tag_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._watchers_panel.Add( self._import_options_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
         
         vbox = QP.VBoxLayout()
         
-        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._watchers_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, self._highlighted_watcher_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -2760,6 +2800,12 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         self._UpdateImportStatus()
         
         HG.client_controller.sub( self, '_ClearExistingHighlightAndPanel', 'clear_multiwatcher_highlights' )
+        
+        self._import_options_button.fileImportOptionsChanged.connect( self._OptionsUpdated )
+        self._import_options_button.noteImportOptionsChanged.connect( self._OptionsUpdated )
+        self._import_options_button.tagImportOptionsChanged.connect( self._OptionsUpdated )
+        
+        self._checker_options.valueChanged.connect( self._OptionsUpdated )
         
     
     def _AddURLs( self, urls, filterable_tags = None, additional_service_keys_to_tags = None ):
@@ -2872,7 +2918,7 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         
         self._ClearExistingHighlight()
         
-        location_context = ClientLocation.GetLocationContextForAllLocalMedia()
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
         
         media_results = []
         
@@ -3026,7 +3072,9 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
             
             ( watcher, ) = selected_watchers
             
-            single_selected_presentation_import_options = watcher.GetFileImportOptions().GetPresentationImportOptions()
+            fio = watcher.GetFileImportOptions()
+            
+            single_selected_presentation_import_options = FileImportOptions.GetRealPresentationImportOptions( fio, FileImportOptions.IMPORT_TYPE_LOUD )
             
         
         AddPresentationSubmenu( menu, 'watcher', single_selected_presentation_import_options, self._ShowSelectedImportersFiles )
@@ -3110,23 +3158,18 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
             
             if len( hashes ) > 0:
                 
-                media_results = HG.client_controller.Read( 'media_results', hashes )
+                media_results = HG.client_controller.Read( 'media_results', hashes, sorted = True )
                 
             else:
                 
-                hashes = []
                 media_results = []
                 
-            
-            hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
-            
-            sorted_media_results = [ hashes_to_media_results[ hash ] for hash in hashes ]
             
             location_context = self._highlighted_watcher.GetFileImportOptions().GetDestinationLocationContext()
             
             self._SetLocationContext( location_context )
             
-            panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, sorted_media_results )
+            panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, media_results )
             
             panel.SetEmptyPageStatusOverride( 'no files for this watcher and its publishing settings' )
             
@@ -3183,7 +3226,10 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
     
     def _OptionsUpdated( self, *args, **kwargs ):
         
-        self._multiple_watcher_import.SetOptions( self._checker_options.GetValue(), self._file_import_options.GetValue(), self._tag_import_options.GetValue() )
+        self._multiple_watcher_import.SetCheckerOptions( self._checker_options.GetValue() )
+        self._multiple_watcher_import.SetFileImportOptions( self._import_options_button.GetFileImportOptions() )
+        self._multiple_watcher_import.SetNoteImportOptions( self._import_options_button.GetNoteImportOptions() )
+        self._multiple_watcher_import.SetTagImportOptions( self._import_options_button.GetTagImportOptions() )
         
     
     def _PausePlayChecking( self ):
@@ -3317,8 +3363,8 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
         if result == QW.QDialog.Accepted:
             
             checker_options = self._checker_options.GetValue()
-            file_import_options = self._file_import_options.GetValue()
-            tag_import_options = self._tag_import_options.GetValue()
+            file_import_options = self._import_options_button.GetFileImportOptions()
+            tag_import_options = self._import_options_button.GetTagImportOptions()
             
             for watcher in watchers:
                 
@@ -3380,7 +3426,7 @@ class ManagementPanelImporterMultipleWatcher( ManagementPanelImporter ):
             
             media_results = self._controller.Read( 'media_results', hashes, sorted = True )
             
-            location_context = ClientLocation.GetLocationContextForAllLocalMedia()
+            location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
             
             self._SetLocationContext( location_context )
             
@@ -3618,8 +3664,11 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         file_import_options = self._simple_downloader_import.GetFileImportOptions()
         
         show_downloader_options = True
+        allow_default_selection = True
         
-        self._file_import_options = ClientGUIImport.FileImportOptionsButton( self._simple_downloader_panel, file_import_options, show_downloader_options, self._simple_downloader_import.SetFileImportOptions )
+        self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
+        
+        self._import_options_button.SetFileImportOptions( file_import_options )
         
         #
         
@@ -3664,13 +3713,14 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         
         self._simple_downloader_panel.Add( self._import_queue_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._simple_downloader_panel.Add( self._simple_parsing_jobs_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._simple_downloader_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._simple_downloader_panel.Add( self._import_options_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
         
         vbox = QP.VBoxLayout()
         
-        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._simple_downloader_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -3691,6 +3741,8 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
         self._gallery_seed_log_control.SetGallerySeedLog( gallery_seed_log )
         
         self._UpdateImportStatus()
+        
+        self._import_options_button.fileImportOptionsChanged.connect( self._simple_downloader_import.SetFileImportOptions )
         
     
     def _EditFormulae( self ):
@@ -3726,7 +3778,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
                 
                 formula = simple_downloader_formula.GetFormula()
                 
-                control = ClientGUIParsing.EditFormulaPanel( panel, formula, lambda: ClientParsing.ParsingTestData( {}, ( '', ) ) )
+                control = ClientGUIParsingFormulae.EditFormulaPanel( panel, formula, lambda: ClientParsing.ParsingTestData( {}, ( '', ) ) )
                 
                 panel.SetControl( control )
                 
@@ -3862,17 +3914,7 @@ class ManagementPanelImporterSimpleDownloader( ManagementPanelImporter ):
             self._pending_jobs_listbox.SelectData( selected_jobs )
             
         
-        if queue_paused:
-            
-            parser_status = 'paused'
-            
-        
         self._parser_status.setText( parser_status )
-        
-        if current_action == '' and files_paused:
-            
-            current_action = 'paused'
-            
         
         self._current_action.setText( current_action )
         
@@ -4052,12 +4094,18 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         
         self._url_input.setPlaceholderText( 'any url hydrus recognises, or a raw file url' )
         
-        ( file_import_options, tag_import_options ) = self._urls_import.GetOptions()
+        file_import_options = self._urls_import.GetFileImportOptions()
+        tag_import_options = self._urls_import.GetTagImportOptions()
+        note_import_options = self._urls_import.GetNoteImportOptions()
         
         show_downloader_options = True
+        allow_default_selection = True
         
-        self._file_import_options = ClientGUIImport.FileImportOptionsButton( self._url_panel, file_import_options, show_downloader_options, self._urls_import.SetFileImportOptions )
-        self._tag_import_options = ClientGUIImport.TagImportOptionsButton( self._url_panel, tag_import_options, show_downloader_options, update_callable = self._urls_import.SetTagImportOptions, allow_default_selection = True )
+        self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
+        
+        self._import_options_button.SetFileImportOptions( file_import_options )
+        self._import_options_button.SetTagImportOptions( tag_import_options )
+        self._import_options_button.SetNoteImportOptions( note_import_options )
         
         #
         
@@ -4071,14 +4119,14 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         self._url_panel.Add( self._import_queue_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._url_panel.Add( self._gallery_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._url_panel.Add( self._url_input, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._url_panel.Add( self._file_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
-        self._url_panel.Add( self._tag_import_options, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._url_panel.Add( self._import_options_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
         
         vbox = QP.VBoxLayout()
         
-        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_sort, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._url_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -4097,6 +4145,10 @@ class ManagementPanelImporterURLs( ManagementPanelImporter ):
         self._gallery_seed_log_control.SetGallerySeedLog( gallery_seed_log )
         
         self._UpdateImportStatus()
+        
+        self._import_options_button.fileImportOptionsChanged.connect( self._urls_import.SetFileImportOptions )
+        self._import_options_button.noteImportOptionsChanged.connect( self._urls_import.SetNoteImportOptions )
+        self._import_options_button.tagImportOptionsChanged.connect( self._urls_import.SetTagImportOptions )
         
     
     def _PendURLs( self, urls, filterable_tags = None, additional_service_keys_to_tags = None ):
@@ -4214,9 +4266,14 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self._last_petition_type_fetched = None
         
+        self._last_fetched_subject_account_key = None
+        
         #
         
         self._petitions_info_panel = ClientGUICommon.StaticBox( self, 'petitions info' )
+        
+        self._petition_account_key = QW.QLineEdit( self._petitions_info_panel )
+        self._petition_account_key.setPlaceholderText( 'account id filter' )
         
         self._refresh_num_petitions_button = ClientGUICommon.BetterButton( self._petitions_info_panel, 'refresh counts', self._FetchNumPetitions )
         
@@ -4270,7 +4327,10 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self._reason_text = QW.QTextEdit( self._petition_panel )
         self._reason_text.setReadOnly( True )
-        self._reason_text.setMinimumHeight( 80 )
+        
+        ( min_width, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self._reason_text, ( 16, 6 ) )
+        
+        self._reason_text.setFixedHeight( min_height )
         
         check_all = ClientGUICommon.BetterButton( self._petition_panel, 'check all', self._CheckAll )
         flip_selected = ClientGUICommon.BetterButton( self._petition_panel, 'flip selected', self._FlipSelected )
@@ -4282,12 +4342,19 @@ class ManagementPanelPetitions( ManagementPanel ):
         self._sort_by_left.setEnabled( False )
         self._sort_by_right.setEnabled( False )
         
-        self._contents = ClientGUICommon.BetterCheckBoxList( self._petition_panel )
-        self._contents.itemDoubleClicked.connect( self.EventContentDoubleClick )
+        self._contents_add = ClientGUICommon.BetterCheckBoxList( self._petition_panel )
+        self._contents_add.itemDoubleClicked.connect( self.ContentsAddDoubleClick )
         
-        ( min_width, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self._contents, ( 16, 20 ) )
+        ( min_width, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self._contents_add, ( 16, 20 ) )
         
-        self._contents.setMinimumHeight( min_height )
+        self._contents_add.setFixedHeight( min_height )
+        
+        self._contents_delete = ClientGUICommon.BetterCheckBoxList( self._petition_panel )
+        self._contents_delete.itemDoubleClicked.connect( self.ContentsDeleteDoubleClick )
+        
+        ( min_width, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self._contents_delete, ( 16, 20 ) )
+        
+        self._contents_delete.setFixedHeight( min_height )
         
         self._process = QW.QPushButton( 'process', self._petition_panel )
         self._process.clicked.connect( self.EventProcess )
@@ -4302,6 +4369,7 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         #
         
+        self._petitions_info_panel.Add( self._petition_account_key, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petitions_info_panel.Add( self._refresh_num_petitions_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         for hbox in content_type_hboxes:
@@ -4326,7 +4394,8 @@ class ManagementPanelPetitions( ManagementPanel ):
         self._petition_panel.Add( self._reason_text, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( check_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         self._petition_panel.Add( sort_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        self._petition_panel.Add( self._contents, CC.FLAGS_EXPAND_BOTH_WAYS )
+        self._petition_panel.Add( self._contents_add, CC.FLAGS_EXPAND_PERPENDICULAR )
+        self._petition_panel.Add( self._contents_delete, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._process, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._copy_account_key_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         self._petition_panel.Add( self._modify_petitioner, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -4337,7 +4406,7 @@ class ManagementPanelPetitions( ManagementPanel ):
         QP.AddToLayout( vbox, self._media_collect, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         QP.AddToLayout( vbox, self._petitions_info_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
-        QP.AddToLayout( vbox, self._petition_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._petition_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         if service_type == HC.TAG_REPOSITORY:
             
@@ -4352,24 +4421,38 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self.widget().setLayout( vbox )
         
-        self._contents.rightClicked.connect( self.EventRowRightClick )
+        self._contents_add.rightClicked.connect( self.EventAddRowRightClick )
+        self._contents_delete.rightClicked.connect( self.EventDeleteRowRightClick )
         
+        self._petition_account_key.textChanged.connect( self._UpdateAccountKey )
+        
+        self._UpdateAccountKey()
         self._DrawCurrentPetition()
         
     
     def _CheckAll( self ):
         
-        for i in range( self._contents.count() ):
+        for i in range( self._contents_add.count() ):
             
-            self._contents.Check( i, True )
+            self._contents_add.Check( i, True )
+            
+        
+        for i in range( self._contents_delete.count() ):
+            
+            self._contents_delete.Check( i, True )
             
         
     
     def _CheckNone( self ):
         
-        for i in range( self._contents.count() ):
+        for i in range( self._contents_add.count() ):
             
-            self._contents.Check( i, False )
+            self._contents_add.Check( i, False )
+            
+        
+        for i in range( self._contents_delete.count() ):
+            
+            self._contents_delete.Check( i, False )
             
         
     
@@ -4395,7 +4478,12 @@ class ManagementPanelPetitions( ManagementPanel ):
             self._reason_text.clear()
             self._reason_text.setProperty( 'hydrus_text', 'default' )
             
-            self._contents.clear()
+            self._contents_add.clear()
+            self._contents_delete.clear()
+            
+            self._contents_add.hide()
+            self._contents_delete.hide()
+            
             self._process.setEnabled( False )
             self._copy_account_key_button.setEnabled( False )
             
@@ -4409,24 +4497,45 @@ class ManagementPanelPetitions( ManagementPanel ):
             
         else:
             
-            ( action_text, action ) = self._current_petition.GetActionTextAndAction()
+            add_contents = self._current_petition.GetContents( HC.CONTENT_UPDATE_PEND )
+            delete_contents = self._current_petition.GetContents( HC.CONTENT_UPDATE_PETITION )
             
-            if action == HC.CONTENT_UPDATE_PEND:
+            have_add = len( add_contents ) > 0
+            have_delete = len( delete_contents ) > 0
+            
+            action_text = 'UNKNOWN'
+            hydrus_text = 'default'
+            object_name = 'normal'
+            
+            if have_add or have_delete:
                 
-                hydrus_text = 'valid'
-                
-            elif action == HC.CONTENT_UPDATE_PETITION:
-                
-                hydrus_text = 'invalid'
+                if have_add and have_delete:
+                    
+                    action_text = 'REPLACE'
+                    
+                elif have_add:
+                    
+                    action_text = 'ADD'
+                    hydrus_text = 'valid'
+                    object_name = 'HydrusValid'
+                    
+                else:
+                    
+                    action_text = 'DELETE'
+                    hydrus_text = 'invalid'
+                    object_name = 'HydrusInvalid'
+                    
                 
             
             self._action_text.setText( action_text )
-            self._action_text.setProperty( 'hydrus_text', hydrus_text )
+            self._action_text.setObjectName( object_name )
+            #self._action_text.setProperty( 'hydrus_text', hydrus_text )
             
             reason = self._current_petition.GetReason()
             
             self._reason_text.setPlainText( reason )
-            self._reason_text.setProperty( 'hydrus_text', hydrus_text )
+            self._reason_text.setObjectName( object_name )
+            #self._reason_text.setProperty( 'hydrus_text', hydrus_text )
             
             if self._last_petition_type_fetched[0] in ( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_TYPE_TAG_PARENTS ):
                 
@@ -4439,11 +4548,16 @@ class ManagementPanelPetitions( ManagementPanel ):
                 self._sort_by_right.setEnabled( False )
                 
             
-            contents = self._current_petition.GetContents()
+            self._contents_add.setVisible( have_add )
+            self._contents_delete.setVisible( have_delete )
             
-            contents_and_checks = [ ( c, True ) for c in contents ]
+            contents_and_checks = [ ( c, True ) for c in add_contents ]
             
-            self._SetContentsAndChecks( contents_and_checks, 'right' )
+            self._SetContentsAndChecks( HC.CONTENT_UPDATE_PEND, contents_and_checks, 'right' )
+            
+            contents_and_checks = [ ( c, True ) for c in delete_contents ]
+            
+            self._SetContentsAndChecks( HC.CONTENT_UPDATE_PETITION, contents_and_checks, 'right' )
             
             self._process.setEnabled( True )
             self._copy_account_key_button.setEnabled( True )
@@ -4460,23 +4574,35 @@ class ManagementPanelPetitions( ManagementPanel ):
     
     def _DrawNumPetitions( self ):
         
-        for ( content_type, status, count ) in self._num_petition_info:
+        if self._num_petition_info is None:
             
-            petition_type = ( content_type, status )
+            for ( petition_type, ( st, button ) ) in self._petition_types_to_controls.items():
+                
+                st.setText( '0 petitions' )
+                
+                button.setEnabled( False )
+                
             
-            if petition_type in self._petition_types_to_controls:
+        else:
+            
+            for ( content_type, status, count ) in self._num_petition_info:
                 
-                ( st, button ) = self._petition_types_to_controls[ petition_type ]
+                petition_type = ( content_type, status )
                 
-                st.setText( HydrusData.ToHumanInt(count)+' petitions' )
-                
-                if count > 0:
+                if petition_type in self._petition_types_to_controls:
                     
-                    button.setEnabled( True )
+                    ( st, button ) = self._petition_types_to_controls[ petition_type ]
                     
-                else:
+                    st.setText( HydrusData.ToHumanInt( count )+' petitions' )
                     
-                    button.setEnabled( False )
+                    if count > 0:
+                        
+                        button.setEnabled( True )
+                        
+                    else:
+                        
+                        button.setEnabled( False )
+                        
                     
                 
             
@@ -4518,7 +4644,7 @@ class ManagementPanelPetitions( ManagementPanel ):
     
     def _FetchNumPetitions( self ):
         
-        def do_it( service ):
+        def do_it( service, subject_account_key = None ):
             
             def qt_draw( n_p_i ):
                 
@@ -4549,7 +4675,25 @@ class ManagementPanelPetitions( ManagementPanel ):
             
             try:
                 
-                response = service.Request( HC.GET, 'num_petitions' )
+                if subject_account_key is None:
+                    
+                    response = service.Request( HC.GET, 'num_petitions' )
+                    
+                else:
+                    
+                    try:
+                        
+                        response = service.Request( HC.GET, 'num_petitions', { 'subject_account_key' : subject_account_key } )
+                        
+                    except HydrusExceptions.NotFoundException:
+                        
+                        HydrusData.ShowText( 'That account id was not found!' )
+                        
+                        QP.CallAfter( qt_draw, None )
+                        
+                        return
+                        
+                    
                 
                 num_petition_info = response[ 'num_petitions' ]
                 
@@ -4563,7 +4707,11 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         self._refresh_num_petitions_button.setText( 'Fetching\u2026' )
         
-        self._controller.CallToThread( do_it, self._service )
+        subject_account_key = self._GetSubjectAccountKey()
+        
+        self._last_fetched_subject_account_key = subject_account_key
+        
+        self._controller.CallToThread( do_it, self._service, subject_account_key )
         
     
     def _FetchPetition( self, content_type, status ):
@@ -4583,7 +4731,7 @@ class ManagementPanelPetitions( ManagementPanel ):
             
             self._DrawCurrentPetition()
             
-            self._ShowHashes( [ ])
+            self._ShowHashes( [] )
             
         
         def qt_done():
@@ -4594,16 +4742,33 @@ class ManagementPanelPetitions( ManagementPanel ):
                 
             
             button.setEnabled( True )
-            button.setText( 'fetch '+HC.content_status_string_lookup[status]+' '+HC.content_type_string_lookup[content_type]+' petition' )
+            button.setText( 'fetch {} {} petition'.format( HC.content_status_string_lookup[ status ], HC.content_type_string_lookup[ content_type ] ) )
             
         
-        def do_it( service ):
+        def do_it( service, subject_account_key = None ):
             
             try:
                 
-                response = service.Request( HC.GET, 'petition', { 'content_type' : content_type, 'status' : status } )
+                if subject_account_key is None:
+                    
+                    response = service.Request( HC.GET, 'petition', { 'content_type' : content_type, 'status' : status } )
+                    
+                else:
+                    
+                    response = service.Request( HC.GET, 'petition', { 'content_type' : content_type, 'status' : status, 'subject_account_key' : subject_account_key } )
+                    
                 
                 QP.CallAfter( qt_setpet, response['petition'] )
+                
+            except HydrusExceptions.NotFoundException:
+                
+                job_key = ClientThreading.JobKey()
+                
+                job_key.SetVariable( 'popup_text_1', 'Hey, the server did not have a petition after all. Please hit refresh counts.' )
+                
+                job_key.Delete( 5 )
+                
+                HG.client_controller.pub( 'message', job_key )
                 
             finally:
                 
@@ -4623,27 +4788,45 @@ class ManagementPanelPetitions( ManagementPanel ):
         button.setEnabled( False )
         button.setText( 'Fetching\u2026' )
         
-        self._controller.CallToThread( do_it, self._service )
+        subject_account_key = self._GetSubjectAccountKey()
+        
+        self._controller.CallToThread( do_it, self._service, subject_account_key )
         
     
     def _FlipSelected( self ):
         
-        for i in self._contents.GetSelectedIndices():
+        for i in self._contents_add.GetSelectedIndices():
             
-            flipped_state = not self._contents.IsChecked( i )
+            flipped_state = not self._contents_add.IsChecked( i )
             
-            self._contents.Check( i, flipped_state )
+            self._contents_add.Check( i, flipped_state )
+            
+        
+        for i in self._contents_delete.GetSelectedIndices():
+            
+            flipped_state = not self._contents_delete.IsChecked( i )
+            
+            self._contents_delete.Check( i, flipped_state )
             
         
     
-    def _GetContentsAndChecks( self ):
+    def _GetContentsAndChecks( self, action ):
+        
+        if action == HC.CONTENT_UPDATE_PEND:
+            
+            contents = self._contents_add
+            
+        else:
+            
+            contents = self._contents_delete
+            
         
         contents_and_checks = []
         
-        for i in range( self._contents.count() ):
+        for i in range( contents.count() ):
             
-            content = self._contents.GetData( i )
-            check = self._contents.IsChecked( i )
+            content = contents.GetData( i )
+            check = contents.IsChecked( i )
             
             contents_and_checks.append( ( content, check ) )
             
@@ -4651,7 +4834,35 @@ class ManagementPanelPetitions( ManagementPanel ):
         return contents_and_checks
         
     
-    def _SetContentsAndChecks( self, contents_and_checks, sort_type ):
+    def _GetSubjectAccountKey( self ):
+        
+        account_key_hex = self._petition_account_key.text()
+        
+        if len( account_key_hex ) == 0:
+            
+            return None
+            
+        else:
+            
+            try:
+                
+                account_key_bytes = bytes.fromhex( account_key_hex )
+                
+                if len( account_key_bytes ) != 32:
+                    
+                    raise Exception()
+                    
+                
+                return account_key_bytes
+                
+            except Exception as e:
+                
+                return None
+                
+            
+        
+    
+    def _SetContentsAndChecks( self, action, contents_and_checks, sort_type ):
         
         def key( c_and_s ):
             
@@ -4688,15 +4899,37 @@ class ManagementPanelPetitions( ManagementPanel ):
         
         contents_and_checks.sort( key = key )
         
-        self._contents.clear()
+        if action == HC.CONTENT_UPDATE_PEND:
+            
+            contents = self._contents_add
+            
+            string_template = 'ADD: {}'
+            
+        else:
+            
+            contents = self._contents_delete
+            
+            string_template = 'DELETE: {}'
+            
         
-        to_check = []
+        contents.clear()
         
         for ( i, ( content, check ) ) in enumerate( contents_and_checks ):
             
-            content_string = content.ToString()
+            content_string = string_template.format( content.ToString() )
             
-            self._contents.Append( content_string, content, starts_checked = check )
+            contents.Append( content_string, content, starts_checked = check )
+            
+        
+        if contents.count() > 0:
+            
+            ideal_height_in_rows = min( 20, len( contents_and_checks ) )
+            
+            pixels_per_row = contents.sizeHintForRow( 0 )
+            
+            ideal_height_in_pixels = ( ideal_height_in_rows * pixels_per_row ) + ( contents.frameWidth() * 2 )
+            
+            contents.setFixedHeight( ideal_height_in_pixels )
             
         
     
@@ -4720,140 +4953,218 @@ class ManagementPanelPetitions( ManagementPanel ):
     
     def _SortBy( self, sort_type ):
         
-        contents_and_checks = self._GetContentsAndChecks()
-        
-        self._SetContentsAndChecks( contents_and_checks, sort_type )
+        for action in [ HC.CONTENT_UPDATE_PEND, HC.CONTENT_UPDATE_PETITION ]:
+            
+            contents_and_checks = self._GetContentsAndChecks( action )
+            
+            self._SetContentsAndChecks( action, contents_and_checks, sort_type )
+            
         
     
-    def EventContentDoubleClick( self, item ):
+    def _UpdateAccountKey( self ):
         
-        selected_indices = self._contents.GetSelectedIndices()
+        account_key_hex = self._petition_account_key.text()
+        
+        if len( account_key_hex ) == 0:
+            
+            valid = True
+            
+        else:
+            
+            try:
+                
+                account_key_bytes = bytes.fromhex( account_key_hex )
+                
+                if len( account_key_bytes ) != 32:
+                    
+                    raise Exception()
+                    
+                
+                valid = True
+                
+            except Exception as e:
+                
+                valid = False
+                
+            
+        
+        if valid:
+            
+            self._petition_account_key.setObjectName( 'HydrusValid' )
+            
+            if self._GetSubjectAccountKey() != self._last_fetched_subject_account_key:
+                
+                self._FetchNumPetitions()
+                
+            
+        else:
+            
+            self._petition_account_key.setObjectName( 'HydrusInvalid' )
+            
+        
+        self._petition_account_key.style().polish( self._petition_account_key )
+        
+    
+    def ContentsAddDoubleClick( self, item ):
+        
+        selected_indices = self._contents_add.GetSelectedIndices()
         
         if len( selected_indices ) > 0:
             
             selection = selected_indices[0]
             
-            content = self._contents.GetData( selection )
+            content = self._contents_add.GetData( selection )
             
-            if content.HasHashes():
+            self.EventContentsDoubleClick( content )
+            
+        
+    
+    def ContentsDeleteDoubleClick( self, item ):
+        
+        selected_indices = self._contents_delete.GetSelectedIndices()
+        
+        if len( selected_indices ) > 0:
+            
+            selection = selected_indices[0]
+            
+            content = self._contents_delete.GetData( selection )
+            
+            self.EventContentsDoubleClick( content )
+            
+        
+    
+    def EventContentsDoubleClick( self, content ):
+        
+        if content.HasHashes():
+            
+            hashes = content.GetHashes()
+            
+            num_files_to_show = self._num_files_to_show.GetValue()
+            
+            if num_files_to_show is not None and len( hashes ) > num_files_to_show:
                 
-                hashes = content.GetHashes()
+                hashes = random.sample( hashes, num_files_to_show )
                 
-                num_files_to_show = self._num_files_to_show.GetValue()
-                
-                if num_files_to_show is not None and len( hashes ) > num_files_to_show:
-                    
-                    hashes = random.sample( hashes, num_files_to_show )
-                    
-                
-                self._ShowHashes( hashes )
-                
+            
+            self._ShowHashes( hashes )
             
         
     
     def EventProcess( self ):
         
-        def break_approved_contents_into_chunks( approved_contents ):
+        def break_contents_into_chunks( some_contents ):
             
-            chunks_of_approved_contents = []
-            chunk_of_approved_contents = []
+            chunks_of_some_contents = []
+            chunk_of_some_contents = []
             
             weight = 0
             
-            for content in approved_contents:
+            for content in some_contents:
                 
                 for content_chunk in content.IterateUploadableChunks(): # break 20K-strong mappings petitions into smaller bits to POST back
                     
-                    chunk_of_approved_contents.append( content_chunk )
+                    chunk_of_some_contents.append( content_chunk )
                     
                     weight += content.GetVirtualWeight()
                     
                     if weight > 50:
                         
-                        chunks_of_approved_contents.append( chunk_of_approved_contents )
+                        chunks_of_some_contents.append( chunk_of_some_contents )
                         
-                        chunk_of_approved_contents = []
+                        chunk_of_some_contents = []
                         
                         weight = 0
                         
                     
                 
             
-            if len( chunk_of_approved_contents ) > 0:
+            if len( chunk_of_some_contents ) > 0:
                 
-                chunks_of_approved_contents.append( chunk_of_approved_contents )
+                chunks_of_some_contents.append( chunk_of_some_contents )
                 
             
-            return chunks_of_approved_contents
+            return chunks_of_some_contents
             
         
-        def do_it( controller, service, petition_service_key, approved_contents, denied_contents, petition ):
+        def do_it( controller, service, petition_service_key, add_approved_contents, add_denied_contents, delete_approved_contents, delete_denied_contents, petition ):
+            
+            jobs = [
+                ( HC.CONTENT_UPDATE_PEND, True, add_approved_contents ),
+                ( HC.CONTENT_UPDATE_PEND, False, add_denied_contents ),
+                ( HC.CONTENT_UPDATE_PETITION, True, delete_approved_contents ),
+                ( HC.CONTENT_UPDATE_PETITION, False, delete_denied_contents ),
+            ]
+            
+            num_done = 0
+            num_to_do = 0
+            
+            for ( action, approved, contents ) in jobs:
+                
+                num_to_do += len( contents )
+                
+            
+            if num_to_do > 1:
+                
+                job_key = ClientThreading.JobKey( cancellable = True )
+                
+                job_key.SetStatusTitle( 'committing petitions' )
+                
+                HG.client_controller.pub( 'message', job_key )
+                
+            else:
+                
+                job_key = None
+                
+            
+            reason = petition.GetReason()
             
             try:
                 
-                num_done = 0
-                num_to_do = len( approved_contents )
-                
-                if len( denied_contents ) > 0:
+                for ( action, approved, contents ) in jobs:
                     
-                    num_to_do += 1
-                    
-                
-                if num_to_do > 1:
-                    
-                    job_key = ClientThreading.JobKey( cancellable = True )
-                    
-                    job_key.SetStatusTitle( 'committing petitions' )
-                    
-                    HG.client_controller.pub( 'message', job_key )
-                    
-                else:
-                    
-                    job_key = None
-                    
-                
-                chunks_of_approved_contents = break_approved_contents_into_chunks( approved_contents )
-                
-                num_approved_to_do = len( chunks_of_approved_contents )
-                
-                for chunk_of_approved_contents in chunks_of_approved_contents:
-                    
-                    if job_key is not None:
+                    if len( contents ) == 0:
                         
-                        ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                        continue
                         
-                        if should_quit:
+                    
+                    chunks_of_contents = break_contents_into_chunks( contents )
+                    
+                    num_to_do += len( chunks_of_contents ) - 1
+                    
+                    for chunk_of_contents in chunks_of_contents:
+                        
+                        if job_key is not None:
                             
-                            return
+                            ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                            
+                            if should_quit:
+                                
+                                return
+                                
+                            
+                            job_key.SetVariable( 'popup_gauge_1', ( num_done, num_to_do ) )
                             
                         
-                        job_key.SetVariable( 'popup_gauge_1', ( num_done, num_approved_to_do ) )
+                        content_updates = []
                         
-                    
-                    ( update, content_updates ) = petition.GetApproval( chunk_of_approved_contents )
-                    
-                    service.Request( HC.POST, 'update', { 'client_to_server_update' : update } )
-                    
-                    controller.WriteSynchronous( 'content_updates', { petition_service_key : content_updates } )
-                    
-                    num_done += 1
-                    
-                
-                if len( denied_contents ) > 0:
-                    
-                    if job_key is not None:
-                        
-                        ( i_paused, should_quit ) = job_key.WaitIfNeeded()
-                        
-                        if should_quit:
+                        if approved:
                             
-                            return
+                            ( update, content_updates ) = petition.GetApproval( action, chunk_of_contents, reason )
+                            
+                        else:
+                            
+                            update = petition.GetDenial( action, chunk_of_contents, reason )
                             
                         
-                    
-                    update = petition.GetDenial( denied_contents )
-                    
-                    service.Request( HC.POST, 'update', { 'client_to_server_update' : update } )
+                        service.Request( HC.POST, 'update', { 'client_to_server_update' : update } )
+                        
+                        if len( content_updates ) > 0:
+                            
+                            controller.WriteSynchronous( 'content_updates', { petition_service_key : content_updates } )
+                            
+                        
+                        num_done += 1
+                        
                     
                 
             finally:
@@ -4877,24 +5188,35 @@ class ManagementPanelPetitions( ManagementPanel ):
                 
             
         
-        approved_contents = []
-        denied_contents = []
+        add_approved_contents = []
+        add_denied_contents = []
         
-        for index in range( self._contents.count() ):
+        delete_approved_contents = []
+        delete_denied_contents = []
+        
+        jobs = [
+            ( self._contents_add, add_approved_contents, add_denied_contents ),
+            ( self._contents_delete, delete_approved_contents, delete_denied_contents )
+        ]
+        
+        for ( contents, approved_contents, denied_contents ) in jobs:
             
-            content = self._contents.GetData( index )
-            
-            if self._contents.IsChecked( index ):
+            for index in range( contents.count() ):
                 
-                approved_contents.append( content )
+                content = contents.GetData( index )
                 
-            else:
-                
-                denied_contents.append( content )
+                if contents.IsChecked( index ):
+                    
+                    approved_contents.append( content )
+                    
+                else:
+                    
+                    denied_contents.append( content )
+                    
                 
             
         
-        HG.client_controller.CallToThread( do_it, self._controller, self._service, self._petition_service_key, approved_contents, denied_contents, self._current_petition )
+        HG.client_controller.CallToThread( do_it, self._controller, self._service, self._petition_service_key, add_approved_contents, add_denied_contents, delete_approved_contents, delete_denied_contents, self._current_petition )
         
         self._current_petition = None
         
@@ -4916,23 +5238,44 @@ class ManagementPanelPetitions( ManagementPanel ):
         frame.SetPanel( panel )
         
     
-    def EventRowRightClick( self ):
+    def EventAddRowRightClick( self ):
         
-        selected_indices = self._contents.GetSelectedIndices()
+        selected_indices = self._contents_add.GetSelectedIndices()
         
         selected_contents = []
         
         for i in selected_indices:
             
-            content = self._contents.GetData( i )
+            content = self._contents_add.GetData( i )
             
             selected_contents.append( content )
             
         
+        self.EventContentsRightClick( selected_contents )
+        
+    
+    def EventDeleteRowRightClick( self ):
+        
+        selected_indices = self._contents_delete.GetSelectedIndices()
+        
+        selected_contents = []
+        
+        for i in selected_indices:
+            
+            content = self._contents_delete.GetData( i )
+            
+            selected_contents.append( content )
+            
+        
+        self.EventContentsRightClick( selected_contents )
+        
+    
+    def EventContentsRightClick( self, contents ):
+        
         copyable_items_a = []
         copyable_items_b = []
         
-        for content in selected_contents:
+        for content in contents:
             
             content_type = content.GetContentType()
             
@@ -5092,7 +5435,7 @@ class ManagementPanelQuery( ManagementPanel ):
             
             file_search_context.FixMissingServices( HG.client_controller.services_manager.FilterValidServiceKeys )
             
-            tag_service_key = file_search_context.GetTagSearchContext().service_key
+            tag_service_key = file_search_context.GetTagContext().service_key
             
             self._current_selection_tags_box.SetTagServiceKey( tag_service_key )
             
@@ -5106,49 +5449,45 @@ class ManagementPanelQuery( ManagementPanel ):
         
         self._controller.ResetIdleTimer()
         
-        interrupting_current_search = not self._query_job_key.IsDone()
-        
-        self._query_job_key.Cancel()
-        
         if self._search_enabled:
             
             file_search_context = self._tag_autocomplete.GetFileSearchContext()
             
-            self._management_controller.SetVariable( 'file_search_context', file_search_context.Duplicate() )
-            
             location_context = file_search_context.GetLocationContext()
-            
-            self._SetLocationContext( location_context )
             
             synchronised = self._tag_autocomplete.IsSynchronised()
             
-            self._management_controller.SetVariable( 'synchronised', synchronised )
+            # a query refresh now undoes paused sync
+            if not synchronised:
+                
+                # this will trigger a refresh of search
+                self._tag_autocomplete.SetSynchronised( True )
+                
+                return
+                
             
-            if synchronised:
+            interrupting_current_search = not self._query_job_key.IsDone()
+            
+            self._query_job_key.Cancel()
+            
+            if len( file_search_context.GetPredicates() ) > 0:
                 
-                if len( file_search_context.GetPredicates() ) > 0:
-                    
-                    self._query_job_key = ClientThreading.JobKey()
-                    
-                    sort_by = self._media_sort.GetSort()
-                    
-                    self._controller.CallToThread( self.THREADDoQuery, self._controller, self._page_key, self._query_job_key, file_search_context, sort_by )
-                    
-                    panel = ClientGUIResults.MediaPanelLoading( self._page, self._page_key, location_context )
-                    
-                else:
-                    
-                    panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, [] )
-                    
-                    panel.SetEmptyPageStatusOverride( 'no search' )
-                    
+                self._query_job_key = ClientThreading.JobKey()
                 
-                self._page.SwapMediaPanel( panel )
+                sort_by = self._media_sort.GetSort()
                 
-            elif interrupting_current_search:
+                self._controller.CallToThread( self.THREADDoQuery, self._controller, self._page_key, self._query_job_key, file_search_context, sort_by )
                 
-                self._CancelSearch()
+                panel = ClientGUIResults.MediaPanelLoading( self._page, self._page_key, location_context )
                 
+            else:
+                
+                panel = ClientGUIResults.MediaPanelThumbnails( self._page, self._page_key, location_context, [] )
+                
+                panel.SetEmptyPageStatusOverride( 'no search' )
+                
+            
+            self._page.SwapMediaPanel( panel )
             
         else:
             
@@ -5249,7 +5588,7 @@ class ManagementPanelQuery( ManagementPanel ):
         
         if self._search_enabled:
             
-            self._tag_autocomplete.PauseSearching()
+            self._tag_autocomplete.SetSynchronised( False )
             
         
     
@@ -5260,7 +5599,34 @@ class ManagementPanelQuery( ManagementPanel ):
     
     def SearchChanged( self, file_search_context: ClientSearch.FileSearchContext ):
         
-        self._RefreshQuery()
+        if self._search_enabled:
+            
+            file_search_context = self._tag_autocomplete.GetFileSearchContext()
+            
+            self._management_controller.SetVariable( 'file_search_context', file_search_context.Duplicate() )
+            
+            location_context = file_search_context.GetLocationContext()
+            
+            self._SetLocationContext( location_context )
+            
+            synchronised = self._tag_autocomplete.IsSynchronised()
+            
+            self._management_controller.SetVariable( 'synchronised', synchronised )
+            
+            if synchronised:
+                
+                self._RefreshQuery()
+                
+            else:
+                
+                interrupting_current_search = not self._query_job_key.IsDone()
+                
+                if interrupting_current_search:
+                    
+                    self._CancelSearch()
+                    
+                
+            
         
     
     def SetSearchFocus( self ):

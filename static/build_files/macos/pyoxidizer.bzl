@@ -1,5 +1,5 @@
 def make_dist():
-    return default_python_distribution()
+    return default_python_distribution( python_version = "3.9" )
 
 def make_packaging_policy(dist):
     policy = dist.make_python_packaging_policy()
@@ -36,7 +36,7 @@ def make_install(client, resources):
 
     static_resources = glob(["./*.py", "./*.md", "./*txt", "./bin/**/*", "./static/**/*", "./help/**/*"], strip_prefix="{}/".format(CWD))
     files.add_manifest(static_resources)
-     
+
     hydrus_source = glob(["./hydrus/**/*.py"], strip_prefix="{}/".format(CWD))
     files.add_manifest(hydrus_source)
 

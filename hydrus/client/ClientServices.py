@@ -23,7 +23,6 @@ from hydrus.core.networking import HydrusNetworking
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientFiles
-from hydrus.client import ClientLocation
 from hydrus.client import ClientThreading
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.importing import ClientImporting
@@ -576,7 +575,7 @@ class ServiceLocalRating( Service ):
         self._colours = dict( dictionary[ 'colours' ] )
         
     
-    def ConvertRatingToString( self, rating: typing.Optional[ float ] ):
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
         
         raise NotImplementedError()
         
@@ -599,7 +598,7 @@ class ServiceLocalRating( Service ):
     
 class ServiceLocalRatingLike( ServiceLocalRating ):
     
-    def ConvertRatingToString( self, rating: typing.Optional[ float ] ):
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
         
         if rating is None:
             
@@ -618,6 +617,30 @@ class ServiceLocalRatingLike( ServiceLocalRating ):
             
         
         return 'unknown'
+        
+    
+    def ConvertRatingStateToString( self, rating_state: int ):
+        
+        if rating_state == ClientRatings.LIKE:
+            
+            return 'like'
+            
+        elif rating_state == ClientRatings.DISLIKE:
+            
+            return 'dislike'
+            
+        elif rating_state == ClientRatings.MIXED:
+            
+            return 'mixed'
+            
+        elif rating_state == ClientRatings.NULL:
+            
+            return 'not set'
+            
+        else:
+            
+            return 'unknown'
+            
         
     
 class ServiceLocalRatingNumerical( ServiceLocalRating ):
@@ -648,21 +671,7 @@ class ServiceLocalRatingNumerical( ServiceLocalRating ):
             
         
     
-    def ConvertRatingToStars( self, rating: float ) -> int:
-        
-        if self._allow_zero:
-            
-            stars = int( round( rating * self._num_stars ) )
-            
-        else:
-            
-            stars = int( round( rating * ( self._num_stars - 1 ) ) ) + 1
-            
-        
-        return stars
-        
-    
-    def ConvertRatingToString( self, rating: typing.Optional[ float ] ):
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
         
         if rating is None:
             
@@ -677,6 +686,40 @@ class ServiceLocalRatingNumerical( ServiceLocalRating ):
             
         
         return 'unknown'
+        
+    
+    def ConvertRatingStateAndRatingToString( self, rating_state: int, rating: float ):
+        
+        if rating_state == ClientRatings.SET:
+            
+            return self.ConvertNoneableRatingToString( rating )
+            
+        elif rating_state == ClientRatings.MIXED:
+            
+            return 'mixed'
+            
+        elif rating_state == ClientRatings.NULL:
+            
+            return 'not set'
+            
+        else:
+            
+            return 'unknown'
+            
+        
+    
+    def ConvertRatingToStars( self, rating: float ) -> int:
+        
+        if self._allow_zero:
+            
+            stars = int( round( rating * self._num_stars ) )
+            
+        else:
+            
+            stars = int( round( rating * ( self._num_stars - 1 ) ) ) + 1
+            
+        
+        return stars
         
     
     def ConvertStarsToRating( self, stars: int ) -> float:
@@ -1562,6 +1605,11 @@ class ServiceRepository( ServiceRestricted ):
         HG.client_controller.frame_splash_status.SetText( popup_message, print_to_log = False )
         job_key.SetVariable( 'popup_text_2', popup_message )
         
+        if HG.profile_mode:
+            
+            HG.client_controller.PrintProfile( popup_message )
+            
+        
     
     def _SetNewServiceOptions( self, service_options ):
         
@@ -1899,7 +1947,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -1915,14 +1963,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     if not isinstance( definition_update, HydrusNetwork.DefinitionsUpdate ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     rows_in_this_update = definition_update.GetNumRows()
@@ -2026,7 +2074,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -2042,14 +2090,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     if not isinstance( content_update, HydrusNetwork.ContentUpdate ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->review_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     rows_in_this_update = content_update.GetNumRows( content_types )
@@ -3013,9 +3061,9 @@ class ServiceIPFS( ServiceRemote ):
                 
                 mime = media_result.GetMime()
                 
-                result = HG.client_controller.Read( 'service_filenames', self._service_key, { hash } )
+                multihash = media_result.GetLocationsManager().GetServiceFilename( self._service_key )
                 
-                if len( result ) == 0:
+                if multihash is None:
                     
                     try:
                         
@@ -3027,10 +3075,6 @@ class ServiceIPFS( ServiceRemote ):
                         
                         continue
                         
-                    
-                else:
-                    
-                    ( multihash, ) = result
                     
                 
                 file_info.append( ( hash, mime, multihash ) )
@@ -3189,6 +3233,7 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job.WaitUntilDone()
             
+            
         
         parsing_text = network_job.GetContentText()
         
@@ -3310,7 +3355,7 @@ class ServicesManager( object ):
         
         self._keys_to_services[ CC.TEST_SERVICE_KEY ] = GenerateService( CC.TEST_SERVICE_KEY, HC.TEST_SERVICE, 'test service' )
         
-        key = lambda s: s.GetName()
+        key = lambda s: s.GetName().lower()
         
         self._services_sorted = sorted( services, key = key )
         
@@ -3335,19 +3380,19 @@ class ServicesManager( object ):
             
         
     
+    def GetDefaultLocalTagService( self ) -> Service:
+        
+        # I can replace this with 'default_local_location_context' kind of thing at some point, but for now we'll merge in here
+        
+        return self.GetServices( ( HC.LOCAL_TAG, ) )[0]
+        
+    
     def GetLocalMediaFileServices( self ):
         
         with self._lock:
             
-            return [ service for service in self._services_sorted if service.GetServiceType() == HC.LOCAL_FILE_DOMAIN and service.GetServiceKey() != CC.LOCAL_UPDATE_SERVICE_KEY ]
+            return [ service for service in self._services_sorted if service.GetServiceType() == HC.LOCAL_FILE_DOMAIN ]
             
-        
-    
-    def GetLocalMediaLocationContextUmbrella( self ) -> ClientLocation.LocationContext:
-        
-        service_keys = [ service.GetServiceKey() for service in self.GetLocalMediaFileServices() ]
-        
-        return ClientLocation.LocationContext( current_service_keys = service_keys )
         
     
     def GetName( self, service_key: bytes ):
@@ -3373,6 +3418,14 @@ class ServicesManager( object ):
         with self._lock:
             
             return self._GetService( service_key )
+            
+        
+    
+    def GetServiceKeysToNames( self ):
+        
+        with self._lock:
+            
+            return { service_key : service.GetName() for ( service_key, service ) in self._keys_to_services.items() }
             
         
     
@@ -3410,7 +3463,7 @@ class ServicesManager( object ):
             
         
     
-    def GetServices( self, desired_types: typing.Collection[ int ] = HC.ALL_SERVICES, randomised: bool = False ):
+    def GetServices( self, desired_types: typing.Collection[ int ] = HC.ALL_SERVICES, randomised: bool = False ) -> typing.List[ Service ]:
         
         with self._lock:
             

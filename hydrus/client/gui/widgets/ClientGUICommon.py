@@ -19,6 +19,7 @@ from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.widgets import ClientGUIColourPicker
 
 def AddGridboxStretchSpacer( layout: QW.QGridLayout ):
     
@@ -56,18 +57,32 @@ def WrapInGrid( parent, rows, expand_text = False, add_stretch_at_end = True ):
             st = BetterStaticText( parent, text )
             
         
+        possible_tooltip_widget = None
+        
         if isinstance( control, QW.QLayout ):
             
             cflags = sizer_flags
+            
+            if control.count() > 0:
+                
+                possible_widget_item = control.itemAt( 0 )
+                
+                if isinstance( possible_widget_item, QW.QWidgetItem ):
+                    
+                    possible_tooltip_widget = possible_widget_item.widget()
+                    
+                
             
         else:
             
             cflags = control_flags
             
-            if control.toolTip() != '':
-                
-                st.setToolTip( control.toolTip() )
-                
+            possible_tooltip_widget = control
+            
+        
+        if possible_tooltip_widget is not None and isinstance( possible_tooltip_widget, QW.QWidget ) and possible_tooltip_widget.toolTip() != '':
+            
+            st.setToolTip( possible_tooltip_widget.toolTip() )
             
         
         QP.AddToLayout( gridbox, st, text_flags )
@@ -418,90 +433,6 @@ class BetterChoice( QW.QComboBox ):
             
         
     
-class BetterColourControl( QP.ColourPickerCtrl ):
-    
-    def __init__( self, *args, **kwargs ):
-        
-        QP.ColourPickerCtrl.__init__( self, *args, **kwargs )
-        
-        self._widget_event_filter = QP.WidgetEventFilter( self )
-        
-    
-    def _ImportHexFromClipboard( self ):
-        
-        try:
-            
-            import_string = HG.client_controller.GetClipboardText()
-            
-        except Exception as e:
-            
-            QW.QMessageBox.critical( self, 'Error', str(e) )
-            
-            return
-            
-        
-        if import_string.startswith( '#' ):
-            
-            import_string = import_string[1:]
-            
-        
-        import_string = '#' + re.sub( '[^0-9a-fA-F]', '', import_string )
-        
-        if len( import_string ) != 7:
-            
-            QW.QMessageBox.critical( self, 'Error', 'That did not appear to be a hex string!' )
-            
-            return
-            
-        
-        try:
-            
-            colour = QG.QColor( import_string )
-            
-        except Exception as e:
-            
-            QW.QMessageBox.critical( self, 'Error', str(e) )
-            
-            HydrusData.ShowException( e )
-            
-            return
-            
-        
-        self.SetColour( colour )
-        
-    
-    def contextMenuEvent( self, event ):
-        
-        if event.reason() == QG.QContextMenuEvent.Keyboard:
-            
-            self.ShowMenu()
-            
-        
-    
-    def mouseReleaseEvent( self, event ):
-        
-        if event.button() != QC.Qt.RightButton:
-            
-            QP.ColourPickerCtrl.mouseReleaseEvent( self, event )
-            
-            return
-            
-        
-        self.ShowMenu()
-        
-    
-    def ShowMenu( self ):
-        
-        menu = QW.QMenu()
-        
-        hex_string = self.GetColour().name( QG.QColor.HexRgb )
-        
-        ClientGUIMenus.AppendMenuItem( menu, 'copy ' + hex_string + ' to the clipboard', 'Copy the current colour to the clipboard.', HG.client_controller.pub, 'clipboard', 'text', hex_string )
-        ClientGUIMenus.AppendMenuItem( menu, 'import a hex colour from the clipboard', 'Look at the clipboard for a colour in the format #FF0000, and set the colour.', self._ImportHexFromClipboard )
-        
-        CGC.core().PopupMenu( self, menu )
-        
-    
 class BetterNotebook( QW.QTabWidget ):
     
     def _ShiftSelection( self, delta ):
@@ -600,6 +531,8 @@ class ButtonWithMenuArrow( QW.QToolButton ):
         
         self._menu = QW.QMenu( self )
         
+        self._menu.installEventFilter( self )
+        
         self.setMenu( self._menu )
         
         self._menu.aboutToShow.connect( self._ClearAndPopulateMenu )
@@ -615,6 +548,20 @@ class ButtonWithMenuArrow( QW.QToolButton ):
     def _PopulateMenu( self, menu ):
         
         raise NotImplementedError()
+        
+    
+    def eventFilter( self, watched, event ):
+        
+        if event.type() == QC.QEvent.Show and watched == self._menu:
+            
+            pos = QG.QCursor.pos()
+            
+            self._menu.move( pos )
+            
+            return True
+            
+        
+        return False
         
     
 class BetterRadioBox( QP.RadioBox ):
@@ -925,7 +872,7 @@ class AlphaColourControl( QW.QWidget ):
         
         QW.QWidget.__init__( self, parent )
         
-        self._colour_picker = BetterColourControl( self )
+        self._colour_picker = ClientGUIColourPicker.ColourPickerButton( self )
         
         self._alpha_selector = BetterSpinBox( self, min=0, max=255 )
         
@@ -979,6 +926,7 @@ class ExportPatternButton( BetterButton ):
         ClientGUIMenus.AppendMenuItem( menu, 'the file\'s hash - {hash}', 'copy "{hash}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{hash}' )
         ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s tags - {tags}', 'copy "{tags}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{tags}' )
         ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s non-namespaced tags - {nn tags}', 'copy "{nn tags}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{nn tags}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'file order - {#}', 'copy "{#}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{#}' )
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -1628,14 +1576,16 @@ class NoneableTextCtrl( QW.QWidget ):
         
         self._checkbox.stateChanged.connect( self._HandleValueChanged )
         self._text.textChanged.connect( self._HandleValueChanged )
+        
     
     def _HandleValueChanged( self, val ):
         
         self.valueChanged.emit()
         
         
-    def EventCheckBox( self, state ):
     
+    def EventCheckBox( self, state ):
+        
         if self._checkbox.isChecked():
         
             self._text.setEnabled( False )
@@ -1656,6 +1606,11 @@ class NoneableTextCtrl( QW.QWidget ):
             
             return self._text.text()
             
+        
+    
+    def setPlaceholderText( self, text: str ):
+        
+        self._text.setPlaceholderText( text )
         
     
     def setToolTip( self, text ):
@@ -1857,7 +1812,7 @@ class StaticBox( QW.QFrame ):
         
         self._sizer = QP.VBoxLayout()
         
-        normal_font = QW.QApplication.font()
+        normal_font = self.font()
         
         normal_font_size = normal_font.pointSize()
         normal_font_family = normal_font.family()

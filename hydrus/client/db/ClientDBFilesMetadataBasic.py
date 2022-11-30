@@ -12,11 +12,7 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
     
     def __init__( self, cursor: sqlite3.Cursor ):
         
-        ClientDBModule.ClientDBModule.__init__( self, 'client files metadata', cursor )
-        
-        self.inbox_hash_ids = set()
-        
-        self._InitCaches()
+        ClientDBModule.ClientDBModule.__init__( self, 'client files simple metadata', cursor )
         
     
     def _GetInitialIndexGenerationDict( self ) -> dict:
@@ -32,10 +28,6 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
             ( [ 'num_frames' ], False, 400 )
         ]
         
-        index_generation_dict[ 'main.archive_timestamps' ] = [
-            ( [ 'archived_timestamp' ], False, 474 )
-        ]
-        
         index_generation_dict[ 'main.file_domain_modified_timestamps' ] = [
             ( [ 'file_modified_timestamp' ], False, 476 )
         ]
@@ -46,20 +38,12 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
     def _GetInitialTableGenerationDict( self ) -> dict:
         
         return {
-            'main.file_inbox' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 400 ),
             'main.files_info' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, size INTEGER, mime INTEGER, width INTEGER, height INTEGER, duration INTEGER, num_frames INTEGER, has_audio INTEGER_BOOLEAN, num_words INTEGER );', 400 ),
             'main.has_icc_profile' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 465 ),
-            'main.archive_timestamps' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, archived_timestamp INTEGER );', 474 ),
+            'main.has_exif' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 505 ),
+            'main.has_human_readable_embedded_metadata' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 505 ),
             'main.file_domain_modified_timestamps' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER, domain_id INTEGER, file_modified_timestamp INTEGER, PRIMARY KEY ( hash_id, domain_id ) );', 476 )
         }
-        
-    
-    def _InitCaches( self ):
-        
-        if self._Execute( 'SELECT 1 FROM sqlite_master WHERE name = ?;', ( 'file_inbox', ) ).fetchone() is not None:
-            
-            self.inbox_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM file_inbox;' ) )
-            
         
     
     def AddFilesInfo( self, rows, overwrite = False ):
@@ -75,29 +59,6 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         
         # hash_id, size, mime, width, height, duration, num_frames, has_audio, num_words
         self._ExecuteMany( insert_phrase + ' files_info ( hash_id, size, mime, width, height, duration, num_frames, has_audio, num_words ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? );', rows )
-        
-    
-    def ArchiveFiles( self, hash_ids: typing.Collection[ int ] ) -> typing.Set[ int ]:
-        
-        if not isinstance( hash_ids, set ):
-            
-            hash_ids = set( hash_ids )
-            
-        
-        archiveable_hash_ids = hash_ids.intersection( self.inbox_hash_ids )
-        
-        if len( archiveable_hash_ids ) > 0:
-            
-            self._ExecuteMany( 'DELETE FROM file_inbox WHERE hash_id = ?;', ( ( hash_id, ) for hash_id in archiveable_hash_ids ) )
-            
-            self.inbox_hash_ids.difference_update( archiveable_hash_ids )
-            
-            now = HydrusData.GetNow()
-            
-            self._ExecuteMany( 'REPLACE INTO archive_timestamps ( hash_id, archived_timestamp ) VALUES ( ?, ? );', ( ( hash_id, now ) for hash_id in archiveable_hash_ids ) )
-            
-        
-        return archiveable_hash_ids
         
     
     def ClearDomainModifiedTimestamp( self, hash_id: int, domain_id: int ):
@@ -169,10 +130,10 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         if content_type == HC.CONTENT_TYPE_HASH:
             
             return [
-                ( 'file_inbox', 'hash_id' ),
                 ( 'files_info', 'hash_id' ),
-                ( 'has_icc_profile', 'hash_id' ),
-                ( 'archive_timestamps', 'hash_id' )
+                ( 'has_exif', 'hash_id' ),
+                ( 'has_human_readable_embedded_metadata', 'hash_id' ),
+                ( 'has_icc_profile', 'hash_id' )
             ]
             
         
@@ -205,6 +166,34 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         return total_size
         
     
+    def GetHasEXIF( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_exif WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasEXIFHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_exif_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_exif USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_exif_hash_ids
+        
+    
+    def GetHasHumanReadableEmbeddedMetadata( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_human_readable_embedded_metadata WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasHumanReadableEmbeddedMetadataHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_human_readable_embedded_metadata_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_human_readable_embedded_metadata USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_human_readable_embedded_metadata_hash_ids
+        
+    
     def GetHasICCProfile( self, hash_id: int ):
         
         result = self._Execute( 'SELECT hash_id FROM has_icc_profile WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
@@ -212,38 +201,40 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         return result is not None
         
     
-    def GetHasICCProfileHashIds( self, hash_ids: typing.Collection[ int ] ) -> typing.Set[ int ]:
+    def GetHasICCProfileHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
         
-        with self._MakeTemporaryIntegerTable( hash_ids, 'hash_id' ) as temp_hash_ids_table_name:
-            
-            has_icc_profile_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_icc_profile USING ( hash_id );'.format( temp_hash_ids_table_name ) ) )
-            
+        has_icc_profile_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_icc_profile USING ( hash_id );'.format( hash_ids_table_name ) ) )
         
         return has_icc_profile_hash_ids
-        
-    
-    def InboxFiles( self, hash_ids: typing.Collection[ int ] ) -> typing.Set[ int ]:
-        
-        if not isinstance( hash_ids, set ):
-            
-            hash_ids = set( hash_ids )
-            
-        
-        inboxable_hash_ids = hash_ids.difference( self.inbox_hash_ids )
-        
-        if len( inboxable_hash_ids ) > 0:
-            
-            self._ExecuteMany( 'INSERT OR IGNORE INTO file_inbox VALUES ( ? );', ( ( hash_id, ) for hash_id in inboxable_hash_ids ) )
-            
-            self.inbox_hash_ids.update( inboxable_hash_ids )
-            
-        
-        return inboxable_hash_ids
         
     
     def SetDomainModifiedTimestamp( self, hash_id: int, domain_id: int, timestamp: int ):
         
         self._Execute( 'REPLACE INTO file_domain_modified_timestamps ( hash_id, domain_id, file_modified_timestamp ) VALUES ( ?, ?, ? );', ( hash_id, domain_id, timestamp ) )
+        
+    
+    def SetHasEXIF( self, hash_id: int, has_exif: bool ):
+        
+        if has_exif:
+            
+            self._Execute( 'INSERT OR IGNORE INTO has_exif ( hash_id ) VALUES ( ? );', ( hash_id, ) )
+            
+        else:
+            
+            self._Execute( 'DELETE FROM has_exif WHERE hash_id = ?;', ( hash_id, ) )
+            
+        
+    
+    def SetHasHumanReadableEmbeddedMetadata( self, hash_id: int, has_human_readable_embedded_metadata: bool ):
+        
+        if has_human_readable_embedded_metadata:
+            
+            self._Execute( 'INSERT OR IGNORE INTO has_human_readable_embedded_metadata ( hash_id ) VALUES ( ? );', ( hash_id, ) )
+            
+        else:
+            
+            self._Execute( 'DELETE FROM has_human_readable_embedded_metadata WHERE hash_id = ?;', ( hash_id, ) )
+            
         
     
     def SetHasICCProfile( self, hash_id: int, has_icc_profile: bool ):

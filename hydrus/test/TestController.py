@@ -52,6 +52,7 @@ from hydrus.test import TestClientImageHandling
 from hydrus.test import TestClientImportOptions
 from hydrus.test import TestClientImportSubscriptions
 from hydrus.test import TestClientListBoxes
+from hydrus.test import TestClientMetadataMigration
 from hydrus.test import TestClientMigration
 from hydrus.test import TestClientNetworking
 from hydrus.test import TestClientParsing
@@ -227,21 +228,29 @@ class Controller( object ):
         
         self._param_read_responses = {}
         
+        self.example_file_repo_service_key_1 = HydrusData.GenerateKey()
+        self.example_file_repo_service_key_2 = HydrusData.GenerateKey()
         self.example_tag_repo_service_key = HydrusData.GenerateKey()
+        self.example_ipfs_service_key = HydrusData.GenerateKey()
         
         services = []
         
         services.append( ClientServices.GenerateService( CC.LOCAL_BOORU_SERVICE_KEY, HC.LOCAL_BOORU, 'local booru' ) )
         services.append( ClientServices.GenerateService( CC.CLIENT_API_SERVICE_KEY, HC.CLIENT_API_SERVICE, 'client api' ) )
         services.append( ClientServices.GenerateService( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HC.COMBINED_LOCAL_FILE, 'all local files' ) )
+        services.append( ClientServices.GenerateService( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, HC.COMBINED_LOCAL_MEDIA, 'all my files' ) )
         services.append( ClientServices.GenerateService( CC.LOCAL_FILE_SERVICE_KEY, HC.LOCAL_FILE_DOMAIN, 'my files' ) )
+        services.append( ClientServices.GenerateService( CC.LOCAL_UPDATE_SERVICE_KEY, HC.LOCAL_FILE_UPDATE_DOMAIN, 'repository updates' ) )
         services.append( ClientServices.GenerateService( CC.TRASH_SERVICE_KEY, HC.LOCAL_FILE_TRASH_DOMAIN, 'trash' ) )
         services.append( ClientServices.GenerateService( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, HC.LOCAL_TAG, 'my tags' ) )
+        services.append( ClientServices.GenerateService( self.example_file_repo_service_key_1, HC.FILE_REPOSITORY, 'example file repo 1' ) )
+        services.append( ClientServices.GenerateService( self.example_file_repo_service_key_2, HC.FILE_REPOSITORY, 'example file repo 2' ) )
         services.append( ClientServices.GenerateService( self.example_tag_repo_service_key, HC.TAG_REPOSITORY, 'example tag repo' ) )
         services.append( ClientServices.GenerateService( CC.COMBINED_TAG_SERVICE_KEY, HC.COMBINED_TAG, 'all known tags' ) )
         services.append( ClientServices.GenerateService( CC.COMBINED_FILE_SERVICE_KEY, HC.COMBINED_FILE, 'all known files' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_LIKE_SERVICE_KEY, HC.LOCAL_RATING_LIKE, 'example local rating like service' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_NUMERICAL_SERVICE_KEY, HC.LOCAL_RATING_NUMERICAL, 'example local rating numerical service' ) )
+        services.append( ClientServices.GenerateService( self.example_ipfs_service_key, HC.IPFS, 'example ipfs service' ) )
         
         self._name_read_responses[ 'services' ] = services
         
@@ -629,7 +638,7 @@ class Controller( object ):
     
     def IsConnected( self ):
         
-        False
+        return False
         
     
     def IsCurrentPage( self, page_key ):
@@ -776,6 +785,7 @@ class Controller( object ):
             TestHydrusNetworking,
             TestClientImportSubscriptions,
             TestClientImageHandling,
+            TestClientMetadataMigration,
             TestClientMigration,
             TestHydrusServer
         ]
@@ -784,7 +794,7 @@ class Controller( object ):
             TestDialogs,
             TestClientListBoxes
         ]
-         
+        
         module_lookup[ 'client_api' ] = [
             TestClientAPI
         ]
@@ -851,6 +861,10 @@ class Controller( object ):
         
         module_lookup[ 'image' ] = [
             TestClientImageHandling
+        ]
+        
+        module_lookup[ 'metadata_migration' ] = [
+            TestClientMetadataMigration
         ]
         
         module_lookup[ 'migration' ] = [

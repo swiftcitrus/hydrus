@@ -282,7 +282,7 @@ class ClientDBMaintenance( ClientDBModule.ClientDBModule ):
     
     def RegisterShutdownWork( self ):
         
-        self._Execute( 'DELETE from last_shutdown_work_time;' )
+        self._Execute( 'DELETE FROM last_shutdown_work_time;' )
         
         self._Execute( 'INSERT INTO last_shutdown_work_time ( last_shutdown_work_time ) VALUES ( ? );', ( HydrusData.GetNow(), ) )
         
@@ -298,5 +298,8 @@ class ClientDBMaintenance( ClientDBModule.ClientDBModule ):
         
         # just a little thing to run after creating and populating tables that will scan any actual new stuff
         
-        self.GetTableNamesDueAnalysis()
+        # TODO: Actually lmao, this didn't do what I wanted and often caused megalag
+        pass
+        
+        # self.GetTableNamesDueAnalysis()
         
