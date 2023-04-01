@@ -669,8 +669,8 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
         
     
     def _CheckFolder( self, job_key ):
-        
-        all_paths = ClientFiles.GetAllFilePaths( [ self._path ] )
+    
+        ( all_paths, num_sidecars ) = ClientFiles.GetAllFilePaths( [ self._path ] )
         
         all_paths = HydrusPaths.FilterFreePaths( all_paths )
         
@@ -683,11 +683,6 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                 break
                 
             
-            if path.endswith( '.txt' ):
-                
-                continue
-                
-            
             file_seed = ClientImportFileSeeds.FileSeed( ClientImportFileSeeds.FILE_SEED_TYPE_HDD, path )
             
             if not self._file_seed_cache.HasFileSeed( file_seed ):
@@ -695,7 +690,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
                 file_seeds.append( file_seed )
                 
             
-            job_key.SetVariable( 'popup_text_1', 'checking: found ' + HydrusData.ToHumanInt( len( file_seeds ) ) + ' new files' )
+            job_key.SetStatusText( 'checking: found ' + HydrusData.ToHumanInt( len( file_seeds ) ) + ' new files' )
             
         
         self._file_seed_cache.AddFileSeeds( file_seeds )
@@ -759,7 +754,7 @@ class ImportFolder( HydrusSerialisable.SerialisableBaseNamed ):
             
             gauge_num_done = num_files_imported + 1
             
-            job_key.SetVariable( 'popup_text_1', 'importing file ' + HydrusData.ConvertValueRangeToPrettyString( gauge_num_done, num_total ) )
+            job_key.SetStatusText( 'importing file ' + HydrusData.ConvertValueRangeToPrettyString( gauge_num_done, num_total ) )
             job_key.SetVariable( 'popup_gauge_1', ( gauge_num_done, num_total ) )
             
             path = file_seed.file_seed_data

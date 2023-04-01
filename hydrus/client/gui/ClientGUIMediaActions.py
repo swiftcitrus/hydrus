@@ -60,25 +60,41 @@ def ApplyContentApplicationCommandToMedia( parent: QW.QWidget, command: CAC.Appl
         
     else:
         
+        content_updates = []
+        
         if service_type in HC.REAL_TAG_SERVICES:
             
             tag = value
             
             content_updates = GetContentUpdatesForAppliedContentApplicationCommandTags( parent, service_key, service_type, action, media, tag )
             
-        elif service_type in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ):
+        elif service_type in HC.RATINGS_SERVICES:
             
             if action in ( HC.CONTENT_UPDATE_SET, HC.CONTENT_UPDATE_FLIP ):
                 
-                rating = value
+                if action == HC.CONTENT_UPDATE_FLIP and service_type == HC.LOCAL_RATING_INCDEC:
+                    
+                    pass
+                    
+                else:
+                    
+                    rating = value
+                    
+                    content_updates = GetContentUpdatesForAppliedContentApplicationCommandRatingsSetFlip( service_key, action, media, rating )
+                    
                 
-                content_updates = GetContentUpdatesForAppliedContentApplicationCommandRatingsSetFlip( service_key, action, media, rating )
+            elif action in ( HC.CONTENT_UPDATE_INCREMENT, HC.CONTENT_UPDATE_DECREMENT ):
                 
-            elif action in ( HC.CONTENT_UPDATE_INCREMENT, HC.CONTENT_UPDATE_DECREMENT ) and service_type == HC.LOCAL_RATING_NUMERICAL:
-                
-                one_star_value = service.GetOneStarValue()
-                
-                content_updates = GetContentUpdatesForAppliedContentApplicationCommandRatingsIncDec( service_key, one_star_value, action, media )
+                if service_type == HC.LOCAL_RATING_NUMERICAL:
+                    
+                    one_star_value = service.GetOneStarValue()
+                    
+                    content_updates = GetContentUpdatesForAppliedContentApplicationCommandRatingsNumericalIncDec( service_key, one_star_value, action, media )
+                    
+                elif service_type == HC.LOCAL_RATING_INCDEC:
+                    
+                    content_updates = GetContentUpdatesForAppliedContentApplicationCommandRatingsIncDec( service_key, action, media )
+                    
                 
             else:
                 
@@ -94,8 +110,37 @@ def ApplyContentApplicationCommandToMedia( parent: QW.QWidget, command: CAC.Appl
             
             HG.client_controller.Write( 'content_updates', { service_key : content_updates } )
             
+        
     
     return True
+    
+
+def ClearDeleteRecord( win, media ):
+    
+    clearable_media = [ m for m in media if CC.COMBINED_LOCAL_FILE_SERVICE_KEY in m.GetLocationsManager().GetDeleted() ]
+    
+    if len( clearable_media ) == 0:
+        
+        return
+        
+    
+    result = ClientGUIDialogsQuick.GetYesNo( win, 'Clear the deletion record for {} previously deleted files?.'.format( HydrusData.ToHumanInt( len( clearable_media ) ) ) )
+    
+    if result == QW.QDialog.Accepted:
+        
+        for chunk_of_media in HydrusData.SplitIteratorIntoChunks( clearable_media, 64 ):
+            
+            service_keys_to_content_updates = collections.defaultdict( list )
+            
+            clearee_hashes = [ m.GetHash() for m in chunk_of_media ]
+            
+            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, clearee_hashes )
+            
+            service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ content_update ]
+            
+            HG.client_controller.Write( 'content_updates', service_keys_to_content_updates )
+            
+        
     
 
 def EditFileNotes( win: QW.QWidget, media: ClientMedia.MediaSingleton, name_to_start_on = typing.Optional[ str ] ):
@@ -171,7 +216,40 @@ def GetContentUpdatesForAppliedContentApplicationCommandRatingsSetFlip( service_
     return content_updates
     
 
-def GetContentUpdatesForAppliedContentApplicationCommandRatingsIncDec( service_key: bytes, one_star_value: float, action: int, media: typing.Collection[ ClientMedia.MediaSingleton ] ):
+def GetContentUpdatesForAppliedContentApplicationCommandRatingsIncDec( service_key: bytes, action: int, media: typing.Collection[ ClientMedia.MediaSingleton ] ):
+    
+    if action == HC.CONTENT_UPDATE_INCREMENT:
+        
+        direction = 1
+        
+    elif action == HC.CONTENT_UPDATE_DECREMENT:
+        
+        direction = -1
+        
+    else:
+        
+        return []
+        
+    
+    ratings_to_hashes = collections.defaultdict( set )
+    
+    for m in media:
+        
+        ratings_manager = m.GetRatingsManager()
+        
+        current_rating = ratings_manager.GetRating( service_key )
+        
+        new_rating = current_rating + direction
+        
+        ratings_to_hashes[ new_rating ].add( m.GetHash() )
+        
+    
+    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) ) for ( rating, hashes ) in ratings_to_hashes.items() ]
+    
+    return content_updates
+    
+
+def GetContentUpdatesForAppliedContentApplicationCommandRatingsNumericalIncDec( service_key: bytes, one_star_value: float, action: int, media: typing.Collection[ ClientMedia.MediaSingleton ] ):
     
     if action == HC.CONTENT_UPDATE_INCREMENT:
         
@@ -502,7 +580,7 @@ def MoveOrDuplicateLocalFiles( win: QW.QWidget, dest_service_key: bytes, action:
                 break
                 
             
-            job_key.SetVariable( 'popup_text_1', HydrusData.ConvertValueRangeToPrettyString( i * BLOCK_SIZE, num_to_do ) )
+            job_key.SetStatusText( HydrusData.ConvertValueRangeToPrettyString( i * BLOCK_SIZE, num_to_do ) )
             job_key.SetVariable( 'popup_gauge_1', ( i * BLOCK_SIZE, num_to_do ) )
             
             content_updates = []
@@ -635,7 +713,14 @@ def UndeleteFiles( hashes ):
 
 def UndeleteMedia( win, media ):
     
-    media_deleted_service_keys = HydrusData.MassUnion( ( m.GetLocationsManager().GetDeleted() for m in media ) )
+    undeletable_media = [ m for m in media if m.GetLocationsManager().IsLocal() ]
+    
+    if len( undeletable_media ) == 0:
+        
+        return
+        
+    
+    media_deleted_service_keys = HydrusData.MassUnion( ( m.GetLocationsManager().GetDeleted() for m in undeletable_media ) )
     
     local_file_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) )
     
@@ -673,7 +758,7 @@ def UndeleteMedia( win, media ):
                 
             
         else:
-    
+            
             ( undelete_service, ) = undeletable_services
             
             if HC.options[ 'confirm_trash' ]:
@@ -693,7 +778,7 @@ def UndeleteMedia( win, media ):
         
         if do_it:
             
-            for chunk_of_media in HydrusData.SplitIteratorIntoChunks( media, 64 ):
+            for chunk_of_media in HydrusData.SplitIteratorIntoChunks( undeletable_media, 64 ):
                 
                 service_keys_to_content_updates = collections.defaultdict( list )
                 

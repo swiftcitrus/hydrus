@@ -28,6 +28,7 @@ I try to release a new version every Wednesday by 8pm EST and write an accompany
         * [Chocolatey](https://community.chocolatey.org/packages/hydrus-network)
         * [Scoop](https://github.com/ScoopInstaller/Scoop) (`hydrus-network` in the 'Extras' bucket)    
         * Winget. The command is `winget install --id=HydrusNetwork.HydrusNetwork  -e --location "\PATH\TO\INSTALL\HERE"`, which can, if you know what you are doing, be `winget install --id=HydrusNetwork.HydrusNetwork  -e --location ".\"`, maybe rolled into a batch file.
+        * [User guide for Anaconda](https://gist.github.com/jufogu/b78509695c6c65cdb2866a56fb14a820)
 
 === "macOS"
 
@@ -163,7 +164,7 @@ As a result, if you get a failure on trying to do a big update, try cutting the 
 
 If you narrow the gap down to just one version and still get an error, please let me know. I am very interested in these sorts of problems and will be happy to help figure out a fix with you (and everyone else who might be affected).
 
-_All that said, and while updating is complex and every client is different, one user recently did a giant multi-year update and found this route worked and was efficient: 204 > 238 > 246 > 291 > 328 > 335 > 376 > 421 > 466 > 474_ 
+_All that said, and while updating is complex and every client is different, various user reports over the years suggest this route works and is efficient: 204 > 238 > 246 > 291 > 328 > 335 > 376 > 421 > 466 > 474 ? 494 > 509_ 
 
 ## Backing up
 

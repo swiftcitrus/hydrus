@@ -615,7 +615,7 @@ class FleshOutPredicatePanel( ClientGUIScrolledPanels.EditPanel ):
             
             services_manager = HG.client_controller.services_manager
             
-            ratings_services = services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) )
+            ratings_services = services_manager.GetServices( HC.RATINGS_SERVICES )
             
             if len( ratings_services ) > 0:
                 
@@ -876,11 +876,20 @@ class TagContextButton( ClientGUICommon.BetterButton ):
         
         menu = QW.QMenu()
         
+        last_seen_service_type = None
+        
         for service in services:
+            
+            if last_seen_service_type is not None and last_seen_service_type != service.GetServiceType():
+                
+                ClientGUIMenus.AppendSeparator( menu )
+                
             
             tag_context = ClientSearch.TagContext( service_key = service.GetServiceKey() )
             
             ClientGUIMenus.AppendMenuItem( menu, service.GetName(), 'Change the current tag domain to {}.'.format( service.GetName() ), self.SetValue, tag_context )
+            
+            last_seen_service_type = service.GetServiceType()
             
         
         CGC.core().PopupMenu( self, menu )

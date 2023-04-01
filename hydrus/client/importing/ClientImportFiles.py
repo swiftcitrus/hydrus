@@ -72,7 +72,7 @@ class FileImportStatus( object ):
         return FileImportStatus( CC.STATUS_UNKNOWN, None )
         
     
-def CheckFileImportStatus( file_import_status: FileImportStatus ):
+def CheckFileImportStatus( file_import_status: FileImportStatus ) -> FileImportStatus:
     
     if file_import_status.AlreadyInDB():
         
@@ -105,6 +105,11 @@ class FileImportJob( object ):
         if HG.file_import_report_mode:
             
             HydrusData.ShowText( 'File import job created for path {}.'.format( temp_path ) )
+            
+        
+        if file_import_options.IsDefault():
+            
+            file_import_options = FileImportOptions.GetRealFileImportOptions( file_import_options, FileImportOptions.IMPORT_TYPE_LOUD )
             
         
         self._temp_path = temp_path
@@ -257,8 +262,10 @@ class FileImportJob( object ):
         
         self._pre_import_file_status = HG.client_controller.Read( 'hash_status', 'sha256', hash, prefix = 'file recognised' )
         
-        # just in case
-        self._pre_import_file_status.hash = hash
+        if self._pre_import_file_status.hash is None:
+            
+            self._pre_import_file_status.hash = hash
+            
         
         self._pre_import_file_status = CheckFileImportStatus( self._pre_import_file_status )
         
@@ -339,8 +346,9 @@ class FileImportJob( object ):
             
             bounding_dimensions = HG.client_controller.options[ 'thumbnail_dimensions' ]
             thumbnail_scale_type = HG.client_controller.new_options.GetInteger( 'thumbnail_scale_type' )
+            thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
             
-            ( clip_rect, target_resolution ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), bounding_dimensions, thumbnail_scale_type )
+            ( clip_rect, target_resolution ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
             
             percentage_in = HG.client_controller.new_options.GetInteger( 'video_thumbnail_percentage_in' )
             

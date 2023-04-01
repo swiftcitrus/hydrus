@@ -22,6 +22,7 @@ from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.metadata import ClientMetadataMigrationImporters
 
 choice_tuple_label_lookup = {
+    ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes : 'a file\'s notes',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags : 'a file\'s tags',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs : 'a file\'s URLs',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT : 'a .txt sidecar',
@@ -29,6 +30,7 @@ choice_tuple_label_lookup = {
 }
 
 choice_tuple_description_lookup = {
+    ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes : 'The notes that a file has.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags : 'The tags that a file has on a particular service.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs : 'The known URLs that a file has.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT : 'A list of raw newline-separated texts in a .txt file.',
@@ -87,6 +89,10 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
+        self._txt_separator_panel = ClientGUIMetadataMigrationCommon.EditSidecarTXTSeparator( self )
+        
+        #
+        
         self._sidecar_panel = ClientGUIMetadataMigrationCommon.EditSidecarDetailsPanel( self )
         
         #
@@ -111,6 +117,7 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         QP.AddToLayout( vbox, self._change_type_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._service_selection_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._json_parsing_formula_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._txt_separator_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._sidecar_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._string_processor_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         
@@ -166,13 +173,13 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             importer.SetServiceKey( self._service_key )
             
-        elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ):
+        elif isinstance( importer, ( ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ) ):
             
             pass
             
         elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT ):
             
-            pass
+            importer.SetSeparator( self._txt_separator_panel.GetValue() )
             
         elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON ):
             
@@ -222,6 +229,10 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( string_processor = string_processor, service_key = self._service_key )
             
+        elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes:
+            
+            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes( string_processor = string_processor )
+            
         elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs:
             
             importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs( string_processor = string_processor )
@@ -231,8 +242,9 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             remove_actual_filename_ext = self._sidecar_panel.GetRemoveActualFilenameExt()
             suffix = self._sidecar_panel.GetSuffix()
             filename_string_converter = self._sidecar_panel.GetFilenameStringConverter()
+            separator = self._txt_separator_panel.GetValue()
             
-            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT( string_processor = string_processor, remove_actual_filename_ext = remove_actual_filename_ext, suffix = suffix, filename_string_converter = filename_string_converter )
+            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT( string_processor = string_processor, remove_actual_filename_ext = remove_actual_filename_ext, suffix = suffix, filename_string_converter = filename_string_converter, separator = separator )
             
         elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON:
             
@@ -276,6 +288,7 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._service_selection_panel.setVisible( False )
         self._json_parsing_formula_panel.setVisible( False )
+        self._txt_separator_panel.setVisible( False )
         self._sidecar_panel.setVisible( False )
         
         if isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterSidecar ):
@@ -299,7 +312,7 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._service_selection_panel.setVisible( True )
             
-        elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ):
+        elif isinstance( importer, ( ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ) ):
             
             pass
             
@@ -307,6 +320,10 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._sidecar_panel.SetSidecarExt( 'txt' )
             self._sidecar_panel.SetExampleInput( 'my_image.jpg' )
+            
+            self._txt_separator_panel.SetValue( importer.GetSeparator() )
+            
+            self._txt_separator_panel.setVisible( True )
             
         elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON ):
             

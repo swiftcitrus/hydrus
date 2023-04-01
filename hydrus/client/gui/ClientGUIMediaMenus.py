@@ -80,14 +80,12 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
             
             ClientGUIMenus.AppendSeparator( duplicates_menu )
             
-            label = 'view this file\'s relations'
-            
-            if job_location_context is combined_local_location_context:
+            if len( view_duplicate_relations_jobs ) > 1:
                 
-                label = '{} ({})'.format( label, HG.client_controller.services_manager.GetName( CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
+                label = '-for {}-'.format( job_location_context.ToString( HG.client_controller.services_manager.GetName ) )
                 
-            
-            ClientGUIMenus.AppendMenuLabel( duplicates_menu, label, label )
+                ClientGUIMenus.AppendMenuLabel( duplicates_menu, label, label )
+                
             
             if HC.DUPLICATE_MEMBER in file_duplicate_types_to_counts:
                 
@@ -111,7 +109,7 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
                     
                     if count > 0:
                         
-                        label = HydrusData.ToHumanInt( count ) + ' ' + HC.duplicate_type_string_lookup[ duplicate_type ]
+                        label = 'view {} {}'.format( HydrusData.ToHumanInt( count ), HC.duplicate_type_string_lookup[ duplicate_type ] )
                         
                         ClientGUIMenus.AppendMenuItem( duplicates_menu, label, 'Show these duplicates in a new page.', ClientGUIMedia.ShowDuplicatesInNewPage, job_location_context, focused_hash, duplicate_type )
                         
@@ -196,12 +194,12 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
             
             for duplicate_type in ( HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ):
                 
-                ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[duplicate_type], 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateActionOptions, win, duplicate_type )
+                ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[duplicate_type], 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateContentMergeOptions, win, duplicate_type )
                 
             
             if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
                 
-                ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[HC.DUPLICATE_ALTERNATE] + ' (advanced!)', 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateActionOptions, win, HC.DUPLICATE_ALTERNATE )
+                ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[HC.DUPLICATE_ALTERNATE] + ' (advanced!)', 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateContentMergeOptions, win, HC.DUPLICATE_ALTERNATE )
                 
             
             ClientGUIMenus.AppendMenu( duplicates_action_submenu, duplicates_edit_action_submenu, 'edit default duplicate metadata merge options' )

@@ -57,6 +57,11 @@ def WrapInGrid( parent, rows, expand_text = False, add_stretch_at_end = True ):
             st = BetterStaticText( parent, text )
             
         
+        if control.objectName() == 'HydrusWarning':
+            
+            st.setObjectName( 'HydrusWarning' )
+            
+        
         possible_tooltip_widget = None
         
         if isinstance( control, QW.QLayout ):
@@ -722,11 +727,13 @@ class BufferedWindow( QW.QWidget ):
     
 class BufferedWindowIcon( BufferedWindow ):
     
-    def __init__( self, parent, bmp, click_callable = None ):
+    def __init__( self, parent, pixmap: QG.QPixmap, click_callable = None ):
         
-        BufferedWindow.__init__( self, parent, size = bmp.size() )
+        device_independant_size = pixmap.size() / pixmap.devicePixelRatio()
         
-        self._bmp = bmp
+        BufferedWindow.__init__( self, parent, size = device_independant_size )
+        
+        self._pixmap = pixmap
         self._click_callable = click_callable
         
     
@@ -738,13 +745,15 @@ class BufferedWindowIcon( BufferedWindow ):
         
         painter.eraseRect( painter.viewport() )
         
-        if isinstance( self._bmp, QG.QImage ):
+        painter.setRenderHint( QG.QPainter.SmoothPixmapTransform, True ) # makes any scaling here due to jank thumbs look good
+        
+        if isinstance( self._pixmap, QG.QImage ):
             
-            painter.drawImage( 0, 0, self._bmp )
+            painter.drawImage( self.rect(), self._pixmap )
             
         else:
             
-            painter.drawPixmap( 0, 0, self._bmp )
+            painter.drawPixmap( self.rect(), self._pixmap )
             
         
     

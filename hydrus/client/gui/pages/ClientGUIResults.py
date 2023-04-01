@@ -154,6 +154,13 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
             
         
     
+    def _ClearDeleteRecord( self ):
+        
+        media = self._GetSelectedFlatMedia()
+        
+        ClientGUIMediaActions.ClearDeleteRecord( self, media )
+        
+    
     def _CopyBMPToClipboard( self ):
         
         copied = False
@@ -486,16 +493,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
         
         ( num_files_descriptor, selected_files_descriptor ) = self._GetSortedSelectedMimeDescriptors()
         
-        if num_files == 1:
-            
-            num_files_string = '1 ' + num_files_descriptor
-            
-        else:
-            
-            suffix = '' if num_files_descriptor.endswith( 's' ) else 's'
-            
-            num_files_string = '{} {}{}'.format( HydrusData.ToHumanInt( num_files ), num_files_descriptor, suffix )
-            
+        num_files_string = '{} {}'.format( HydrusData.ToHumanInt( num_files ), num_files_descriptor )
         
         s = num_files_string # 23 files
         
@@ -507,20 +505,26 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 
                 s += ' - totalling ' + pretty_total_size
                 
+                pretty_total_duration = self._GetPrettyTotalDuration()
+                
+                if pretty_total_duration != '':
+                    
+                    s += ', {}'.format( pretty_total_duration )
+                    
+                
             
         else:
             
             s += ' - '
             
+            # if 1 selected, we show the whole mime string, so no need to specify
             if num_selected == 1 or selected_files_descriptor == num_files_descriptor:
                 
                 selected_files_string = HydrusData.ToHumanInt( num_selected )
                 
             else:
                 
-                suffix = '' if selected_files_descriptor.endswith( 's' ) else 's'
-                
-                selected_files_string = '{} {}{}'.format( HydrusData.ToHumanInt( num_selected ), selected_files_descriptor, suffix )
+                selected_files_string = '{} {}'.format( HydrusData.ToHumanInt( num_selected ), selected_files_descriptor )
                 
             
             if num_selected == 1: # 23 files - 1 video selected, file_info
@@ -537,24 +541,52 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 
                 if num_inbox == num_selected:
                     
-                    inbox_phrase = 'all in inbox, '
+                    inbox_phrase = 'all in inbox'
                     
                 elif num_inbox == 0:
                     
-                    inbox_phrase = 'all archived, '
+                    inbox_phrase = 'all archived'
                     
                 else:
                     
-                    inbox_phrase = '{} in inbox and {} archived, '.format( HydrusData.ToHumanInt( num_inbox ), HydrusData.ToHumanInt( num_selected - num_inbox ) )
+                    inbox_phrase = '{} in inbox and {} archived'.format( HydrusData.ToHumanInt( num_inbox ), HydrusData.ToHumanInt( num_selected - num_inbox ) )
                     
                 
                 pretty_total_size = self._GetPrettyTotalSize( only_selected = True )
                 
-                s += '{} selected, {}totalling {}'.format( selected_files_string, inbox_phrase, pretty_total_size )
+                s += '{} selected, {}, totalling {}'.format( selected_files_string, inbox_phrase, pretty_total_size )
+                
+                pretty_total_duration = self._GetPrettyTotalDuration( only_selected = True )
+                
+                if pretty_total_duration != '':
+                    
+                    s += ', {}'.format( pretty_total_duration )
+                    
                 
             
         
         return s
+        
+    
+    def _GetPrettyTotalDuration( self, only_selected = False ):
+        
+        if only_selected:
+            
+            media_source = self._selected_media
+            
+        else:
+            
+            media_source = self._sorted_media
+            
+        
+        if len( media_source ) == 0 or False in ( media.HasDuration() for media in media_source ):
+            
+            return ''
+            
+        
+        total_duration = sum( ( media.GetDurationMS() for media in media_source ) )
+        
+        return HydrusData.ConvertMillisecondsToPrettyTime( total_duration )
         
     
     def _GetPrettyTotalSize( self, only_selected = False ):
@@ -679,11 +711,13 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
     
     def _GetSortedSelectedMimeDescriptors( self ):
         
-        def GetDescriptor( classes, num_collections ):
+        def GetDescriptor( plural, classes, num_collections ):
+            
+            suffix = 's' if plural else ''
             
             if len( classes ) == 0:
                 
-                return 'file'
+                return 'file' + suffix
                 
             
             if len( classes ) == 1:
@@ -692,39 +726,41 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 
                 if mime == HC.APPLICATION_HYDRUS_CLIENT_COLLECTION:
                     
-                    return 'files in {} collections'.format( HydrusData.ToHumanInt( num_collections ) )
+                    collections_suffix = 's' if num_collections > 1 else ''
+                    
+                    return 'file{} in {} collection{}'.format( suffix, HydrusData.ToHumanInt( num_collections ), collections_suffix )
                     
                 else:
                     
-                    return HC.mime_string_lookup[ mime ]
+                    return HC.mime_string_lookup[ mime ] + suffix
                     
                 
             
             if len( classes.difference( HC.IMAGES ) ) == 0:
                 
-                return 'image'
+                return 'image' + suffix
                 
             elif len( classes.difference( HC.ANIMATIONS ) ) == 0:
                 
-                return 'animation'
+                return 'animation' + suffix
                 
             elif len( classes.difference( HC.VIDEO ) ) == 0:
                 
-                return 'video'
+                return 'video' + suffix
                 
             elif len( classes.difference( HC.AUDIO ) ) == 0:
                 
-                return 'audio file'
+                return 'audio file' + suffix
                 
             else:
                 
-                return 'file'
+                return 'file' + suffix
                 
             
         
         if len( self._sorted_media ) > 1000:
             
-            sorted_mime_descriptor = 'file'
+            sorted_mime_descriptor = 'files'
             
         else:
             
@@ -739,12 +775,14 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 num_collections = 0
                 
             
-            sorted_mime_descriptor = GetDescriptor( sorted_mimes, num_collections )
+            plural = len( self._sorted_media ) > 1 or sum( ( m.GetNumFiles() for m in self._sorted_media ) ) > 1
+            
+            sorted_mime_descriptor = GetDescriptor( plural, sorted_mimes, num_collections )
             
         
         if len( self._selected_media ) > 1000:
             
-            selected_mime_descriptor = 'file'
+            selected_mime_descriptor = 'files'
             
         else:
             
@@ -759,7 +797,9 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 num_collections = 0
                 
             
-            selected_mime_descriptor = GetDescriptor( selected_mimes, num_collections )
+            plural = len( self._selected_media ) > 1 or sum( ( m.GetNumFiles() for m in self._selected_media ) ) > 1
+            
+            selected_mime_descriptor = GetDescriptor( plural, selected_mimes, num_collections )
             
         
         return ( sorted_mime_descriptor, selected_mime_descriptor )
@@ -816,7 +856,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                         
                         if HG.client_controller.new_options.GetBoolean( 'focus_preview_on_ctrl_click_only_static' ):
                             
-                            focus_it = media.GetDuration() is None
+                            focus_it = media.GetDurationMS() is None
                             
                         else:
                             
@@ -865,7 +905,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                     
                     if HG.client_controller.new_options.GetBoolean( 'focus_preview_on_shift_click_only_static' ):
                         
-                        focus_it = media.GetDuration() is None
+                        focus_it = media.GetDurationMS() is None
                         
                     else:
                         
@@ -1461,13 +1501,13 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
             
         
     
-    def _SetDuplicates( self, duplicate_type, media_pairs = None, media_group = None, duplicate_action_options = None, silent = False ):
+    def _SetDuplicates( self, duplicate_type, media_pairs = None, media_group = None, duplicate_content_merge_options = None, silent = False ):
         
         if duplicate_type == HC.DUPLICATE_POTENTIAL:
             
             yes_no_text = 'queue all possible and valid pair combinations into the duplicate filter'
             
-        elif duplicate_action_options is None:
+        elif duplicate_content_merge_options is None:
             
             yes_no_text = 'apply "{}"'.format( HC.duplicate_type_string_lookup[ duplicate_type ] )
             
@@ -1477,7 +1517,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 
                 new_options = HG.client_controller.new_options
                 
-                duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
+                duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
                 
             
         else:
@@ -1607,13 +1647,13 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
                 
                 list_of_service_keys_to_content_updates = hash_pairs_to_list_of_service_keys_to_content_updates[ ( first_hash, second_hash ) ]
                 
-                if duplicate_action_options is not None:
+                if duplicate_content_merge_options is not None:
                     
                     do_not_do_deletes = is_first_run
                     
                     # so the important part of this mess is here. we send the duplicated media, which is keeping up with content updates, to the method here
                     # original 'first_media' is not changed, and won't be until the database Write clears and publishes everything
-                    list_of_service_keys_to_content_updates.append( duplicate_action_options.ProcessPairIntoContentUpdates( first_duplicated_media, second_duplicated_media, file_deletion_reason = file_deletion_reason, do_not_do_deletes = do_not_do_deletes ) )
+                    list_of_service_keys_to_content_updates.append( duplicate_content_merge_options.ProcessPairIntoContentUpdates( first_duplicated_media, second_duplicated_media, file_deletion_reason = file_deletion_reason, do_not_do_deletes = do_not_do_deletes ) )
                     
                 
                 for service_keys_to_content_updates in list_of_service_keys_to_content_updates:
@@ -1678,24 +1718,31 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
         
         new_options = HG.client_controller.new_options
         
-        duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
+        duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
         
         with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit duplicate merge options' ) as dlg:
             
-            panel = ClientGUIScrolledPanelsEdit.EditDuplicateActionOptionsPanel( dlg, duplicate_type, duplicate_action_options, for_custom_action = True )
+            panel = ClientGUIScrolledPanelsEdit.EditDuplicateContentMergeOptionsPanel( dlg, duplicate_type, duplicate_content_merge_options, for_custom_action = True )
             
             dlg.SetPanel( panel )
             
             if dlg.exec() == QW.QDialog.Accepted:
                 
-                duplicate_action_options = panel.GetValue()
+                duplicate_content_merge_options = panel.GetValue()
                 
-                self._SetDuplicates( duplicate_type, duplicate_action_options = duplicate_action_options )
+                if duplicate_type == HC.DUPLICATE_BETTER:
+                    
+                    self._SetDuplicatesFocusedBetter( duplicate_content_merge_options = duplicate_content_merge_options )
+                    
+                else:
+                    
+                    self._SetDuplicates( duplicate_type, duplicate_content_merge_options = duplicate_content_merge_options )
+                    
                 
             
         
     
-    def _SetDuplicatesFocusedBetter( self, duplicate_action_options = None ):
+    def _SetDuplicatesFocusedBetter( self, duplicate_content_merge_options = None ):
         
         if self._HasFocusSingleton():
             
@@ -1722,7 +1769,7 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
             
             if result == QW.QDialog.Accepted:
                 
-                self._SetDuplicates( HC.DUPLICATE_BETTER, media_pairs = media_pairs, silent = True )
+                self._SetDuplicates( HC.DUPLICATE_BETTER, media_pairs = media_pairs, silent = True, duplicate_content_merge_options = duplicate_content_merge_options )
                 
             
         else:
@@ -2009,6 +2056,19 @@ class MediaPanel( ClientMedia.ListeningMediaList, QW.QScrollArea, CAC.Applicatio
             elif action == CAC.SIMPLE_COPY_SHA512_HASH:
                 
                 self._CopyHashesToClipboard( 'sha512' )
+                
+            elif action == CAC.SIMPLE_SHOW_DUPLICATES:
+                
+                if self._HasFocusSingleton():
+                    
+                    media = self._GetFocusSingleton()
+                    
+                    hash = media.GetHash()
+                    
+                    duplicate_type = command.GetSimpleData()
+                    
+                    ClientGUIMedia.ShowDuplicatesInNewPage( self._location_context, hash, duplicate_type )
+                    
                 
             elif action == CAC.SIMPLE_DUPLICATE_MEDIA_CLEAR_FOCUSED_FALSE_POSITIVES:
                 
@@ -3571,6 +3631,7 @@ class MediaPanelThumbnails( MediaPanel ):
         selection_has_trash = True in ( locations_manager.IsTrashed() for locations_manager in selected_locations_managers )
         selection_has_inbox = True in ( media.HasInbox() for media in self._selected_media )
         selection_has_archive = True in ( media.HasArchive() and media.GetLocationsManager().IsLocal() for media in self._selected_media )
+        selection_has_deletion_record = True in ( CC.COMBINED_LOCAL_FILE_SERVICE_KEY in locations_manager.GetDeleted() for locations_manager in selected_locations_managers )
         
         all_file_domains = HydrusData.MassUnion( locations_manager.GetCurrent() for locations_manager in all_locations_managers )
         all_specific_file_domains = all_file_domains.difference( { CC.COMBINED_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY } )
@@ -3613,7 +3674,7 @@ class MediaPanelThumbnails( MediaPanel ):
             
             ipfs_services = [ service for service in services if service.GetServiceType() == HC.IPFS ]
             
-            local_ratings_services = [ service for service in services if service.GetServiceType() in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) ]
+            local_ratings_services = [ service for service in services if service.GetServiceType() in HC.RATINGS_SERVICES ]
             
             local_booru_service = [ service for service in services if service.GetServiceType() == HC.LOCAL_BOORU ][0]
             
@@ -3655,6 +3716,7 @@ class MediaPanelThumbnails( MediaPanel ):
                 local_delete_phrase = 'delete selected'
                 delete_physically_phrase = 'delete selected physically now'
                 undelete_phrase = 'undelete selected'
+                clear_deletion_phrase = 'clear deletion record for selected'
                 export_phrase = 'files'
                 copy_phrase = 'files'
                 
@@ -3679,6 +3741,7 @@ class MediaPanelThumbnails( MediaPanel ):
                 local_delete_phrase = 'delete'
                 delete_physically_phrase = 'delete physically now'
                 undelete_phrase = 'undelete'
+                clear_deletion_phrase = 'clear deletion record'
                 export_phrase = 'file'
                 copy_phrase = 'file'
                 
@@ -3816,7 +3879,16 @@ class MediaPanelThumbnails( MediaPanel ):
             
             if multiple_selected:
                 
-                selection_info_menu_label = '{} files, {}'.format( HydrusData.ToHumanInt( num_selected ), self._GetPrettyTotalSize( only_selected = True ) )
+                ( num_files_descriptor, selected_files_descriptor ) = self._GetSortedSelectedMimeDescriptors()
+                
+                selection_info_menu_label = '{} {}, {}'.format( HydrusData.ToHumanInt( num_selected ), selected_files_descriptor, self._GetPrettyTotalSize( only_selected = True ) )
+                
+                pretty_total_duration = self._GetPrettyTotalDuration( only_selected = True )
+                
+                if pretty_total_duration != '':
+                    
+                    selection_info_menu_label += ', {}'.format( pretty_total_duration )
+                    
                 
             else:
                 
@@ -3974,6 +4046,11 @@ class MediaPanelThumbnails( MediaPanel ):
                 
                 ClientGUIMenus.AppendMenuItem( menu, delete_physically_phrase, 'Completely delete the selected files, forcing an immediate physical delete from your hard drive.', self._Delete, CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
                 ClientGUIMenus.AppendMenuItem( menu, undelete_phrase, 'Restore the selected files back to \'my files\'.', self._Undelete )
+                
+            
+            if selection_has_deletion_record:
+                
+                ClientGUIMenus.AppendMenuItem( menu, clear_deletion_phrase, 'Clear the deletion record for these files, allowing them to reimport even if previously deleted files are set to be discarded.', self._ClearDeleteRecord )
                 
             
             #
@@ -4652,7 +4729,7 @@ class Thumbnail( Selectable ):
         self._last_lower_summary = None
         
     
-    def GetQtImage( self, device_pixel_ratio ):
+    def GetQtImage( self, device_pixel_ratio ) -> QG.QImage:
         
         # we probably don't really want to say DPR as a param here, but instead ask for a qt_image in a certain resolution?
         # or just give the qt_image to be drawn to?
@@ -4708,16 +4785,15 @@ class Thumbnail( Selectable ):
         # EDIT 2: I think it may only look weird when the thumb banner has opacity. Maybe I need to learn about CompositionModes
         #
         # EDIT 3: Appalently Qt 6.4.0 may fix the basic 100% UI scale QImage init bug!
+        #
+        # UPDATE 3a: Qt 6.4.x did not magically fix it. It draws much nicer, but still a different font weight/metrics compared to media viewer background, say.
+        # The PreferAntialias flag on 6.4.x seems to draw very very close to our ideal, so let's be happy with it for now.
         
         painter = QG.QPainter( qt_image )
         
         painter.setRenderHint( QG.QPainter.TextAntialiasing, True ) # is true already in tests, is supposed to be 'the way' to fix the ugly text issue
         painter.setRenderHint( QG.QPainter.Antialiasing, True ) # seems to do nothing, it only affects primitives?
-        
-        if device_pixel_ratio > 1.0:
-            
-            painter.setRenderHint( QG.QPainter.SmoothPixmapTransform, True ) # makes the thumb scale up prettily and expensively when we need it
-            
+        painter.setRenderHint( QG.QPainter.SmoothPixmapTransform, True ) # makes the thumb QImage scale up and down prettily when we need it, either because it is too small or DPR gubbins
         
         new_options = HG.client_controller.new_options
         
@@ -4755,13 +4831,27 @@ class Thumbnail( Selectable ):
         
         painter.fillRect( thumbnail_border, thumbnail_border, width - ( thumbnail_border * 2 ), height - ( thumbnail_border * 2 ), new_options.GetColour( background_colour_type ) )
         
-        ( thumb_width, thumb_height ) = thumbnail_hydrus_bmp.GetSize() 
-        
         raw_thumbnail_qt_image = thumbnail_hydrus_bmp.GetQtImage()
         
-        x_offset = ( width - thumb_width ) // 2
+        thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
         
-        y_offset = ( height - thumb_height ) // 2
+        if thumbnail_dpr_percent != 100:
+            
+            thumbnail_dpr = thumbnail_dpr_percent / 100
+            
+            raw_thumbnail_qt_image.setDevicePixelRatio( thumbnail_dpr )
+            
+            # qt_image.deviceIndepedentSize isn't supported in Qt5 lmao
+            device_independent_thumb_size = raw_thumbnail_qt_image.size() / thumbnail_dpr
+            
+        else:
+            
+            device_independent_thumb_size = raw_thumbnail_qt_image.size()
+            
+        
+        x_offset = ( width - device_independent_thumb_size.width() ) // 2
+        
+        y_offset = ( height - device_independent_thumb_size.height() ) // 2
         
         painter.drawImage( x_offset, y_offset, raw_thumbnail_qt_image )
         

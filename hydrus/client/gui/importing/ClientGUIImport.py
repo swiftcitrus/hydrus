@@ -580,6 +580,9 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
             self._filename_namespace.textChanged.connect( self.tagsChanged )
             self._filename_checkbox.clicked.connect( self.tagsChanged )
             
+            self._tag_autocomplete_all.tagsPasted.connect( self.EnterTagsOnlyAdd )
+            self._tag_autocomplete_selection.tagsPasted.connect( self.EnterTagsSingleOnlyAdd )
+            
         
         def _GetTagsFromClipboard( self ):
             
@@ -652,6 +655,18 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                 
             
         
+        def EnterTagsOnlyAdd( self, tags ):
+            
+            current_tags = self._tags.GetTags()
+            
+            tags = { tag for tag in tags if tag not in current_tags }
+            
+            if len( tags ) > 0:
+                
+                self.EnterTags( tags )
+                
+            
+        
         def EnterTagsSingle( self, tags ):
             
             HG.client_controller.Write( 'push_recent_tags', self._service_key, tags )
@@ -668,6 +683,18 @@ class FilenameTaggingOptionsPanel( QW.QWidget ):
                     
                 
                 self.tagsChanged.emit()
+                
+            
+        
+        def EnterTagsSingleOnlyAdd( self, tags ):
+            
+            current_tags = self._single_tags.GetTags()
+            
+            tags = { tag for tag in tags if tag not in current_tags }
+            
+            if len( tags ) > 0:
+                
+                self.EnterTagsSingle( tags )
                 
             
         
@@ -996,7 +1023,7 @@ class EditLocalImportFilenameTaggingPanel( ClientGUIScrolledPanels.EditPanel ):
             self._paths_list = ClientGUIListCtrl.BetterListCtrl( self, CGLC.COLUMN_LIST_PATHS_TO_TAGS.ID, 10, self._ConvertDataToListCtrlTuples )
             
             allowed_importer_classes = [ ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT, ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON ]
-            allowed_exporter_classes = [ ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTags, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs ]
+            allowed_exporter_classes = [ ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTags, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs ]
             
             self._metadata_routers_panel = ClientGUIMetadataMigration.SingleFileMetadataRoutersControl( self, metadata_routers, allowed_importer_classes, allowed_exporter_classes )
             

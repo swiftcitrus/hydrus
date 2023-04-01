@@ -66,6 +66,7 @@ from hydrus.test import TestHydrusNetworking
 from hydrus.test import TestHydrusSerialisable
 from hydrus.test import TestHydrusServer
 from hydrus.test import TestHydrusSessions
+from hydrus.test import TestHydrusTags
 from hydrus.test import TestServerDB
 
 DB_DIR = None
@@ -74,6 +75,7 @@ tiniest_gif = b'\x47\x49\x46\x38\x39\x61\x01\x00\x01\x00\x00\xFF\x00\x2C\x00\x00
 
 LOCAL_RATING_LIKE_SERVICE_KEY = HydrusData.GenerateKey()
 LOCAL_RATING_NUMERICAL_SERVICE_KEY = HydrusData.GenerateKey()
+LOCAL_RATING_INCDEC_SERVICE_KEY = HydrusData.GenerateKey()
 
 def ConvertServiceKeysToContentUpdatesToComparable( service_keys_to_content_updates ):
     
@@ -250,6 +252,7 @@ class Controller( object ):
         services.append( ClientServices.GenerateService( CC.COMBINED_FILE_SERVICE_KEY, HC.COMBINED_FILE, 'all known files' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_LIKE_SERVICE_KEY, HC.LOCAL_RATING_LIKE, 'example local rating like service' ) )
         services.append( ClientServices.GenerateService( LOCAL_RATING_NUMERICAL_SERVICE_KEY, HC.LOCAL_RATING_NUMERICAL, 'example local rating numerical service' ) )
+        services.append( ClientServices.GenerateService( LOCAL_RATING_INCDEC_SERVICE_KEY, HC.LOCAL_RATING_INCDEC, 'example local rating inc/dec service' ) )
         services.append( ClientServices.GenerateService( self.example_ipfs_service_key, HC.IPFS, 'example ipfs service' ) )
         
         self._name_read_responses[ 'services' ] = services
@@ -787,6 +790,7 @@ class Controller( object ):
             TestClientImageHandling,
             TestClientMetadataMigration,
             TestClientMigration,
+            TestHydrusTags,
             TestHydrusServer
         ]
         
@@ -812,6 +816,7 @@ class Controller( object ):
             TestClientThreading,
             TestFunctions,
             TestHydrusData,
+            TestHydrusTags,
             TestHydrusSerialisable,
             TestHydrusSessions
         ]
@@ -942,6 +947,11 @@ class Controller( object ):
     def ShouldStopThisWork( self, maintenance_mode, stop_time = None ):
         
         return False
+        
+    
+    def RefreshPage( self, page_key ):
+        
+        self.Write( 'refresh_page', page_key )
         
     
     def ShowPage( self, page_key ):

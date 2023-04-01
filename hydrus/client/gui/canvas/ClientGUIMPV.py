@@ -1,6 +1,7 @@
 import locale
 import os
 import traceback
+import typing
 
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
@@ -10,6 +11,7 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusVideoHandling
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
@@ -17,6 +19,7 @@ from hydrus.client.gui import ClientGUIMedia
 from hydrus.client.gui import ClientGUIMediaControls
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.media import ClientMedia
 
 mpv_failed_reason = 'MPV seems ok!'
 
@@ -31,6 +34,7 @@ except Exception as e:
     mpv_failed_reason = traceback.format_exc()
     
     MPV_IS_AVAILABLE = False
+    
 
 def GetClientAPIVersionString():
     
@@ -159,7 +163,7 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         self._file_is_loaded = False
         self._disallow_seek_on_this_file = False
         
-        self._times_to_play_gif = 0
+        self._times_to_play_animation = 0
         
         self._current_seek_to_start_count = 0
         
@@ -294,7 +298,7 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                     self.Pause()
                     
                 
-                if self._times_to_play_gif != 0 and self._current_seek_to_start_count >= self._times_to_play_gif:
+                if self._times_to_play_animation != 0 and self._current_seek_to_start_count >= self._times_to_play_animation:
                     
                     self.Pause()
                     
@@ -337,12 +341,12 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                     
                 else:
                     
-                    current_frame_index = int( round( ( current_timestamp_ms / self._media.GetDuration() ) * num_frames ) )
+                    current_frame_index = int( round( ( current_timestamp_ms / self._media.GetDurationMS() ) * num_frames ) )
                     
                     current_frame_index = min( current_frame_index, num_frames - 1 )
                     
                 
-                current_timestamp_ms = min( current_timestamp_ms, self._media.GetDuration() )
+                current_timestamp_ms = min( current_timestamp_ms, self._media.GetDurationMS() )
                 
             
             paused = self._player.pause
@@ -483,9 +487,14 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         current_timestamp_s = self._player.time_pos
         
+        if current_timestamp_s is None:
+            
+            return
+            
+        
         new_timestamp_ms = max( 0, ( current_timestamp_s * 1000 ) + ( direction * duration_ms ) )
         
-        if new_timestamp_ms > self._media.GetDuration():
+        if new_timestamp_ms > self._media.GetDurationMS():
             
             new_timestamp_ms = 0
             
@@ -514,7 +523,7 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         self._player.set_loglevel( level )
         
     
-    def SetMedia( self, media, start_paused = False ):
+    def SetMedia( self, media: typing.Optional[ ClientMedia.MediaSingleton ], start_paused = False ):
         
         if media == self._media:
             
@@ -526,15 +535,24 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         self._media = media
         
-        self._times_to_play_gif = 0
+        self._times_to_play_animation = 0
         
-        if self._media is not None and self._media.GetMime() == HC.IMAGE_GIF and not HG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
+        if self._media is not None and self._media.GetMime() in HC.ANIMATIONS and not HG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
             
             hash = self._media.GetHash()
             
-            path = HG.client_controller.client_files_manager.GetFilePath( hash, HC.IMAGE_GIF )
+            mime = self._media.GetMime()
             
-            self._times_to_play_gif = HydrusImageHandling.GetTimesToPlayGIF( path )
+            path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
+            
+            if mime == HC.IMAGE_GIF:
+                
+                self._times_to_play_animation = HydrusImageHandling.GetTimesToPlayGIF( path )
+                
+            elif mime == HC.IMAGE_APNG:
+                
+                self._times_to_play_animation = HydrusVideoHandling.GetAPNGTimesToPlay( path )
+                
             
         
         self._current_seek_to_start_count = 0
@@ -560,6 +578,11 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             hash = self._media.GetHash()
             mime = self._media.GetMime()
             
+            # some videos have an audio channel that is silent. hydrus thinks these dudes are 'no audio', but when we throw them at mpv, it may play audio for them
+            # would be fine, you think, except in one reported case this causes scratches and pops and hell whitenoise
+            # so let's see what happens here
+            mute_override = not self._media.HasAudio()
+            
             client_files_manager = HG.client_controller.client_files_manager
             
             path = client_files_manager.GetFilePath( hash, mime )
@@ -580,7 +603,7 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                 
             
             self._player.volume = self._GetCorrectCurrentVolume()
-            self._player.mute = self._GetCorrectCurrentMute()
+            self._player.mute = mute_override or self._GetCorrectCurrentMute()
             self._player.pause = start_paused
             
         

@@ -261,6 +261,48 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         self.assertEqual( set( result ), set( string_processor.ProcessStrings( my_current_storage_tags ) ) )
         
     
+    def test_media_notes( self ):
+        
+        names_to_notes = {
+            'test' : 'This is a test note!',
+            'Another Test' : 'This one has\n\na newline!'
+        }
+        
+        expected_rows = [ '{}: {}'.format( name, note ) for ( name, note ) in names_to_notes.items() ]
+        
+        # simple
+        
+        hash = HydrusData.GenerateKey()
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetNotesManager().SetNamesToNotes( names_to_notes )
+        
+        # simple
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes()
+        
+        result = importer.Import( media_result )
+        
+        self.assertEqual( set( result ), set( expected_rows ) )
+        
+        # with string processor
+        
+        string_processor = ClientStrings.StringProcessor()
+        
+        processing_steps = [ ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_REMOVE_TEXT_FROM_BEGINNING, 1 ) ] ) ]
+        
+        string_processor.SetProcessingSteps( processing_steps )
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes( string_processor = string_processor )
+        
+        result = importer.Import( media_result )
+        
+        self.assertTrue( len( result ) > 0 )
+        self.assertNotEqual( set( result ), set( expected_rows ) )
+        self.assertEqual( set( result ), set( string_processor.ProcessStrings( expected_rows ) ) )
+        
+    
     def test_media_urls( self ):
         
         urls = { 'https://site.com/123456', 'https://cdn5.st.com/file/123456' }
@@ -337,6 +379,25 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
             
         
         importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT()
+        
+        result = importer.Import( actual_file_path )
+        
+        os.unlink( expected_input_path )
+        
+        self.assertEqual( set( result ), set( rows ) )
+        
+        # diff separator
+        
+        separator = ', '
+        
+        expected_input_path = actual_file_path + '.txt'
+        
+        with open( expected_input_path, 'w', encoding = 'utf-8' ) as f:
+            
+            f.write( separator.join( rows ) )
+            
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT( separator = separator )
         
         result = importer.Import( actual_file_path )
         
@@ -537,6 +598,43 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
     
+    def test_media_notes( self ):
+        
+        hash = os.urandom( 32 )
+        notes = [ 'test: this is a test note', 'another test: this is a different\n\ntest note' ]
+        
+        # no notes makes no write
+        
+        exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes()
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        exporter.Export( hash, [] )
+        
+        with self.assertRaises( Exception ):
+            
+            [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            
+        
+        # simple
+        
+        exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes()
+        
+        HG.test_controller.SetRead( 'media_result', HF.GetFakeMediaResult( hash ) )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        exporter.Export( hash, notes )
+        
+        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in [ n.split( ': ', 1 ) for n in notes ] ]
+        
+        expected_service_keys_to_content_updates = { CC.LOCAL_NOTES_SERVICE_KEY : content_updates }
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+    
     def test_media_urls( self ):
         
         hash = os.urandom( 32 )
@@ -623,16 +721,34 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         self.assertEqual( set( rows ), set( HydrusText.DeserialiseNewlinedTexts( text ) ) )
         
+        # diff separator
+        
+        separator = ', '
+        
+        exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT( suffix = 'tags', separator = separator )
+        
+        exporter.Export( actual_file_path, rows )
+        
+        expected_output_path = actual_file_path + '.tags.txt'
+        
+        self.assertTrue( os.path.exists( expected_output_path ) )
+        
+        with open( expected_output_path, 'r', encoding = 'utf-8' ) as f:
+            
+            text = f.read()
+            
+        
+        os.unlink( expected_output_path )
+        
+        self.assertEqual( set( rows ), set( text.split( separator ) ) )
+        
         # with filename remove ext and string conversion
         
         expected_output_path = os.path.join( HG.test_controller.db_dir, 'file.jpg'[1:].rsplit( '.', 1 )[0] ) + '.txt'
         
-        with open( expected_output_path, 'w', encoding = 'utf-8' ) as f:
-            
-            f.write( os.linesep.join( rows ) )
-            
-        
         exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT( remove_actual_filename_ext = True, filename_string_converter = ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_REMOVE_TEXT_FROM_BEGINNING, 1 ) ] ) )
+        
+        exporter.Export( actual_file_path, rows )
         
         with open( expected_output_path, 'r', encoding = 'utf-8' ) as f:
             

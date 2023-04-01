@@ -127,12 +127,33 @@ def GetAPNGDuration( apng_bytes: bytes ) -> float:
     
     return total_duration
     
+
 def GetAPNGNumFrames( apng_actl_bytes: bytes ) -> int:
     
     ( num_frames, ) = struct.unpack( '>I', apng_actl_bytes[ : 4 ] )
     
     return num_frames
     
+
+def GetAPNGTimesToPlay( path: str ) -> int:
+    
+    with open( path, 'rb' ) as f:
+        
+        file_header_bytes = f.read( 256 )
+        
+    
+    apng_actl_bytes = GetAPNGACTLChunkData( file_header_bytes )
+    
+    if apng_actl_bytes is None:
+        
+        return 0
+        
+    
+    ( num_plays, ) = struct.unpack( '>I', apng_actl_bytes[ 4 : 8 ] )
+    
+    return num_plays
+    
+
 def GetFFMPEGVersion():
     
     cmd = [ FFMPEG_PATH, '-version' ]
@@ -591,10 +612,19 @@ def HasVideoStream( path ) -> bool:
     
     return ParseFFMPEGHasVideo( lines )
     
-def RenderImageToPNGPath( path, temp_png_path ):
+def RenderImageToImagePath( path, temp_image_path ):
     
     # -y to overwrite the temp path
-    cmd = [ FFMPEG_PATH, '-y', "-i", path, temp_png_path ]
+    
+    if temp_image_path.endswith( '.jpg' ):
+        
+        # '-q:v 1' does high quality
+        cmd = [ FFMPEG_PATH, '-y', "-i", path, "-q:v", "1", temp_image_path ]
+        
+    else:
+        
+        cmd = [ FFMPEG_PATH, '-y', "-i", path, temp_image_path ]
+        
     
     sbp_kwargs = HydrusData.GetSubprocessKWArgs()
     
@@ -1113,7 +1143,7 @@ def VideoHasAudio( path, info_lines ) -> bool:
 # This was built from moviepy's FFMPEG_VideoReader
 class VideoRendererFFMPEG( object ):
     
-    def __init__( self, path, mime, duration, num_frames, target_resolution, pix_fmt = "rgb24", clip_rect = None ):
+    def __init__( self, path, mime, duration, num_frames, target_resolution, pix_fmt = "rgb24", clip_rect = None, start_pos = None ):
         
         self._path = path
         self._mime = mime
@@ -1144,7 +1174,12 @@ class VideoRendererFFMPEG( object ):
         
         self.bufsize = bufsize
         
-        self.initialize()
+        if start_pos is None:
+            
+            start_pos = 0
+            
+        
+        self.initialize( start_index = start_pos )
         
     
     def close( self ) -> None:

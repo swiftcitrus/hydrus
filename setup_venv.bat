@@ -39,16 +39,18 @@ SET /P install_type=Do you want the (s)imple or (a)dvanced install?
 
 IF "%install_type%" == "s" goto :create
 IF "%install_type%" == "a" goto :question_qt
+IF "%install_type%" == "d" goto :create
 goto :parse_fail
 
 :question_qt
 
 ECHO:
 ECHO If you are on Windows ^<=8.1, choose 5.
-SET /P qt=Do you want Qt(5) or Qt(6)? 
+SET /P qt=Do you want Qt(5), Qt(6), or (t)est? 
 
 IF "%qt%" == "5" goto :question_mpv
 IF "%qt%" == "6" goto :question_mpv
+IF "%qt%" == "t" goto :question_mpv
 goto :parse_fail
 
 :question_mpv
@@ -97,12 +99,29 @@ IF "%install_type%" == "s" (
 	
 	python -m pip install -r requirements.txt
 	
-) ELSE (
+)
+
+IF "%install_type%" == "d" (
+
+	python -m pip install -r static\requirements\advanced\requirements_core.txt
+	
+	python -m pip install -r static\requirements\advanced\requirements_qt6_test.txt
+	python -m pip install pyside2
+	python -m pip install PyQtChart PyQt5
+	python -m pip install PyQt6-Charts PyQt6
+	python -m pip install -r static\requirements\advanced\requirements_new_mpv.txt
+	python -m pip install -r static\requirements\advanced\requirements_new_opencv.txt
+	python -m pip install -r static\requirements\hydev\requirements_windows_build.txt
+	
+)
+
+IF "%install_type%" == "a" (
 	
 	python -m pip install -r static\requirements\advanced\requirements_core.txt
 	
 	IF "%qt%" == "5" python -m pip install -r static\requirements\advanced\requirements_qt5.txt
 	IF "%qt%" == "6" python -m pip install -r static\requirements\advanced\requirements_qt6.txt
+	IF "%qt%" == "t" python -m pip install -r static\requirements\advanced\requirements_qt6_test.txt
 	
 	IF "%mpv%" == "o" python -m pip install -r static\requirements\advanced\requirements_old_mpv.txt
 	IF "%mpv%" == "n" python -m pip install -r static\requirements\advanced\requirements_new_mpv.txt

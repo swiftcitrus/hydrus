@@ -8,6 +8,7 @@ import shutil
 import time
 import unittest
 import urllib
+import urllib.parse
 
 from twisted.internet import reactor
 
@@ -21,7 +22,9 @@ from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientAPI
+from hydrus.client import ClientLocation
 from hydrus.client import ClientSearch
+from hydrus.client import ClientSearchParseSystemPredicates
 from hydrus.client import ClientServices
 from hydrus.client.importing import ClientImportFiles
 from hydrus.client.media import ClientMediaManagers
@@ -30,6 +33,8 @@ from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientLocalServer
 from hydrus.client.networking import ClientLocalServerResources
 from hydrus.client.networking import ClientNetworkingContexts
+
+from hydrus.test import HelperFunctions
 
 CBOR_AVAILABLE = False
 try:
@@ -256,7 +261,7 @@ class TestClientAPI( unittest.TestCase ):
         permissions_to_set_up.append( ( 'add_tags', [ ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS ] ) )
         permissions_to_set_up.append( ( 'add_urls', [ ClientAPI.CLIENT_API_PERMISSION_ADD_URLS ] ) )
         permissions_to_set_up.append( ( 'manage_pages', [ ClientAPI.CLIENT_API_PERMISSION_MANAGE_PAGES ] ) )
-        permissions_to_set_up.append( ( 'manage_cookies', [ ClientAPI.CLIENT_API_PERMISSION_MANAGE_COOKIES ] ) )
+        permissions_to_set_up.append( ( 'manage_headers', [ ClientAPI.CLIENT_API_PERMISSION_MANAGE_HEADERS ] ) )
         permissions_to_set_up.append( ( 'search_all_files', [ ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES ] ) )
         permissions_to_set_up.append( ( 'search_green_files', [ ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES ] ) )
         
@@ -447,7 +452,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'Hydrus-Client-API-Access-Key' : 'abcd', 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'Hydrus-Client-API-Access-Key' : 'abcd', 'hash' : hash_hex, 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -459,7 +464,7 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 403 )
         
-        body_dict = { 'Hydrus-Client-API-Session-Key' : 'abcd', 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'Hydrus-Client-API-Session-Key' : 'abcd', 'hash' : hash_hex, 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -500,7 +505,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'hash' : hash_hex, 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -516,7 +521,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearWrites( 'content_updates' )
         
-        body_dict = { 'Hydrus-Client-API-Session-Key' : session_key_hex, 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'Hydrus-Client-API-Session-Key' : session_key_hex, 'hash' : hash_hex, 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -633,7 +638,7 @@ class TestClientAPI( unittest.TestCase ):
     def _test_get_services( self, connection, set_up_permissions ):
         
         should_work = { set_up_permissions[ 'everything' ], set_up_permissions[ 'add_files' ], set_up_permissions[ 'add_tags' ], set_up_permissions[ 'manage_pages' ], set_up_permissions[ 'search_all_files' ], set_up_permissions[ 'search_green_files' ] }
-        should_break = { set_up_permissions[ 'add_urls' ], set_up_permissions[ 'manage_cookies' ] }
+        should_break = { set_up_permissions[ 'add_urls' ], set_up_permissions[ 'manage_headers' ] }
         
         expected_answer = {
             'local_tags' : [
@@ -723,6 +728,15 @@ class TestClientAPI( unittest.TestCase ):
             ]
         }
         
+        get_service_expected_result = {
+            'service' : {
+                'name' : 'repository updates',
+                'service_key' : '7265706f7369746f72792075706461746573',
+                'type': 20,
+                'type_pretty': 'local update file domain'
+            }
+        }
+        
         for api_permissions in should_work.union( should_break ):
             
             access_key_hex = api_permissions.GetAccessKey().hex()
@@ -753,6 +767,55 @@ class TestClientAPI( unittest.TestCase ):
                 
                 self.assertEqual( response.status, 403 )
                 
+            
+            #
+            
+            path = '/get_service?service_name=repository%20updates'
+            
+            connection.request( 'GET', path, headers = headers )
+            
+            response = connection.getresponse()
+            
+            data = response.read()
+            
+            if api_permissions in should_work:
+                
+                text = str( data, 'utf-8' )
+                
+                self.assertEqual( response.status, 200 )
+                
+                d = json.loads( text )
+                
+                self.assertEqual( d, get_service_expected_result )
+                
+            else:
+                
+                self.assertEqual( response.status, 403 )
+                
+            
+            path = '/get_service?service_key={}'.format( CC.LOCAL_UPDATE_SERVICE_KEY.hex() )
+            
+            connection.request( 'GET', path, headers = headers )
+            
+            response = connection.getresponse()
+            
+            data = response.read()
+            
+            if api_permissions in should_work:
+                
+                text = str( data, 'utf-8' )
+                
+                self.assertEqual( response.status, 200 )
+                
+                d = json.loads( text )
+                
+                self.assertEqual( d, get_service_expected_result )
+                
+            else:
+                
+                self.assertEqual( response.status, 403 )
+                
+            
             
         
     
@@ -961,7 +1024,9 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_files/delete_files'
         
-        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_name' : 'not existing service' }
+        not_existing_service_hex = os.urandom( 32 ).hex()
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_key' : not_existing_service_hex }
         
         body = json.dumps( body_dict )
         
@@ -975,7 +1040,7 @@ class TestClientAPI( unittest.TestCase ):
         
         text = str( data, 'utf-8' )
         
-        self.assertIn( 'not existing service', text ) # error message should be complaining about it
+        self.assertIn( not_existing_service_hex, text ) # error message should be complaining about it
         
         #
         
@@ -1031,7 +1096,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_files/undelete_files'
         
-        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_name' : 'not existing service' }
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ], 'file_service_key' : not_existing_service_hex }
         
         body = json.dumps( body_dict )
         
@@ -1045,7 +1110,7 @@ class TestClientAPI( unittest.TestCase ):
         
         text = str( data, 'utf-8' )
         
-        self.assertIn( 'not existing service', text ) # error message should be complaining about it
+        self.assertIn( not_existing_service_hex, text ) # error message should be complaining about it
         
         #
         
@@ -1174,7 +1239,13 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
+        text = str( data, 'utf-8' )
+        
         self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], new_notes_dict )
         
         expected_service_keys_to_content_updates = collections.defaultdict( list )
         
@@ -1212,6 +1283,213 @@ class TestClientAPI( unittest.TestCase ):
         
         self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
         
+        # set notes with merge
+        
+        # setup
+        
+        file_id = 1
+        hash = b'\xadm5\x99\xa6\xc4\x89\xa5u\xeb\x19\xc0&\xfa\xce\x97\xa9\xcdey\xe7G(\xb0\xce\x94\xa6\x01\xd22\xf3\xc3'
+        hash_hex = hash.hex()
+        
+        size = 100
+        mime = HC.IMAGE_PNG
+        width = 20
+        height = 20
+        duration = None
+        
+        file_info_manager = ClientMediaManagers.FileInfoManager( file_id, hash, size = size, mime = mime, width = width, height = height, duration = duration )
+        
+        service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
+        service_keys_to_statuses_to_display_tags =  { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit', 'clothing' ] } }
+        
+        tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
+        
+        locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set() )
+        ratings_manager = ClientMediaManagers.RatingsManager( {} )
+        notes_manager = ClientMediaManagers.NotesManager( { 'abc' : '123' } )
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        
+        from hydrus.client.importing.options import NoteImportOptions
+        
+        # extend
+        
+        HG.test_controller.SetRead( 'media_result', media_result )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'abc' : '1234' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict, 'merge_cleverly' : True, 'extend_existing_note_if_possible' : True, 'conflict_resolution' : NoteImportOptions.NOTE_IMPORT_CONFLICT_RENAME }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], new_notes_dict )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '1234' ) ) ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # no extend (rename)
+        
+        HG.test_controller.SetRead( 'media_result', media_result )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'abc' : '1234' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict, 'merge_cleverly' : True, 'extend_existing_note_if_possible' : False, 'conflict_resolution' : NoteImportOptions.NOTE_IMPORT_CONFLICT_RENAME }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], { 'abc (1)' : '1234' } )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc (1)', '1234' ) ) ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # ignore
+        
+        HG.test_controller.SetRead( 'media_result', media_result )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'abc' : '789' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict, 'merge_cleverly' : True, 'extend_existing_note_if_possible' : True, 'conflict_resolution' : NoteImportOptions.NOTE_IMPORT_CONFLICT_IGNORE }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], {} )
+        
+        stuff = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self.assertEqual( stuff, [] )
+        
+        # append
+        
+        HG.test_controller.SetRead( 'media_result', media_result )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'abc' : '789' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict, 'merge_cleverly' : True, 'extend_existing_note_if_possible' : True, 'conflict_resolution' : NoteImportOptions.NOTE_IMPORT_CONFLICT_APPEND }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], { 'abc' : '123\n\n789' } )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '123\n\n789' ) ) ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+        # replace
+        
+        HG.test_controller.SetRead( 'media_result', media_result )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/add_notes/set_notes'
+        
+        new_notes_dict = { 'abc' : '789' }
+        
+        body_dict = { 'hash' : hash_hex, 'notes' : new_notes_dict, 'merge_cleverly' : True, 'extend_existing_note_if_possible' : True, 'conflict_resolution' : NoteImportOptions.NOTE_IMPORT_CONFLICT_REPLACE }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'notes' ], { 'abc' : '789' } )
+        
+        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        
+        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '789' ) ) ]
+        
+        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        
+    
     def _test_add_tags( self, connection, set_up_permissions ):
         
         api_permissions = set_up_permissions[ 'everything' ]
@@ -1264,7 +1542,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'service_names_to_tags' : { 'my tags' : [ 'test' ] } }
+        body_dict = { 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test' ] } }
         
         body = json.dumps( body_dict )
         
@@ -1280,7 +1558,9 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hash' : hash_hex, 'service_names_to_tags' : { 'bad tag service' : [ 'test' ] } }
+        not_existing_service_key_hex = os.urandom( 32 ).hex()
+        
+        body_dict = { 'hash' : hash_hex, 'service_keys_to_tags' : { not_existing_service_key_hex : [ 'test' ] } }
         
         body = json.dumps( body_dict )
         
@@ -1292,13 +1572,17 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 400 )
         
+        text = str( data, 'utf-8' )
+        
+        self.assertIn( not_existing_service_key_hex, text ) # test it complains about the key in the error
+        
         # add tags to local
         
         HG.test_controller.ClearWrites( 'content_updates' )
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hash' : hash_hex, 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'hash' : hash_hex, 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -1324,7 +1608,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hash' : hash_hex, 'service_names_to_actions_to_tags' : { 'my tags' : { str( HC.CONTENT_UPDATE_ADD ) : [ 'test_add', 'test_add2' ], str( HC.CONTENT_UPDATE_DELETE ) : [ 'test_delete', 'test_delete2' ] } } }
+        body_dict = { 'hash' : hash_hex, 'service_keys_to_actions_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : { str( HC.CONTENT_UPDATE_ADD ) : [ 'test_add', 'test_add2' ], str( HC.CONTENT_UPDATE_DELETE ) : [ 'test_delete', 'test_delete2' ] } } }
         
         body = json.dumps( body_dict )
         
@@ -1355,7 +1639,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hash' : hash_hex, 'service_names_to_tags' : { 'example tag repo' : [ 'test', 'test2' ] } }
+        body_dict = { 'hash' : hash_hex, 'service_keys_to_tags' : { HG.test_controller.example_tag_repo_service_key.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -1381,7 +1665,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hash' : hash_hex, 'service_names_to_actions_to_tags' : { 'example tag repo' : { str( HC.CONTENT_UPDATE_PEND ) : [ 'test_add', 'test_add2' ], str( HC.CONTENT_UPDATE_PETITION ) : [ [ 'test_delete', 'muh reason' ], 'test_delete2' ] } } }
+        body_dict = { 'hash' : hash_hex, 'service_keys_to_actions_to_tags' : { HG.test_controller.example_tag_repo_service_key.hex() : { str( HC.CONTENT_UPDATE_PEND ) : [ 'test_add', 'test_add2' ], str( HC.CONTENT_UPDATE_PETITION ) : [ [ 'test_delete', 'muh reason' ], 'test_delete2' ] } } }
         
         body = json.dumps( body_dict )
         
@@ -1412,7 +1696,7 @@ class TestClientAPI( unittest.TestCase ):
         
         path = '/add_tags/add_tags'
         
-        body_dict = { 'hashes' : [ hash_hex, hash2_hex ], 'service_names_to_tags' : { 'my tags' : [ 'test', 'test2' ] } }
+        body_dict = { 'hashes' : [ hash_hex, hash2_hex ], 'service_keys_to_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ 'test', 'test2' ] } }
         
         body = json.dumps( body_dict )
         
@@ -1862,7 +2146,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearWrites( 'import_url_test' )
         
-        request_dict = { 'url' : url, 'destination_page_name' : 'muh /tv/', 'show_destination_page' : True, 'filterable_tags' : [ 'filename:yo' ], 'service_names_to_additional_tags' : { 'my tags' : [ '/tv/ thread' ] } }
+        request_dict = { 'url' : url, 'destination_page_name' : 'muh /tv/', 'show_destination_page' : True, 'filterable_tags' : [ 'filename:yo' ], 'service_keys_to_additional_tags' : { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex() : [ '/tv/ thread' ] } }
         
         request_body = json.dumps( request_dict )
         
@@ -2033,7 +2317,7 @@ class TestClientAPI( unittest.TestCase ):
     
     def _test_manage_cookies( self, connection, set_up_permissions ):
         
-        api_permissions = set_up_permissions[ 'manage_cookies' ]
+        api_permissions = set_up_permissions[ 'manage_headers' ]
         
         access_key_hex = api_permissions.GetAccessKey().hex()
         
@@ -2175,6 +2459,15 @@ class TestClientAPI( unittest.TestCase ):
         
         #
         
+    
+    def _test_manage_headers( self, connection, set_up_permissions ):
+        
+        api_permissions = set_up_permissions[ 'manage_headers' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        #
+        
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
         
         path = '/manage_headers/set_user_agent'
@@ -2216,6 +2509,316 @@ class TestClientAPI( unittest.TestCase ):
         from hydrus.client import ClientDefaults
         
         self.assertEqual( current_headers[ 'User-Agent' ], ClientDefaults.DEFAULT_USER_AGENT )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 0,
+                'data' : None
+            },
+            'headers' : {
+                'User-Agent' : {
+                    'approved': 'approved',
+                    'reason': 'This is the default User-Agent identifier for the client for all network connections.',
+                    'value' : ClientDefaults.DEFAULT_USER_AGENT
+                }
+            }
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_headers'
+        
+        request_dict = { 'headers' : { 'Test' : { 'value' : 'test_value' } } }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 0,
+                'data' : None
+            },
+            'headers' : {
+                'User-Agent' : {
+                    'approved': 'approved',
+                    'reason': 'This is the default User-Agent identifier for the client for all network connections.',
+                    'value' : ClientDefaults.DEFAULT_USER_AGENT
+                },
+                'Test' : {
+                    'approved': 'approved',
+                    'reason': 'Set by Client API',
+                    'value' : 'test_value'
+                }
+            }
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_headers'
+        
+        request_dict = { 'domain' : None, 'headers' : { 'Test' : { 'value' : 'test_value2' } } }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 0,
+                'data' : None
+            },
+            'headers' : {
+                'User-Agent' : {
+                    'approved': 'approved',
+                    'reason': 'This is the default User-Agent identifier for the client for all network connections.',
+                    'value' : ClientDefaults.DEFAULT_USER_AGENT
+                },
+                'Test' : {
+                    'approved': 'approved',
+                    'reason': 'Set by Client API',
+                    'value' : 'test_value2'
+                }
+            }
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        domain = 'subdomain.example.com'
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = f'/manage_headers/get_headers?domain={domain}'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 2,
+                'data' : 'subdomain.example.com'
+            },
+            'headers' : {}
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_headers'
+        
+        request_dict = { 'domain' : 'subdomain.example.com', 'headers' : { 'cool_stuff' : { 'value' : 'on', 'approved' : 'pending', 'reason' : 'select yes to turn on cool stuff' } } }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers?domain=subdomain.example.com'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 2,
+                'data' : 'subdomain.example.com'
+            },
+            'headers' : {
+                'cool_stuff' : { 'value' : 'on', 'approved' : 'pending', 'reason' : 'select yes to turn on cool stuff' }
+            }
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_headers'
+        
+        request_dict = { 'domain' : 'subdomain.example.com', 'headers' : { 'cool_stuff' : { 'approved' : 'approved' } } }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers?domain=subdomain.example.com'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 2,
+                'data' : 'subdomain.example.com'
+            },
+            'headers' : {
+                'cool_stuff' : { 'value' : 'on', 'approved' : 'approved', 'reason' : 'select yes to turn on cool stuff' }
+            }
+        }
+        
+        self.assertEqual( d, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_headers/set_headers'
+        
+        request_dict = { 'domain' : 'subdomain.example.com', 'headers' : { 'cool_stuff' : { 'value' : None } } }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        path = '/manage_headers/get_headers?domain=subdomain.example.com'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'network_context' : {
+                'type' : 2,
+                'data' : 'subdomain.example.com'
+            },
+            'headers' : {}
+        }
+        
+        self.assertEqual( d, expected_result )
         
     
     def _test_manage_database( self, connection, set_up_permissions ):
@@ -2293,6 +2896,436 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( boned_stats, dict( expected_data ) )
         
     
+    def _test_manage_duplicates( self, connection, set_up_permissions ):
+        
+        # this stuff is super dependent on the db requests, which aren't tested in this class, but we can do the arg parsing and wrapper
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        default_location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
+        
+        # file relationships
+        
+        file_relationships_hash = bytes.fromhex( 'ac940bb9026c430ea9530b4f4f6980a12d9432c2af8d9d39dfc67b05d91df11d' )
+        
+        # yes the database returns hex hashes in this case
+        example_response = {
+            "file_relationships" : {
+                "ac940bb9026c430ea9530b4f4f6980a12d9432c2af8d9d39dfc67b05d91df11d" : {
+                    "is_king" : False,
+                    "king" : "8784afbfd8b59de3dcf2c13dc1be9d7cb0b3d376803c8a7a8b710c7c191bb657",
+                    "king_is_on_file_domain" : True,
+                    "king_is_local" : True,
+                    "0" : [
+                    ],
+                    "1" : [],
+                    "3" : [
+                        "8bf267c4c021ae4fd7c4b90b0a381044539519f80d148359b0ce61ce1684fefe"
+                    ],
+                    "8" : [
+                        "8784afbfd8b59de3dcf2c13dc1be9d7cb0b3d376803c8a7a8b710c7c191bb657",
+                        "3fa8ef54811ec8c2d1892f4f08da01e7fc17eed863acae897eb30461b051d5c3"
+                    ]
+                }
+            }
+        }
+        
+        HG.test_controller.SetRead( 'file_relationships_for_api', example_response )
+        
+        path = '/manage_file_relationships/get_file_relationships?hash={}'.format( file_relationships_hash.hex() )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'file_relationships' ], example_response )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'file_relationships_for_api' )
+
+        ( location_context, hashes ) = args
+        
+        self.assertEqual( location_context, default_location_context )
+        self.assertEqual( set( hashes ), { file_relationships_hash } )
+        
+        # search files failed tag permission
+        
+        tag_context = ClientSearch.TagContext( CC.COMBINED_TAG_SERVICE_KEY )
+        predicates = { ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING ) }
+        
+        default_file_search_context = ClientSearch.FileSearchContext( location_context = default_location_context, tag_context = tag_context, predicates = predicates )
+        
+        default_potentials_search_type = CC.DUPE_SEARCH_ONE_FILE_MATCHES_ONE_SEARCH
+        default_pixel_duplicates = CC.SIMILAR_FILES_PIXEL_DUPES_ALLOWED
+        default_max_hamming_distance = 4
+        
+        test_tag_service_key_1 = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY
+        test_tags_1 = [ 'skirt', 'system:width<400' ]
+        
+        test_tag_context_1 = ClientSearch.TagContext( test_tag_service_key_1 )
+        test_predicates_1 = ClientLocalServerResources.ConvertTagListToPredicates( None, test_tags_1, do_permission_check = False )
+        
+        test_file_search_context_1 = ClientSearch.FileSearchContext( location_context = default_location_context, tag_context = test_tag_context_1, predicates = test_predicates_1 )
+        
+        test_tag_service_key_2 = HG.test_controller.example_tag_repo_service_key
+        test_tags_2 = [ 'system:untagged' ]
+        
+        test_tag_context_2 = ClientSearch.TagContext( test_tag_service_key_2 )
+        test_predicates_2 = ClientLocalServerResources.ConvertTagListToPredicates( None, test_tags_2, do_permission_check = False )
+        
+        test_file_search_context_2 = ClientSearch.FileSearchContext( location_context = default_location_context, tag_context = test_tag_context_2, predicates = test_predicates_2 )
+        
+        test_potentials_search_type = CC.DUPE_SEARCH_BOTH_FILES_MATCH_DIFFERENT_SEARCHES
+        test_pixel_duplicates = CC.SIMILAR_FILES_PIXEL_DUPES_EXCLUDED
+        test_max_hamming_distance = 8
+        
+        # get count
+        
+        HG.test_controller.SetRead( 'potential_duplicates_count', 5 )
+        
+        path = '/manage_file_relationships/get_potentials_count'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'potential_duplicates_count' ], 5 )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'potential_duplicates_count' )
+
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, default_potentials_search_type )
+        self.assertEqual( pixel_duplicates, default_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, default_max_hamming_distance )
+        
+        # get count with params
+        
+        HG.test_controller.SetRead( 'potential_duplicates_count', 5 )
+        
+        path = '/manage_file_relationships/get_potentials_count?tag_service_key_1={}&tags_1={}&tag_service_key_2={}&tags_2={}&potentials_search_type={}&pixel_duplicates={}&max_hamming_distance={}'.format(
+            test_tag_service_key_1.hex(),
+            urllib.parse.quote( json.dumps( test_tags_1 ) ),
+            test_tag_service_key_2.hex(),
+            urllib.parse.quote( json.dumps( test_tags_2 ) ),
+            test_potentials_search_type,
+            test_pixel_duplicates,
+            test_max_hamming_distance
+        )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'potential_duplicates_count' ], 5 )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'potential_duplicates_count' )
+
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), test_file_search_context_1.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), test_file_search_context_2.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, test_potentials_search_type )
+        self.assertEqual( pixel_duplicates, test_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, test_max_hamming_distance )
+        
+        # get pairs
+        
+        default_max_num_pairs = 250
+        test_max_num_pairs = 20
+        
+        test_hash_pairs = [ ( os.urandom( 32 ), os.urandom( 32 ) ) for i in range( 10 ) ]
+        test_media_result_pairs = [ ( HelperFunctions.GetFakeMediaResult( h1 ), HelperFunctions.GetFakeMediaResult( h2 ) ) for ( h1, h2 ) in test_hash_pairs ]
+        test_hash_pairs_hex = [ [ h1.hex(), h2.hex() ] for ( h1, h2 ) in test_hash_pairs ]
+        
+        HG.test_controller.SetRead( 'duplicate_pairs_for_filtering', test_media_result_pairs )
+        
+        path = '/manage_file_relationships/get_potential_pairs'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'potential_duplicate_pairs' ], test_hash_pairs_hex )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'duplicate_pairs_for_filtering' )
+        
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        max_num_pairs = kwargs[ 'max_num_pairs' ]
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, default_potentials_search_type )
+        self.assertEqual( pixel_duplicates, default_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, default_max_hamming_distance )
+        self.assertEqual( max_num_pairs, default_max_num_pairs )
+        
+        # get pairs with params
+        
+        HG.test_controller.SetRead( 'duplicate_pairs_for_filtering', test_media_result_pairs )
+        
+        path = '/manage_file_relationships/get_potential_pairs?tag_service_key_1={}&tags_1={}&tag_service_key_2={}&tags_2={}&potentials_search_type={}&pixel_duplicates={}&max_hamming_distance={}&max_num_pairs={}'.format(
+            test_tag_service_key_1.hex(),
+            urllib.parse.quote( json.dumps( test_tags_1 ) ),
+            test_tag_service_key_2.hex(),
+            urllib.parse.quote( json.dumps( test_tags_2 ) ),
+            test_potentials_search_type,
+            test_pixel_duplicates,
+            test_max_hamming_distance,
+            test_max_num_pairs
+        )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'potential_duplicate_pairs' ], test_hash_pairs_hex )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'duplicate_pairs_for_filtering' )
+
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        max_num_pairs = kwargs[ 'max_num_pairs' ]
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), test_file_search_context_1.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), test_file_search_context_2.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, test_potentials_search_type )
+        self.assertEqual( pixel_duplicates, test_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, test_max_hamming_distance )
+        self.assertEqual( max_num_pairs, test_max_num_pairs )
+        
+        # get random
+        
+        test_hashes = [ os.urandom( 32 ) for i in range( 6 ) ]
+        test_hash_pairs_hex = [ h.hex() for h in test_hashes ]
+        
+        HG.test_controller.SetRead( 'random_potential_duplicate_hashes', test_hashes )
+        
+        path = '/manage_file_relationships/get_random_potentials'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'random_potential_duplicate_hashes' ], test_hash_pairs_hex )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'random_potential_duplicate_hashes' )
+        
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), default_file_search_context.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, default_potentials_search_type )
+        self.assertEqual( pixel_duplicates, default_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, default_max_hamming_distance )
+        
+        # get random with params
+        
+        HG.test_controller.SetRead( 'random_potential_duplicate_hashes', test_hashes )
+        
+        path = '/manage_file_relationships/get_random_potentials?tag_service_key_1={}&tags_1={}&tag_service_key_2={}&tags_2={}&potentials_search_type={}&pixel_duplicates={}&max_hamming_distance={}'.format(
+            test_tag_service_key_1.hex(),
+            urllib.parse.quote( json.dumps( test_tags_1 ) ),
+            test_tag_service_key_2.hex(),
+            urllib.parse.quote( json.dumps( test_tags_2 ) ),
+            test_potentials_search_type,
+            test_pixel_duplicates,
+            test_max_hamming_distance
+        )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d[ 'random_potential_duplicate_hashes' ], test_hash_pairs_hex )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'random_potential_duplicate_hashes' )
+
+        ( file_search_context_1, file_search_context_2, potentials_search_type, pixel_duplicates, max_hamming_distance ) = args
+        
+        self.assertEqual( file_search_context_1.GetSerialisableTuple(), test_file_search_context_1.GetSerialisableTuple() )
+        self.assertEqual( file_search_context_2.GetSerialisableTuple(), test_file_search_context_2.GetSerialisableTuple() )
+        self.assertEqual( potentials_search_type, test_potentials_search_type )
+        self.assertEqual( pixel_duplicates, test_pixel_duplicates )
+        self.assertEqual( max_hamming_distance, test_max_hamming_distance )
+        
+        # set relationship
+        
+        # this is tricky to test fully
+        
+        HG.test_controller.ClearWrites( 'duplicate_pair_status' )
+        
+        HG.test_controller.ClearReads( 'media_result' )
+        
+        hashes = {
+            'b54d09218e0d6efc964b78b070620a1fa19c7e069672b4c6313cee2c9b0623f2',
+            'bbaa9876dab238dcf5799bfd8319ed0bab805e844f45cf0de33f40697b11a845',
+            '22667427eaa221e2bd7ef405e1d2983846c863d40b2999ce8d1bf5f0c18f5fb2',
+            '65d228adfa722f3cd0363853a191898abe8bf92d9a514c6c7f3c89cfed0bf423',
+            '0480513ffec391b77ad8c4e57fe80e5b710adfa3cb6af19b02a0bd7920f2d3ec',
+            '5fab162576617b5c3fc8caabea53ce3ab1a3c8e0a16c16ae7b4e4a21eab168a7'
+        }
+        
+        # TODO: populate the fakes here with real tags and test actual content merge
+        # to test the content merge, we'd want to set some content merge options and populate these fakes with real tags
+        # don't need to be too clever, just test one thing and we know it'll all be hooked up right
+        HG.test_controller.SetRead( 'media_results', [ HelperFunctions.GetFakeMediaResult( bytes.fromhex( hash_hex ) ) for hash_hex in hashes ] )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_file_relationships/set_file_relationships'
+        
+        request_dict = {
+            "relationships" : [
+                {
+                    "hash_a" : "b54d09218e0d6efc964b78b070620a1fa19c7e069672b4c6313cee2c9b0623f2",
+                    "hash_b" : "bbaa9876dab238dcf5799bfd8319ed0bab805e844f45cf0de33f40697b11a845",
+                    "relationship" : 4,
+                    "do_default_content_merge" : False,
+                    "delete_b" : True
+                },
+                {
+                    "hash_a" : "22667427eaa221e2bd7ef405e1d2983846c863d40b2999ce8d1bf5f0c18f5fb2",
+                    "hash_b" : "65d228adfa722f3cd0363853a191898abe8bf92d9a514c6c7f3c89cfed0bf423",
+                    "relationship" : 4,
+                    "do_default_content_merge" : False,
+                    "delete_b" : True
+                },
+                {
+                    "hash_a" : "0480513ffec391b77ad8c4e57fe80e5b710adfa3cb6af19b02a0bd7920f2d3ec",
+                    "hash_b" : "5fab162576617b5c3fc8caabea53ce3ab1a3c8e0a16c16ae7b4e4a21eab168a7",
+                    "relationship" : 2,
+                    "do_default_content_merge" : False
+                }
+            ]
+        }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetWrite( 'duplicate_pair_status' )
+
+        ( written_rows, ) = args
+        
+        def delete_thing( h, do_it ):
+            
+            if do_it:
+                
+                c = collections.defaultdict( list )
+                
+                c[ b'local files' ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { bytes.fromhex( h ) }, reason = 'From Client API (duplicates processing).' ) ]
+                
+                return [ c ]
+                
+            else:
+                
+                return []
+                
+            
+        
+        expected_written_rows = [ ( r_dict[ 'relationship' ], bytes.fromhex( r_dict[ 'hash_a' ] ), bytes.fromhex( r_dict[ 'hash_b' ] ), delete_thing( r_dict[ 'hash_b' ], 'delete_b' in r_dict and r_dict[ 'delete_b' ] ) ) for r_dict in request_dict[ 'relationships' ] ]
+        
+        self.assertEqual( written_rows, expected_written_rows )
+        
+        # set kings
+        
+        HG.test_controller.ClearWrites( 'duplicate_set_king' )
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_file_relationships/set_kings'
+        
+        test_hashes = [
+            "b54d09218e0d6efc964b78b070620a1fa19c7e069672b4c6313cee2c9b0623f2",
+            "bbaa9876dab238dcf5799bfd8319ed0bab805e844f45cf0de33f40697b11a845"
+        ]
+        
+        request_dict = { 'hashes' : test_hashes }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( args1, kwargs1 ), ( args2, kwargs2 ) ] = HG.test_controller.GetWrite( 'duplicate_set_king' )
+        
+        self.assertEqual( { args1[0], args2[0] }, { bytes.fromhex( h ) for h in test_hashes } )
+        
+    
     def _test_manage_pages( self, connection, set_up_permissions ):
         
         api_permissions = set_up_permissions[ 'manage_pages' ]
@@ -2341,7 +3374,33 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        result = HG.test_controller.GetWrite( 'show_page' )
+        result = HG.test_controller.GetWrite( 'show_page' ) # a fake hook in the controller handles this
+        
+        expected_result = [ ( ( page_key, ), {} ) ]
+        
+        self.assertEqual( result, expected_result )
+        
+        #
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        path = '/manage_pages/refresh_page'
+        
+        page_key = os.urandom( 32 )
+        
+        request_dict = { 'page_key' : page_key.hex() }
+        
+        request_body = json.dumps( request_dict )
+        
+        connection.request( 'POST', path, body = request_body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        result = HG.test_controller.GetWrite( 'refresh_page' ) # a fake hook in the controller handles this
         
         expected_result = [ ( ( page_key, ), {} ) ]
         
@@ -2362,7 +3421,7 @@ class TestClientAPI( unittest.TestCase ):
         
         #
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
@@ -2382,7 +3441,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
@@ -2429,7 +3488,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         hash_ids_to_hashes = { hash_id : os.urandom( 32 ) for hash_id in sample_hash_ids }
         
@@ -2490,7 +3549,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         hash_ids_to_hashes = { hash_id : os.urandom( 32 ) for hash_id in sample_hash_ids }
         
@@ -2551,7 +3610,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
@@ -2592,7 +3651,7 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
@@ -2633,17 +3692,17 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
         tags = [ 'kino', 'green' ]
         
-        path = '/get_files/search_files?tags={}&file_sort_type={}&file_sort_asc={}&file_service_name={}'.format(
+        path = '/get_files/search_files?tags={}&file_sort_type={}&file_sort_asc={}&file_service_key={}'.format(
             urllib.parse.quote( json.dumps( tags ) ),
             CC.SORT_FILES_BY_FRAMERATE,
             'true',
-            'trash'
+            CC.TRASH_SERVICE_KEY.hex()
         )
         
         connection.request( 'GET', path, headers = headers )
@@ -2679,18 +3738,18 @@ class TestClientAPI( unittest.TestCase ):
         
         HG.test_controller.ClearReads( 'file_query_ids' )
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
         tags = [ 'kino', 'green' ]
         
-        path = '/get_files/search_files?tags={}&file_sort_type={}&file_sort_asc={}&file_service_key={}&tag_service_name={}'.format(
+        path = '/get_files/search_files?tags={}&file_sort_type={}&file_sort_asc={}&file_service_key={}&tag_service_key={}'.format(
             urllib.parse.quote( json.dumps( tags ) ),
             CC.SORT_FILES_BY_FRAMERATE,
             'true',
             CC.TRASH_SERVICE_KEY.hex(),
-            'all%20known%20tags'
+            CC.COMBINED_TAG_SERVICE_KEY.hex()
         )
         
         connection.request( 'GET', path, headers = headers )
@@ -2726,7 +3785,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # this just tests if it parses, we don't have a full test for read params yet
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
         
@@ -2752,7 +3811,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # empty
         
-        sample_hash_ids = set( random.sample( hash_ids, 3 ) )
+        sample_hash_ids = set( random.sample( list( hash_ids ), 3 ) )
         
         # set it, just to check we aren't ever asking
         HG.test_controller.SetRead( 'file_query_ids', set( sample_hash_ids ) )
@@ -2793,18 +3852,6 @@ class TestClientAPI( unittest.TestCase ):
         predicates = ClientLocalServerResources.ParseClientAPISearchPredicates( pretend_request )
         
         self.assertEqual( predicates, [] )
-        
-        #
-        
-        pretend_request = PretendRequest()
-        
-        pretend_request.parsed_request_args = { 'system_inbox' : True }
-        pretend_request.client_api_permissions = set_up_permissions[ 'search_green_files' ]
-        
-        with self.assertRaises( HydrusExceptions.InsufficientCredentialsException ):
-            
-            ClientLocalServerResources.ParseClientAPISearchPredicates( pretend_request )
-            
         
         #
         
@@ -2855,38 +3902,6 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = 'green' ) )
         expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = 'kino', inclusive = False ) )
-        
-        self.assertEqual( set( predicates ), set( expected_predicates ) )
-        
-        #
-        
-        pretend_request = PretendRequest()
-        
-        pretend_request.parsed_request_args = { 'tags' : [ 'green' ], 'system_inbox' : True }
-        pretend_request.client_api_permissions = set_up_permissions[ 'search_green_files' ]
-        
-        predicates = ClientLocalServerResources.ParseClientAPISearchPredicates( pretend_request )
-        
-        expected_predicates = []
-        
-        expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = 'green' ) )
-        expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_SYSTEM_INBOX ) )
-        
-        self.assertEqual( set( predicates ), set( expected_predicates ) )
-        
-        #
-        
-        pretend_request = PretendRequest()
-        
-        pretend_request.parsed_request_args = { 'tags' : [ 'green' ], 'system_archive' : True }
-        pretend_request.client_api_permissions = set_up_permissions[ 'search_green_files' ]
-        
-        predicates = ClientLocalServerResources.ParseClientAPISearchPredicates( pretend_request )
-        
-        expected_predicates = []
-        
-        expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_TAG, value = 'green' ) )
-        expected_predicates.append( ClientSearch.Predicate( predicate_type = ClientSearch.PREDICATE_TYPE_SYSTEM_ARCHIVE ) )
         
         self.assertEqual( set( predicates ), set( expected_predicates ) )
         
@@ -2973,6 +3988,44 @@ class TestClientAPI( unittest.TestCase ):
             
         
     
+    def _test_file_hashes( self, connection, set_up_permissions ):
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        md5_hash = bytes.fromhex( 'ec5c5a4d7da4be154597e283f0b6663c' )
+        sha256_hash = bytes.fromhex( '2a0174970defa6f147f2eabba829c5b05aba1f1aea8b978611a07b7bb9cf9399' )
+        
+        source_to_dest = { md5_hash : sha256_hash }
+        
+        HG.test_controller.SetRead( 'file_hashes', source_to_dest )
+        
+        path = '/get_files/file_hashes?source_hash_type=md5&desired_hash_type=sha256&hash={}'.format( md5_hash.hex() )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_answer = {
+            'hashes' : {
+                md5_hash.hex() : sha256_hash.hex()
+            }
+        }
+        
+        self.assertEqual( d, expected_answer )
+        
+    
     def _test_file_metadata( self, connection, set_up_permissions ):
         
         # test file metadata
@@ -2983,11 +4036,16 @@ class TestClientAPI( unittest.TestCase ):
         
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
         
-        file_ids_to_hashes = { 1 : bytes.fromhex( 'a' * 64 ), 2 : bytes.fromhex( 'b' * 64 ), 3 : bytes.fromhex( 'c' * 64 ) }
+        file_ids_to_hashes = { i : os.urandom( 32 ) for i in range( 20 ) }
         
         metadata = []
         
         for ( file_id, hash ) in file_ids_to_hashes.items():
+            
+            if file_id == 0 or file_id >= 4:
+                
+                continue
+                
             
             metadata_row = { 'file_id' : file_id, 'hash' : hash.hex() }
             
@@ -3015,6 +4073,11 @@ class TestClientAPI( unittest.TestCase ):
         done_a_multihash = False
         
         for ( file_id, hash ) in file_ids_to_hashes.items():
+            
+            if file_id == 0 or file_id >= 4:
+                
+                continue
+                
             
             size = random.randint( 8192, 20 * 1048576 )
             mime = random.choice( [ HC.IMAGE_JPEG, HC.VIDEO_WEBM, HC.APPLICATION_PDF ] )
@@ -3103,10 +4166,10 @@ class TestClientAPI( unittest.TestCase ):
             if file_info_manager.mime in HC.MIMES_WITH_THUMBNAILS:
                 
                 bounding_dimensions = HG.test_controller.options[ 'thumbnail_dimensions' ]
-                
                 thumbnail_scale_type = HG.test_controller.new_options.GetInteger( 'thumbnail_scale_type' )
+                thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
                 
-                ( clip_rect, ( thumbnail_expected_width, thumbnail_expected_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( file_info_manager.width, file_info_manager.height ), bounding_dimensions, thumbnail_scale_type )
+                ( clip_rect, ( thumbnail_expected_width, thumbnail_expected_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( file_info_manager.width, file_info_manager.height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
                 
                 metadata_row[ 'thumbnail_width' ] = thumbnail_expected_width
                 metadata_row[ 'thumbnail_height' ] = thumbnail_expected_height
@@ -3195,56 +4258,6 @@ class TestClientAPI( unittest.TestCase ):
             
             metadata_row[ 'tags' ] = tags_dict
             
-            # old stuff start
-            
-            api_service_keys_to_statuses_to_tags = {}
-            
-            service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_STORAGE )
-            
-            for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
-                
-                if service_key not in service_keys_to_names:
-                    
-                    service_keys_to_names[ service_key ] = services_manager.GetName( service_key )
-                    
-                
-                s = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
-                
-                if len( s ) > 0:
-                    
-                    service_name = service_keys_to_names[ service_key ]
-                    
-                    api_service_keys_to_statuses_to_tags[ service_key.hex() ] = s
-                    
-                
-            
-            metadata_row[ 'service_keys_to_statuses_to_tags' ] = api_service_keys_to_statuses_to_tags
-            
-            service_keys_to_statuses_to_display_tags = {}
-            
-            service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_ACTUAL )
-            
-            for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
-                
-                if service_key not in service_keys_to_names:
-                    
-                    service_keys_to_names[ service_key ] = services_manager.GetName( service_key )
-                    
-                
-                s = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
-                
-                if len( s ) > 0:
-                    
-                    service_name = service_keys_to_names[ service_key ]
-                    
-                    service_keys_to_statuses_to_display_tags[ service_key.hex() ] = s
-                    
-                
-            
-            metadata_row[ 'service_keys_to_statuses_to_display_tags' ] = service_keys_to_statuses_to_display_tags
-            
-            # old stuff end
-            
             metadata.append( metadata_row )
             
             detailed_known_urls_metadata_row = dict( metadata_row )
@@ -3278,6 +4291,8 @@ class TestClientAPI( unittest.TestCase ):
         
         # fail on non-permitted files
         
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3, 7 ] } )
+        
         path = '/get_files/file_metadata?file_ids={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3, 7 ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
@@ -3302,6 +4317,8 @@ class TestClientAPI( unittest.TestCase ):
         
         # identifiers from file_ids
         
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
         path = '/get_files/file_metadata?file_ids={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
@@ -3320,6 +4337,8 @@ class TestClientAPI( unittest.TestCase ):
         
         # basic metadata from file_ids
         
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
         path = '/get_files/file_metadata?file_ids={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
@@ -3337,6 +4356,8 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( d, expected_only_return_basic_information_result )
         
         # metadata from file_ids
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
         
         path = '/get_files/file_metadata?file_ids={}'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
         
@@ -3391,7 +4412,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # identifiers from hashes
         
-        path = '/get_files/file_metadata?hashes={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -3409,7 +4430,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # basic metadata from hashes
         
-        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -3427,7 +4448,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # metadata from hashes
         
-        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -3457,7 +4478,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # metadata from hashes with detailed url info
         
-        path = '/get_files/file_metadata?hashes={}&detailed_url_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&detailed_url_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -3475,7 +4496,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # metadata from hashes with notes info
         
-        path = '/get_files/file_metadata?hashes={}&include_notes=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in file_ids_to_hashes.values() ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&include_notes=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -3493,7 +4514,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # failure on missing file_ids
         
-        HG.test_controller.SetRead( 'media_results_from_ids', HydrusExceptions.DataMissing( 'test missing' ) )
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', HydrusExceptions.DataMissing( 'test missing' ) )
         
         api_permissions = set_up_permissions[ 'everything' ]
         
@@ -3906,7 +4927,9 @@ class TestClientAPI( unittest.TestCase ):
         self._test_add_tags( connection, set_up_permissions )
         self._test_add_tags_search_tags( connection, set_up_permissions )
         self._test_add_urls( connection, set_up_permissions )
+        self._test_manage_duplicates( connection, set_up_permissions )
         self._test_manage_cookies( connection, set_up_permissions )
+        self._test_manage_headers( connection, set_up_permissions )
         self._test_manage_pages( connection, set_up_permissions )
         self._test_search_files( connection, set_up_permissions )
         
@@ -3916,6 +4939,7 @@ class TestClientAPI( unittest.TestCase ):
             
         
         self._test_search_files_predicate_parsing( connection, set_up_permissions )
+        self._test_file_hashes( connection, set_up_permissions )
         self._test_file_metadata( connection, set_up_permissions )
         self._test_get_files( connection, set_up_permissions )
         self._test_permission_failures( connection, set_up_permissions )

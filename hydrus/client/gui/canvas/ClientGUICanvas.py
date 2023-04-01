@@ -22,6 +22,7 @@ from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIDialogs
 from hydrus.client.gui import ClientGUIDialogsManage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIDuplicates
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMedia
 from hydrus.client.gui import ClientGUIMediaActions
@@ -135,6 +136,58 @@ def AddAudioVolumeMenu( menu, canvas_type ):
     
     ClientGUIMenus.AppendMenu( menu, volume_menu, 'volume' )
     
+
+class CanvasBackgroundColourGenerator( object ):
+    
+    def GetColour( self ) -> QG.QColor:
+        
+        return HG.client_controller.new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND )
+        
+    
+    def CanDoTransparencyCheckerboard( self ) -> bool:
+        
+        return HG.client_controller.new_options.GetBoolean( 'draw_transparency_checkerboard_media_canvas' )
+        
+    
+
+class CanvasBackgroundColourGeneratorDuplicates( CanvasBackgroundColourGenerator ):
+    
+    def __init__( self, duplicate_canvas ):
+        
+        CanvasBackgroundColourGenerator.__init__( self )
+        
+        self._duplicate_canvas = duplicate_canvas
+        
+    
+    def CanDoTransparencyCheckerboard( self ) -> bool:
+        
+        return HG.client_controller.new_options.GetBoolean( 'draw_transparency_checkerboard_media_canvas' ) or HG.client_controller.new_options.GetBoolean( 'draw_transparency_checkerboard_media_canvas_duplicates' )
+        
+    
+    def GetColour( self ) -> QG.QColor:
+        
+        new_options = HG.client_controller.new_options
+        
+        normal_colour = new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND )
+        
+        if self._duplicate_canvas.IsShowingAPair():
+            
+            if self._duplicate_canvas.IsShowingFileA():
+                
+                duplicate_intensity = new_options.GetNoneableInteger( 'duplicate_background_switch_intensity_a' )
+                
+            else:
+                
+                duplicate_intensity = new_options.GetNoneableInteger( 'duplicate_background_switch_intensity_b' )
+                
+            
+            return ClientGUIFunctions.GetLighterDarkerColour( normal_colour, duplicate_intensity )
+            
+        
+        return normal_colour
+        
+    
+
 # cribbing from here https://doc.qt.io/qt-5/layout.html#how-to-write-a-custom-layout-manager
 # not finished, but a start as I continue to refactor. might want to rename to 'draggable layout' or something too, since it doesn't actually care about media container that much, and instead subclass vboxlayout?
 class CanvasLayout( QW.QLayout ):
@@ -256,6 +309,8 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         self._location_context = location_context
         
+        self._background_colour_generator = CanvasBackgroundColourGenerator()
+        
         self._current_media_start_time = HydrusData.GetNow()
         
         self._new_options = HG.client_controller.new_options
@@ -282,7 +337,7 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         self.installEventFilter( self._click_drag_reporting_filter )
         
-        self._media_container = ClientGUICanvasMedia.MediaContainer( self, self.CANVAS_TYPE, self._click_drag_reporting_filter )
+        self._media_container = ClientGUICanvasMedia.MediaContainer( self, self.CANVAS_TYPE, self._background_colour_generator, self._click_drag_reporting_filter )
         
         self._last_drag_pos = None
         self._current_drag_is_touch = False
@@ -422,7 +477,7 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def _DrawBackgroundBitmap( self, painter: QG.QPainter ):
         
-        background_colour = self._GetBackgroundColour()
+        background_colour = self._background_colour_generator.GetColour()
         
         painter.setBackground( QG.QBrush( background_colour ) )
         
@@ -434,11 +489,6 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     def _DrawBackgroundDetails( self, painter ):
         
         pass
-        
-    
-    def _GetBackgroundColour( self ):
-        
-        return self._new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND )
         
     
     def _GetIndexString( self ):
@@ -640,7 +690,7 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         hash = self._current_media.GetHash()
         
-        HG.client_controller.file_viewing_stats_manager.FinishViewing( hash, self.CANVAS_TYPE, view_timestamp, viewtime_delta )
+        HG.client_controller.file_viewing_stats_manager.FinishViewing( self._current_media, self.CANVAS_TYPE, view_timestamp, viewtime_delta )
         
     
     def _SeekDeltaCurrentMedia( self, direction, duration_ms ):
@@ -908,6 +958,128 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                 
                 self._media_container.PausePlay()
                 
+            elif action == CAC.SIMPLE_SHOW_DUPLICATES:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    duplicate_type = command.GetSimpleData()
+                    
+                    ClientGUIMedia.ShowDuplicatesInNewPage( self._location_context, hash, duplicate_type )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_CLEAR_FOCUSED_FALSE_POSITIVES:
+                
+                # TODO: when media knows dupe relationships, all these lads here need a media scan for the existence of alternate groups or whatever
+                # no duplicate group->don't start the process
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.ClearFalsePositives( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_CLEAR_FALSE_POSITIVES:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.ClearFalsePositives( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_DISSOLVE_FOCUSED_ALTERNATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.DissolveAlternateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_DISSOLVE_ALTERNATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.DissolveAlternateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_DISSOLVE_FOCUSED_DUPLICATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.DissolveDuplicateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_DISSOLVE_DUPLICATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.DissolveDuplicateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_REMOVE_FOCUSED_FROM_ALTERNATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.RemoveFromAlternateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_REMOVE_FOCUSED_FROM_DUPLICATE_GROUP:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.RemoveFromDuplicateGroup( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_RESET_FOCUSED_POTENTIAL_SEARCH:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.ResetPotentialSearch( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_RESET_POTENTIAL_SEARCH:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.ResetPotentialSearch( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_REMOVE_FOCUSED_POTENTIALS:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.RemovePotentials( self, ( hash, ) )
+                    
+                
+            elif action == CAC.SIMPLE_DUPLICATE_MEDIA_REMOVE_POTENTIALS:
+                
+                if self._current_media is not None:
+                    
+                    hash = self._current_media.GetHash()
+                    
+                    ClientGUIDuplicates.RemovePotentials( self, ( hash, ) )
+                    
+                
             elif action == CAC.SIMPLE_MEDIA_SEEK_DELTA:
                 
                 ( direction, ms ) = command.GetSimpleData()
@@ -1018,6 +1190,17 @@ class Canvas( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             if not ClientGUICanvasMedia.CanDisplayMedia( media, self.CANVAS_TYPE ):
                 
                 media = None
+                
+            
+        
+        if media is not None:
+            
+            if self.CANVAS_TYPE == CC.CANVAS_PREVIEW:
+                
+                if not ClientGUICanvasMedia.UserWantsUsToDisplayMedia( media, self.CANVAS_TYPE ):
+                    
+                    media = None
+                    
                 
             
         
@@ -1205,7 +1388,7 @@ class CanvasPanel( Canvas ):
             
             locations_manager = self._current_media.GetLocationsManager()
             
-            local_ratings_services = [ service for service in services if service.GetServiceType() in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) ]
+            local_ratings_services = [ service for service in services if service.GetServiceType() in HC.RATINGS_SERVICES ]
             
             i_can_post_ratings = len( local_ratings_services ) > 0
             
@@ -1715,6 +1898,30 @@ class CanvasWithDetails( Canvas ):
             current_y += 18
             
         
+        incdec_services = services_manager.GetServices( ( HC.LOCAL_RATING_INCDEC, ) )
+        
+        incdec_services.reverse()
+        
+        control_width = ClientGUIRatings.INCDEC_SIZE.width()
+        
+        incdec_rating_current_x = my_width - control_width - 2 # -2 to line up exactly with the floating panel
+        
+        for incdec_service in incdec_services:
+            
+            service_key = incdec_service.GetServiceKey()
+            
+            ( rating_state, rating ) = ClientRatings.GetIncDecStateFromMedia( ( self._current_media, ), service_key )
+            
+            ClientGUIRatings.DrawIncDec( painter, incdec_rating_current_x, current_y, service_key, rating_state, rating )
+            
+            incdec_rating_current_x -= control_width
+            
+        
+        if len( incdec_services ) > 0:
+            
+            current_y += 18
+            
+        
         # icons
         
         icons_to_show = []
@@ -1975,7 +2182,7 @@ class CanvasWithHovers( CanvasWithDetails ):
         # due to the mouse setPos below, the event pos can get funky I think due to out of order coordinate setting events, so we'll poll current value directly
         event_pos = self.mapFromGlobal( QG.QCursor.pos() )
         
-        mouse_currently_shown = self.cursor() == QG.QCursor( QC.Qt.ArrowCursor )
+        mouse_currently_shown = self.cursor().shape() == QC.Qt.ArrowCursor
         show_mouse = mouse_currently_shown
         
         is_dragging = event.buttons() & QC.Qt.LeftButton and self._last_drag_pos is not None
@@ -2096,9 +2303,9 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     
     showPairInPage = QC.Signal( list )
     
-    def __init__( self, parent, file_search_context: ClientSearch.FileSearchContext, both_files_match, pixel_dupes_preference, max_hamming_distance ):
+    def __init__( self, parent, file_search_context_1: ClientSearch.FileSearchContext, file_search_context_2: ClientSearch.FileSearchContext, dupe_search_type, pixel_dupes_preference, max_hamming_distance ):
         
-        location_context = file_search_context.GetLocationContext()
+        location_context = file_search_context_1.GetLocationContext()
         
         CanvasWithHovers.__init__( self, parent, location_context )
         
@@ -2109,10 +2316,15 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         self._hovers.append( hover )
         
+        self._background_colour_generator = CanvasBackgroundColourGeneratorDuplicates( self )
+        
+        self._media_container.SetBackgroundColourGenerator( self._background_colour_generator )
+        
         self._my_shortcuts_handler.AddWindowToFilter( hover )
         
-        self._file_search_context = file_search_context
-        self._both_files_match = both_files_match
+        self._file_search_context_1 = file_search_context_1
+        self._file_search_context_2 = file_search_context_2
+        self._dupe_search_type = dupe_search_type
         self._pixel_dupes_preference = pixel_dupes_preference
         self._max_hamming_distance = max_hamming_distance
         
@@ -2294,17 +2506,17 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         if duplicate_type in [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ] or ( new_options.GetBoolean( 'advanced_mode' ) and duplicate_type == HC.DUPLICATE_ALTERNATE ):
             
-            duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
+            duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
             
             with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit duplicate merge options' ) as dlg_2:
                 
-                panel = ClientGUIScrolledPanelsEdit.EditDuplicateActionOptionsPanel( dlg_2, duplicate_type, duplicate_action_options, for_custom_action = True )
+                panel = ClientGUIScrolledPanelsEdit.EditDuplicateContentMergeOptionsPanel( dlg_2, duplicate_type, duplicate_content_merge_options, for_custom_action = True )
                 
                 dlg_2.SetPanel( panel )
                 
                 if dlg_2.exec() == QW.QDialog.Accepted:
                     
-                    duplicate_action_options = panel.GetValue()
+                    duplicate_content_merge_options = panel.GetValue()
                     
                 else:
                     
@@ -2314,7 +2526,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
         else:
             
-            duplicate_action_options = None
+            duplicate_content_merge_options = None
             
         
         message = 'Delete any of the files?'
@@ -2352,7 +2564,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             delete_second = True
             
         
-        self._ProcessPair( duplicate_type, delete_first = delete_first, delete_second = delete_second, duplicate_action_options = duplicate_action_options )
+        self._ProcessPair( duplicate_type, delete_first = delete_first, delete_second = delete_second, duplicate_content_merge_options = duplicate_content_merge_options )
         
     
     def _DrawBackgroundDetails( self, painter ):
@@ -2381,31 +2593,6 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         return ClientGUICanvasHoverFrames.CanvasHoverFrameTopDuplicatesFilter( self, self, self._canvas_key )
         
     
-    def _GetBackgroundColour( self ):
-        
-        normal_colour = self._new_options.GetColour( CC.COLOUR_MEDIA_BACKGROUND )
-        
-        if self._current_media is None or len( self._media_list ) == 0:
-            
-            return normal_colour
-            
-        else:
-            
-            if self._current_media == self._media_list.GetFirst():
-                
-                return normal_colour
-                
-            else:
-                
-                new_options = HG.client_controller.new_options
-                
-                duplicate_intensity = new_options.GetNoneableInteger( 'duplicate_background_switch_intensity' )
-                
-                return ClientGUIFunctions.GetLighterDarkerColour( normal_colour, duplicate_intensity )
-                
-            
-        
-    
     def _GetIndexString( self ):
         
         if self._current_media is None or len( self._media_list ) == 0:
@@ -2421,7 +2608,29 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             index_string = HydrusData.ConvertValueRangeToPrettyString( progress, total )
             
-            num_decisions_string = '{} decisions'.format( HydrusData.ToHumanInt( self._GetNumCommittableDecisions() ) )
+            num_committable = self._GetNumCommittableDecisions()
+            num_deletable = self._GetNumCommittableDeletes()
+            
+            components = []
+            
+            if num_committable > 0:
+                
+                components.append( '{} decisions'.format( HydrusData.ToHumanInt( num_committable ) ) )
+                
+            
+            if num_deletable > 0:
+                
+                components.append( '{} deletes'.format( HydrusData.ToHumanInt( num_deletable ) ) )
+                
+            
+            if len( components ) == 0:
+                
+                num_decisions_string = 'no decisions yet'
+                
+            else:
+                
+                num_decisions_string = ', '.join( components )
+                
             
             return '{} - {} - {}'.format( current_media_label, index_string, num_decisions_string )
             
@@ -2435,6 +2644,11 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     def _GetNumCommittableDecisions( self ):
         
         return len( [ 1 for ( duplicate_type, first_media, second_media, list_of_service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs if duplicate_type is not None ] )
+        
+    
+    def _GetNumCommittableDeletes( self ):
+        
+        return len( [ 1 for ( duplicate_type, first_media, second_media, list_of_service_keys_to_content_updates, was_auto_skipped ) in self._processed_pairs if duplicate_type is None and len( list_of_service_keys_to_content_updates ) > 0 ] )
         
     
     def _GetNumRemainingDecisions( self ):
@@ -2473,7 +2687,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         self._currently_fetching_pairs = True
         
-        HG.client_controller.CallToThread( self.THREADFetchPairs, self._file_search_context, self._both_files_match, self._pixel_dupes_preference, self._max_hamming_distance )
+        HG.client_controller.CallToThread( self.THREADFetchPairs, self._file_search_context_1, self._file_search_context_2, self._dupe_search_type, self._pixel_dupes_preference, self._max_hamming_distance )
         
         self.update()
         
@@ -2529,24 +2743,24 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
         
     
-    def _ProcessPair( self, duplicate_type, delete_first = False, delete_second = False, duplicate_action_options = None ):
+    def _ProcessPair( self, duplicate_type, delete_first = False, delete_second = False, duplicate_content_merge_options = None ):
         
         if self._current_media is None:
             
             return
             
         
-        if duplicate_action_options is None:
+        if duplicate_content_merge_options is None:
             
             if duplicate_type in [ HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ] or ( HG.client_controller.new_options.GetBoolean( 'advanced_mode' ) and duplicate_type == HC.DUPLICATE_ALTERNATE ):
                 
                 new_options = HG.client_controller.new_options
                 
-                duplicate_action_options = new_options.GetDuplicateActionOptions( duplicate_type )
+                duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
                 
             else:
                 
-                duplicate_action_options = ClientDuplicates.DuplicateActionOptions()
+                duplicate_content_merge_options = ClientDuplicates.DuplicateContentMergeOptions()
                 
             
         
@@ -2596,7 +2810,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             file_deletion_reason = None
             
         
-        list_of_service_keys_to_content_updates = [ duplicate_action_options.ProcessPairIntoContentUpdates( first_media, second_media, delete_first = delete_first, delete_second = delete_second, file_deletion_reason = file_deletion_reason ) ]
+        list_of_service_keys_to_content_updates = [ duplicate_content_merge_options.ProcessPairIntoContentUpdates( first_media, second_media, delete_first = delete_first, delete_second = delete_second, file_deletion_reason = file_deletion_reason ) ]
         
         process_tuple = ( duplicate_type, first_media, second_media, list_of_service_keys_to_content_updates, was_auto_skipped )
         
@@ -2669,7 +2883,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         first_media = ClientMedia.MediaSingleton( first_media_result )
         second_media = ClientMedia.MediaSingleton( second_media_result )
         
-        score = ClientMedia.GetDuplicateComparisonScore( first_media, second_media )
+        score = ClientDuplicates.GetDuplicateComparisonScore( first_media, second_media )
         
         if score > 0:
             
@@ -2761,10 +2975,23 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             if num_remaining == 0:
                 
                 num_committable = self._GetNumCommittableDecisions()
+                num_deletable = self._GetNumCommittableDeletes()
                 
-                if num_committable > 0:
+                if num_committable + num_deletable > 0:
                     
-                    label = 'commit ' + HydrusData.ToHumanInt( num_committable ) + ' decisions and continue?'
+                    components = []
+                    
+                    if num_committable > 0:
+                        
+                        components.append( '{} decisions'.format( HydrusData.ToHumanInt( num_committable ) ) )
+                        
+                    
+                    if num_deletable > 0:
+                        
+                        components.append( '{} deletes'.format( HydrusData.ToHumanInt( num_deletable ) ) )
+                        
+                    
+                    label = 'commit {} and continue?'.format( ' and '.join( components ) )
                     
                     result = ClientGUIDialogsQuick.GetInterstitialFilteringAnswer( self, label )
                     
@@ -2894,8 +3121,8 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
         
         HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
         
-        ClientMedia.hashes_to_jpeg_quality = {} # clear the cache
-        ClientMedia.hashes_to_pixel_hashes = {} # clear the cache
+        ClientDuplicates.hashes_to_jpeg_quality = {} # clear the cache
+        ClientDuplicates.hashes_to_pixel_hashes = {} # clear the cache
         
         CanvasWithHovers.CleanBeforeDestroy( self )
         
@@ -2914,6 +3141,21 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
             self._Inbox()
             
+        
+    
+    def IsShowingAPair( self ):
+        
+        return self._current_media is not None and len( self._media_list ) > 1
+        
+    
+    def IsShowingFileA( self ):
+        
+        if not self.IsShowingAPair():
+            
+            return False
+            
+        
+        return self._current_media == self._media_list.GetFirst()
         
     
     def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
@@ -3033,10 +3275,23 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
     def TryToDoPreClose( self ):
         
         num_committable = self._GetNumCommittableDecisions()
+        num_deletable = self._GetNumCommittableDeletes()
         
-        if num_committable > 0:
+        if num_committable + num_deletable > 0:
             
-            label = 'commit ' + HydrusData.ToHumanInt( num_committable ) + ' decisions?'
+            components = []
+            
+            if num_committable > 0:
+                
+                components.append( '{} decisions'.format( HydrusData.ToHumanInt( num_committable ) ) )
+                
+            
+            if num_deletable > 0:
+                
+                components.append( '{} deletes'.format( HydrusData.ToHumanInt( num_deletable ) ) )
+                
+            
+            label = 'commit {}?'.format( ' and '.join( components ) )
             
             ( result, cancelled ) = ClientGUIDialogsQuick.GetFinishFilteringAnswer( self, label )
             
@@ -3068,7 +3323,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             
         
     
-    def THREADFetchPairs( self, file_search_context, both_files_match, pixel_dupes_preference, max_hamming_distance ):
+    def THREADFetchPairs( self, file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance ):
         
         def qt_close():
             
@@ -3097,7 +3352,7 @@ class CanvasFilterDuplicates( CanvasWithHovers ):
             self._ShowCurrentPair()
             
         
-        result = HG.client_controller.Read( 'duplicate_pairs_for_filtering', file_search_context, both_files_match, pixel_dupes_preference, max_hamming_distance )
+        result = HG.client_controller.Read( 'duplicate_pairs_for_filtering', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance )
         
         if len( result ) == 0:
             
@@ -3419,6 +3674,8 @@ def CommitArchiveDelete( page_key: bytes, location_context: ClientLocation.Locat
         
     
 class CanvasMediaListFilterArchiveDelete( CanvasMediaList ):
+    
+    CANVAS_TYPE = CC.CANVAS_MEDIA_VIEWER_ARCHIVE_DELETE
     
     def __init__( self, parent, page_key, location_context: ClientLocation.LocationContext, media_results ):
         
@@ -4052,7 +4309,7 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
             
             services = HG.client_controller.services_manager.GetServices()
             
-            local_ratings_services = [ service for service in services if service.GetServiceType() in ( HC.LOCAL_RATING_LIKE, HC.LOCAL_RATING_NUMERICAL ) ]
+            local_ratings_services = [ service for service in services if service.GetServiceType() in HC.RATINGS_SERVICES ]
             
             i_can_post_ratings = len( local_ratings_services ) > 0
             
@@ -4087,13 +4344,20 @@ class CanvasMediaListBrowser( CanvasMediaListNavigable ):
                 ClientGUIMenus.AppendMenuItem( zoom_menu, 'zoom in', 'Zoom the media in.', self._media_container.ZoomIn )
                 ClientGUIMenus.AppendMenuItem( zoom_menu, 'zoom out', 'Zoom the media out.', self._media_container.ZoomOut )
                 
-                if self._media_container.GetCurrentZoom() != 1.0:
+                current_zoom = self._media_container.GetCurrentZoom()
+                
+                if current_zoom != 1.0:
                     
                     ClientGUIMenus.AppendMenuItem( zoom_menu, 'zoom to 100%', 'Set the zoom to 100%.', self._media_container.ZoomSwitch )
                     
-                elif self._media_container.GetCurrentZoom() != self._media_container.GetCanvasZoom():
+                elif current_zoom != self._media_container.GetCanvasZoom():
                     
                     ClientGUIMenus.AppendMenuItem( zoom_menu, 'zoom fit', 'Set the zoom so the media fits the canvas.', self._media_container.ZoomSwitch )
+                    
+                
+                if not self._media_container.IsAtMaxZoom():
+                    
+                    ClientGUIMenus.AppendMenuItem( zoom_menu, 'zoom to max', 'Set the zoom to the maximum possible.', self._media_container.ZoomMax )
                     
                 
                 ClientGUIMenus.AppendMenu( menu, zoom_menu, 'current zoom: {}'.format( ClientData.ConvertZoomToPercentage( self._media_container.GetCurrentZoom() ) ) )

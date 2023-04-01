@@ -1,5 +1,6 @@
 import collections
 import sqlite3
+import time
 import typing
 
 from hydrus.core import HydrusConstants as HC
@@ -476,6 +477,21 @@ class ClientDBTagSearch( ClientDBModule.ClientDBModule ):
         # For instance, if we search for A on a domain where one tag service has A->B, we return the B results. Well, let's increment the A (x) count according to that, based on each service!
         # and then obviously a nice big merge at the end
         
+        if HG.autocomplete_delay_mode and not exact_match:
+            
+            time_to_stop = HydrusData.GetNowFloat() + 3.0
+            
+            while not HydrusData.TimeHasPassedFloat( time_to_stop ):
+                
+                time.sleep( 0.1 )
+                
+                if job_key is not None and job_key.IsCancelled():
+                    
+                    return []
+                    
+                
+            
+        
         location_context = file_search_context.GetLocationContext()
         tag_context = file_search_context.GetTagContext()
         
@@ -625,9 +641,10 @@ class ClientDBTagSearch( ClientDBModule.ClientDBModule ):
             tag_ids = set( tag_ids )
             
         
-        tag_ids_without_siblings = list( tag_ids )
+        # for now, this thing can fetch an absolute ton of stuff. you type in '1 female', you are getting a lot of tags, often with no count
+        # not a very nice simple way to clear the chaff since in smaller cases those related siblings are useful, including those with no count, so no worries
         
-        seen_ideal_tag_ids = collections.defaultdict( set )
+        tag_ids_without_siblings = list( tag_ids )
         
         for batch_of_tag_ids in HydrusData.SplitListIntoChunks( tag_ids_without_siblings, 10240 ):
             

@@ -152,7 +152,7 @@ def ConvertSubtagToSearchable( subtag ):
     
     subtag = subtag.translate( IGNORED_TAG_SEARCH_CHARACTERS_UNICODE_TRANSLATE )
     
-    subtag = HydrusText.re_multiple_spaces.sub( ' ', subtag )
+    subtag = HydrusText.re_one_or_more_whitespace.sub( ' ', subtag )
     
     subtag = subtag.strip()
     
@@ -234,11 +234,12 @@ def IsComplexWildcard( search_text ):
     
 def SortPredicates( predicates ):
     
-    key = lambda p: p.GetCount().GetMinCount()
+    key = lambda p: ( - p.GetCount().GetMinCount(), p.ToString() )
     
-    predicates.sort( key = key, reverse = True )
+    predicates.sort( key = key )
     
     return predicates
+    
 
 NUMBER_TEST_OPERATOR_LESS_THAN = 0
 NUMBER_TEST_OPERATOR_GREATER_THAN = 1
@@ -353,7 +354,7 @@ HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIAL
 
 class FileSystemPredicates( object ):
     
-    def __init__( self, system_predicates: typing.Collection[ "Predicate" ], apply_implicit_limit = True ):
+    def __init__( self, system_predicates: typing.Collection[ "Predicate" ] ):
         
         self._has_system_everything = False
         
@@ -482,12 +483,16 @@ class FileSystemPredicates( object ):
                     
                 elif age_type == 'date':
                     
-                    ( year, month, day ) = age_value
+                    ( year, month, day, hour, minute ) = age_value
                     
-                    dt = ClientTime.GetDateTime( year, month, day )
+                    dt = ClientTime.GetDateTime( year, month, day, hour, minute )
                     
                     time_pivot = ClientTime.CalendarToTimestamp( dt )
-                    next_day_timestamp = ClientTime.CalendarToTimestamp( ClientTime.CalendarDelta( dt, day_delta = 1 ) )
+                    
+                    dt_day_of_start = ClientTime.GetDateTime( year, month, day, 0, 0 )
+                    
+                    day_of_start = ClientTime.CalendarToTimestamp( dt_day_of_start )
+                    day_of_end = ClientTime.CalendarToTimestamp( ClientTime.CalendarDelta( dt_day_of_start, day_delta = 1 ) )
                     
                     # the before/since semantic logic is:
                     # '<' 2022-05-05 means 'before that date'
@@ -499,12 +504,12 @@ class FileSystemPredicates( object ):
                         
                     elif operator == '>':
                         
-                        self._timestamp_ranges[ predicate_type ][ '>' ] = next_day_timestamp
+                        self._timestamp_ranges[ predicate_type ][ '>' ] = time_pivot
                         
                     elif operator == '=':
                         
-                        self._timestamp_ranges[ predicate_type ][ '>' ] = time_pivot
-                        self._timestamp_ranges[ predicate_type ][ '<' ] = next_day_timestamp
+                        self._timestamp_ranges[ predicate_type ][ '>' ] = day_of_start
+                        self._timestamp_ranges[ predicate_type ][ '<' ] = day_of_end
                         
                     elif operator == CC.UNICODE_ALMOST_EQUAL_TO:
                         
@@ -1564,7 +1569,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_PREDICATE
     SERIALISABLE_NAME = 'File Search Predicate'
-    SERIALISABLE_VERSION = 5
+    SERIALISABLE_VERSION = 6
     
     def __init__(
         self,
@@ -1576,7 +1581,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         
         if predicate_type == PREDICATE_TYPE_SYSTEM_MIME and value is not None:
             
-            value = tuple( ConvertSpecificFiletypesToSummary( value ) )
+            value = tuple( sorted( ConvertSpecificFiletypesToSummary( value ) ) )
             
         
         if predicate_type == PREDICATE_TYPE_OR_CONTAINER:
@@ -1619,14 +1624,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             self._parent_key = None
             
         
-        if predicate_type == PREDICATE_TYPE_TAG:
-            
-            self._matchable_search_texts = { self._value }
-            
-        else:
-            
-            self._matchable_search_texts = set()
-            
+        self._RecalculateMatchableSearchTexts()
         
         #
         
@@ -1772,11 +1770,16 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
             serialisable_or_predicates = serialisable_value
             
-            self._value = tuple( HydrusSerialisable.CreateFromSerialisableTuple( serialisable_or_predicates ) )
+            self._value = tuple( sorted( HydrusSerialisable.CreateFromSerialisableTuple( serialisable_or_predicates ), key = lambda p: HydrusTags.ConvertTagToSortable( p.ToString() ) ) )
             
         else:
             
             self._value = serialisable_value
+            
+            if self._predicate_type == PREDICATE_TYPE_SYSTEM_MIME and self._value is not None:
+                
+                self._value = tuple( sorted( ConvertSpecificFiletypesToSummary( self._value ) ) )
+                
             
         
         if isinstance( self._value, list ):
@@ -1785,6 +1788,23 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         
         self._RecalcPythonHash()
+        
+    
+    def _RecalculateMatchableSearchTexts( self ):
+        
+        if self._predicate_type == PREDICATE_TYPE_TAG:
+            
+            self._matchable_search_texts = { self._value }
+            
+            if self._siblings is not None:
+                
+                self._matchable_search_texts.update( self._siblings )
+                
+            
+        else:
+            
+            self._matchable_search_texts = set()
+            
         
     
     def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
@@ -1853,12 +1873,38 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                 
                 summary_mimes = ConvertSpecificFiletypesToSummary( specific_mimes )
                 
-                serialisable_value = tuple( summary_mimes )
+                serialisable_value = tuple( sorted( summary_mimes ) )
                 
             
             new_serialisable_info = ( predicate_type, serialisable_value, inclusive )
             
             return ( 5, new_serialisable_info )
+            
+        
+        if version == 5:
+            
+            ( predicate_type, serialisable_value, inclusive ) = old_serialisable_info
+            
+            if predicate_type in ( PREDICATE_TYPE_SYSTEM_AGE, PREDICATE_TYPE_SYSTEM_LAST_VIEWED_TIME, PREDICATE_TYPE_SYSTEM_MODIFIED_TIME ):
+                
+                ( operator, age_type, age_value ) = serialisable_value
+                
+                if age_type == 'date':
+                    
+                    ( year, month, day ) = age_value
+                    
+                    hour = 0
+                    minute = 0
+                    
+                    age_value = ( year, month, day, hour, minute )
+                    
+                    serialisable_value = ( operator, age_type, age_value )
+                    
+                
+            
+            new_serialisable_info = ( predicate_type, serialisable_value, inclusive )
+            
+            return ( 6, new_serialisable_info )
             
         
     
@@ -1894,6 +1940,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             tag_analogue = self._value
             
             ( namespace, subtag ) = HydrusTags.SplitTag( tag_analogue )
+            
+            if '*' in namespace:
+                
+                return '*'
+                
             
             return namespace
             
@@ -1999,25 +2050,26 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         
         if self._predicate_type == PREDICATE_TYPE_OR_CONTAINER:
             
-            texts_and_namespaces = []
+            or_connector = HG.client_controller.new_options.GetString( 'or_connector' )
+            or_connector_namespace = HG.client_controller.new_options.GetNoneableString( 'or_connector_custom_namespace_colour' )
             
-            if or_under_construction:
-                
-                texts_and_namespaces.append( ( 'OR: ', 'system' ) )
-                
+            texts_and_namespaces = []
             
             for or_predicate in self._value:
                 
-                texts_and_namespaces.append( ( or_predicate.ToString(), or_predicate.GetNamespace() ) )
+                texts_and_namespaces.append( ( or_predicate.ToString(), 'namespace', or_predicate.GetNamespace() ) )
                 
-                texts_and_namespaces.append( ( ' OR ', 'system' ) )
+                texts_and_namespaces.append( ( or_connector, 'or', or_connector_namespace ) )
                 
             
-            texts_and_namespaces = texts_and_namespaces[ : -1 ]
+            if not or_under_construction:
+                
+                texts_and_namespaces = texts_and_namespaces[ : -1 ]
+                
             
         else:
             
-            texts_and_namespaces = [ ( self.ToString( render_for_user = render_for_user ), self.GetNamespace() ) ]
+            texts_and_namespaces = [ ( self.ToString( render_for_user = render_for_user ), 'namespace', self.GetNamespace() ) ]
             
         
         return texts_and_namespaces
@@ -2096,6 +2148,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         return False
         
     
+    def IsORPredicate( self ):
+        
+        return self._predicate_type == PREDICATE_TYPE_OR_CONTAINER
+        
+    
     def IsUIEditable( self, ideal_predicate: "Predicate" ) -> bool:
         
         # bleh
@@ -2140,6 +2197,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         return True
         
     
+    def SetCount( self, count: PredicateCount ):
+        
+        self._count = count
+        
+    
     def SetCountTextSuffix( self, suffix: str ):
         
         self._count_text_suffix = suffix
@@ -2168,14 +2230,7 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
         
         self._siblings = siblings
         
-        if self._predicate_type == PREDICATE_TYPE_TAG:
-            
-            self._matchable_search_texts = { self._value }.union( self._siblings )
-            
-        else:
-            
-            self._matchable_search_texts = set()
-            
+        self._RecalculateMatchableSearchTexts()
         
     
     def ToString( self, with_count: bool = True, tag_display_type: int = ClientTags.TAG_DISPLAY_ACTUAL, render_for_user: bool = False, or_under_construction: bool = False ) -> str:
@@ -2443,19 +2498,11 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                         
                     elif age_type == 'date':
                         
-                        ( year, month, day ) = age_value
+                        ( year, month, day, hour, minute ) = age_value
                         
-                        dt = datetime.datetime( year, month, day )
+                        dt = datetime.datetime( year, month, day, hour, minute )
                         
-                        try:
-                            
-                            # make a timestamp (IN GMT SECS SINCE 1970) from the local meaning of 2018/02/01
-                            timestamp = int( time.mktime( dt.timetuple() ) )
-                            
-                        except:
-                            
-                            timestamp = HydrusData.GetNow()
-                            
+                        timestamp = ClientTime.CalendarToTimestamp( dt )
                         
                         if operator == '<':
                             
@@ -2474,8 +2521,10 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
                             pretty_operator = 'a month either side of '
                             
                         
+                        include_24h_time = operator != '=' and ( hour > 0 or minute > 0 )
+                        
                         # convert this GMT TIMESTAMP to a pretty local string
-                        base += ': ' + pretty_operator + HydrusData.ConvertTimestampToPrettyTime( timestamp, include_24h_time = False )
+                        base += ': ' + pretty_operator + HydrusData.ConvertTimestampToPrettyTime( timestamp, include_24h_time = include_24h_time )
                         
                     
                 
@@ -2856,7 +2905,16 @@ class Predicate( HydrusSerialisable.SerialisableBase ):
             
         elif self._predicate_type == PREDICATE_TYPE_WILDCARD:
             
-            wildcard = self._value + ' (wildcard search)'
+            if self._value.startswith( '*:' ):
+                
+                ( any_namespace, subtag ) = HydrusTags.SplitTag( self._value )
+                
+                wildcard = '{} (any namespace)'.format( subtag )
+                
+            else:
+                
+                wildcard = self._value + ' (wildcard search)'
+                
             
             if not self._inclusive:
                 
@@ -2924,11 +2982,18 @@ def FilterPredicatesBySearchText( service_key, search_text, predicates: typing.C
         
         if ':' in s:
             
-            beginning = r'\A'
-            
             ( namespace, subtag ) = s.split( ':', 1 )
             
-            s = r'{}:(.*\s)?{}'.format( namespace, subtag )
+            if namespace == '.*':
+                
+                beginning = r'(\A|:|\s)'
+                s = subtag
+                
+            else:
+                
+                beginning = r'\A'
+                s = r'{}:(.*\s)?{}'.format( namespace, subtag )
+                
             
         elif s.startswith( '.*' ):
             
@@ -3074,13 +3139,36 @@ class ParsedAutocompleteText( object ):
         return 'AC Tag Text: {}'.format( self.raw_input )
         
     
-    def _GetSearchText( self, always_autocompleting: bool, force_do_not_collapse: bool = False ):
+    def _GetSearchText( self, always_autocompleting: bool, force_do_not_collapse: bool = False, allow_auto_wildcard_conversion: bool = False ) -> str:
         
         text = CollapseWildcardCharacters( self.raw_content )
+        
+        if len( text ) == 0:
+            
+            return ''
+            
         
         if self._collapse_search_characters and not force_do_not_collapse:
             
             text = ConvertTagToSearchable( text )
+            
+        
+        if allow_auto_wildcard_conversion and self._tag_autocomplete_options.UnnamespacedSearchGivesAnyNamespaceWildcards():
+            
+            if ':' not in text:
+                
+                ( namespace, subtag ) = HydrusTags.SplitTag( text )
+                
+                if namespace == '':
+                    
+                    if subtag == '':
+                        
+                        return ''
+                        
+                    
+                    text = '*:{}'.format( subtag )
+                    
+                
             
         
         if always_autocompleting:
@@ -3100,12 +3188,12 @@ class ParsedAutocompleteText( object ):
     
     def GetAddTagPredicate( self ):
         
-        return Predicate( PREDICATE_TYPE_TAG, self.raw_content )
+        return Predicate( PREDICATE_TYPE_TAG, self.raw_content, self.inclusive )
         
     
-    def GetImmediateFileSearchPredicate( self ):
+    def GetImmediateFileSearchPredicate( self, allow_auto_wildcard_conversion ):
         
-        non_tag_predicates = self.GetNonTagFileSearchPredicates()
+        non_tag_predicates = self.GetNonTagFileSearchPredicates( allow_auto_wildcard_conversion )
         
         if len( non_tag_predicates ) > 0:
             
@@ -3117,7 +3205,7 @@ class ParsedAutocompleteText( object ):
         return tag_search_predicate
         
     
-    def GetNonTagFileSearchPredicates( self ):
+    def GetNonTagFileSearchPredicates( self, allow_auto_wildcard_conversion ):
         
         predicates = []
         
@@ -3133,9 +3221,26 @@ class ParsedAutocompleteText( object ):
                 
                 predicates.append( predicate )
                 
-            elif self.IsExplicitWildcard():
+            elif self.IsExplicitWildcard( allow_auto_wildcard_conversion ):
                 
-                search_texts = [ self._GetSearchText( True, force_do_not_collapse = True ), self._GetSearchText( False, force_do_not_collapse = True ) ]
+                search_texts = []
+                
+                allow_unnamespaced_search_gives_any_namespace_wildcards_values = [ True ]
+                always_autocompleting_values = [ True, False ]
+                
+                if '*' in self.raw_content:
+                    
+                    # don't spam users who type something with this setting turned on
+                    allow_unnamespaced_search_gives_any_namespace_wildcards_values.append( False )
+                    
+                
+                for allow_unnamespaced_search_gives_any_namespace_wildcards in allow_unnamespaced_search_gives_any_namespace_wildcards_values:
+                    
+                    for always_autocompleting in always_autocompleting_values:
+                        
+                        search_texts.append( self._GetSearchText( always_autocompleting, allow_auto_wildcard_conversion = allow_unnamespaced_search_gives_any_namespace_wildcards, force_do_not_collapse = True ) )
+                        
+                    
                 
                 for s in list( search_texts ):
                     
@@ -3154,9 +3259,9 @@ class ParsedAutocompleteText( object ):
         return predicates
         
     
-    def GetSearchText( self, always_autocompleting: bool ):
+    def GetSearchText( self, always_autocompleting: bool, allow_auto_wildcard_conversion = True ):
         
-        return self._GetSearchText( always_autocompleting )
+        return self._GetSearchText( always_autocompleting, allow_auto_wildcard_conversion = allow_auto_wildcard_conversion )
         
     
     def GetTagAutocompleteOptions( self ):
@@ -3166,7 +3271,7 @@ class ParsedAutocompleteText( object ):
     
     def IsAcceptableForTagSearches( self ):
         
-        search_text = self._GetSearchText( False )
+        search_text = self._GetSearchText( False, allow_auto_wildcard_conversion = True )
         
         if search_text == '':
             
@@ -3201,7 +3306,7 @@ class ParsedAutocompleteText( object ):
     
     def IsAcceptableForFileSearches( self ):
         
-        search_text = self._GetSearchText( False )
+        search_text = self._GetSearchText( False, allow_auto_wildcard_conversion = True )
         
         if len( search_text ) == 0:
             
@@ -3221,10 +3326,10 @@ class ParsedAutocompleteText( object ):
         return self.raw_input == ''
         
     
-    def IsExplicitWildcard( self ):
+    def IsExplicitWildcard( self, allow_auto_wildcard_conversion ):
         
         # user has intentionally put a '*' in
-        return '*' in self.raw_content
+        return '*' in self.raw_content or self._GetSearchText( False, allow_auto_wildcard_conversion = allow_auto_wildcard_conversion ).startswith( '*:' )
         
     
     def IsNamespaceSearch( self ):
@@ -3234,9 +3339,9 @@ class ParsedAutocompleteText( object ):
         return SearchTextIsNamespaceFetchAll( search_text ) or SearchTextIsNamespaceBareFetchAll( search_text )
         
     
-    def IsTagSearch( self ):
+    def IsTagSearch( self, allow_auto_wildcard_conversion ):
         
-        if self.IsEmpty() or self.IsExplicitWildcard() or self.IsNamespaceSearch():
+        if self.IsEmpty() or self.IsExplicitWildcard( allow_auto_wildcard_conversion ) or self.IsNamespaceSearch():
             
             return False
             
@@ -3263,7 +3368,7 @@ class PredicateResultsCache( object ):
         self._predicates = list( predicates )
         
     
-    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool ):
+    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool, allow_auto_wildcard_conversion = True ):
         
         return False
         
@@ -3307,9 +3412,9 @@ class PredicateResultsCacheTag( PredicateResultsCache ):
         self._exact_match = exact_match
         
     
-    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool ):
+    def CanServeTagResults( self, parsed_autocomplete_text: ParsedAutocompleteText, exact_match: bool, allow_auto_wildcard_conversion = True ):
         
-        strict_search_text = parsed_autocomplete_text.GetSearchText( False )
+        strict_search_text = parsed_autocomplete_text.GetSearchText( False, allow_auto_wildcard_conversion = allow_auto_wildcard_conversion )
         
         if self._exact_match:
             

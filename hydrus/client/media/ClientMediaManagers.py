@@ -782,30 +782,25 @@ class LocationsManager( object ):
         
         if data_type == HC.CONTENT_TYPE_FILES:
             
-            if action == HC.CONTENT_UPDATE_ADVANCED:
+            if action == HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD:
                 
-                ( sub_action, hashes ) = row
-                
-                if sub_action == 'delete_deleted':
+                if service_key in self._deleted:
                     
-                    if CC.TRASH_SERVICE_KEY not in self._current:
+                    if service_key == CC.COMBINED_LOCAL_FILE_SERVICE_KEY:
                         
-                        if service_key == CC.COMBINED_LOCAL_FILE_SERVICE_KEY:
-                            
-                            service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, HC.COMBINED_LOCAL_FILE ) )
-                            
-                        else:
-                            
-                            service_keys = ( service_key, )
-                            
+                        service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, HC.COMBINED_LOCAL_FILE ) )
                         
-                        for service_key in service_keys:
+                    else:
+                        
+                        service_keys = ( service_key, )
+                        
+                    
+                    for service_key in service_keys:
+                        
+                        if service_key in self._deleted_to_timestamps:
                             
-                            if service_key in self._deleted_to_timestamps:
-                                
-                                del self._deleted_to_timestamps[ service_key ]
-                                self._deleted.discard( service_key )
-                                
+                            del self._deleted_to_timestamps[ service_key ]
+                            self._deleted.discard( service_key )
                             
                         
                     
@@ -1068,13 +1063,23 @@ class RatingsManager( object ):
             
         else:
             
-            return None
+            service_type = HG.client_controller.services_manager.GetServiceType( service_key )
+            
+            if service_type == HC.LOCAL_RATING_INCDEC:
+                
+                return 0
+                
+            else:
+                
+                return None
+                
             
         
     
-    def GetRatingSlice( self, service_keys ): return frozenset( { self._service_keys_to_ratings[ service_key ] for service_key in service_keys if service_key in self._service_keys_to_ratings } )
-    
-    def GetServiceKeysToRatings( self ): return self._service_keys_to_ratings
+    def GetStarRatingSlice( self, service_keys ):
+        
+        return frozenset( { self._service_keys_to_ratings[ service_key ] for service_key in service_keys if service_key in self._service_keys_to_ratings } )
+        
     
     def ProcessContentUpdate( self, service_key, content_update ):
         
@@ -1084,16 +1089,26 @@ class RatingsManager( object ):
             
             ( rating, hashes ) = row
             
-            if rating is None and service_key in self._service_keys_to_ratings: del self._service_keys_to_ratings[ service_key ]
-            else: self._service_keys_to_ratings[ service_key ] = rating
+            if rating is None and service_key in self._service_keys_to_ratings:
+                
+                del self._service_keys_to_ratings[ service_key ]
+                
+            else:
+                
+                self._service_keys_to_ratings[ service_key ] = rating
+                
             
         
     
     def ResetService( self, service_key ):
         
-        if service_key in self._service_keys_to_ratings: del self._service_keys_to_ratings[ service_key ]
+        if service_key in self._service_keys_to_ratings:
+            
+            del self._service_keys_to_ratings[ service_key ]
+            
         
     
+
 class TagsManager( object ):
     
     def __init__(

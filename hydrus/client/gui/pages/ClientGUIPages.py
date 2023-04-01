@@ -438,7 +438,7 @@ class Page( QW.QWidget ):
         
         self._initial_hashes = initial_hashes
         
-        self._management_controller.SetKey( 'page', self._page_key )
+        self._management_controller.SetVariable( 'page_key', self._page_key )
         
         self._initialised = len( initial_hashes ) == 0
         self._pre_initialisation_media_results = []
@@ -456,7 +456,7 @@ class Page( QW.QWidget ):
         self._preview_panel.setFrameStyle( QW.QFrame.Panel | QW.QFrame.Sunken )
         self._preview_panel.setLineWidth( 2 )
         
-        self._preview_canvas = ClientGUICanvas.CanvasPanel( self._preview_panel, self._page_key, self._management_controller.GetVariable( 'location_context' ) )
+        self._preview_canvas = ClientGUICanvas.CanvasPanel( self._preview_panel, self._page_key, self._management_controller.GetLocationContext() )
         
         self._management_panel.locationChanged.connect( self._preview_canvas.SetLocationContext )
         
@@ -664,6 +664,7 @@ class Page( QW.QWidget ):
         
         d[ 'name' ] = self._management_controller.GetPageName()
         d[ 'page_key' ] = self._page_key.hex()
+        d[ 'page_state' ] = self.GetPageState()
         d[ 'page_type' ] = self._management_controller.GetType()
         
         management_info = self._management_controller.GetAPIInfoDict( simple )
@@ -770,6 +771,18 @@ class Page( QW.QWidget ):
         return { self._page_key }
         
     
+    def GetPageState( self ) -> int:
+        
+        if self._initialised:
+            
+            return self._management_panel.GetPageState()
+            
+        else:
+            
+            return CC.PAGE_STATE_INITIALISING
+            
+        
+    
     def GetParentNotebook( self ):
         
         return self._parent_notebook
@@ -819,8 +832,9 @@ class Page( QW.QWidget ):
         
         root[ 'name' ] = self.GetName()
         root[ 'page_key' ] = self._page_key.hex()
+        root[ 'page_state' ] = self.GetPageState()
         root[ 'page_type' ] = self._management_controller.GetType()
-        root[ 'focused' ] = is_selected
+        root[ 'selected' ] = is_selected
         
         return root
         
@@ -1064,7 +1078,7 @@ class Page( QW.QWidget ):
             
             self._SetPrettyStatus( '' )
             
-            location_context = self._management_controller.GetVariable( 'location_context' )
+            location_context = self._management_controller.GetLocationContext()
             
             media_panel = ClientGUIResults.MediaPanelThumbnails( self, self._page_key, location_context, media_results )
             
@@ -2103,7 +2117,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         job_key = ClientThreading.JobKey()
         
-        job_key.SetVariable( 'popup_text_1', 'loading session "{}"\u2026'.format( name ) )
+        job_key.SetStatusText( 'loading session "{}"\u2026'.format( name ) )
         
         HG.client_controller.pub( 'message', job_key )
         
@@ -2286,7 +2300,12 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
     
     def GetAPIInfoDict( self, simple ):
         
-        return {}
+        return {
+            'name' : self.GetName(),
+            'page_key' : self._page_key.hex(),
+            'page_state' : self.GetPageState(),
+            'page_type' : ClientGUIManagement.MANAGEMENT_TYPE_PAGE_OF_PAGES
+        }
         
     
     def GetCurrentGUISession( self, name: str, only_changed_page_data: bool, about_to_save: bool ):
@@ -2487,7 +2506,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
             
         
     
-    def GetPageFromPageKey( self, page_key ):
+    def GetPageFromPageKey( self, page_key ) -> typing.Optional[ Page ]:
         
         if self._page_key == page_key:
             
@@ -2538,6 +2557,11 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
     def GetPages( self ):
         
         return self._GetPages()
+        
+    
+    def GetPageState( self ) -> int:
+        
+        return CC.PAGE_STATE_NORMAL
         
     
     def GetPrettyStatusForStatusBar( self ):
@@ -2596,6 +2620,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         root[ 'name' ] = self.GetName()
         root[ 'page_key' ] = self._page_key.hex()
+        root[ 'page_state' ] = self.GetPageState()
         root[ 'page_type' ] = ClientGUIManagement.MANAGEMENT_TYPE_PAGE_OF_PAGES
         root[ 'selected' ] = is_selected
         root[ 'pages' ] = my_pages_list
@@ -2909,7 +2934,7 @@ class PagesNotebook( QP.TabWidgetWithDnD ):
         
         source_management_controller = source_page.GetManagementController()
         
-        location_context = source_management_controller.GetVariable( 'location_context' )
+        location_context = source_management_controller.GetLocationContext()
         
         screen_position = QG.QCursor.pos()
         

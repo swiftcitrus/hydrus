@@ -15,6 +15,7 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTags
 from hydrus.core.networking import HydrusNATPunch
 from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworkVariableHandling
@@ -104,20 +105,29 @@ def GenerateDefaultServiceDictionary( service_type ):
     
     if service_type in HC.RATINGS_SERVICES:
         
-        dictionary[ 'shape' ] = ClientRatings.CIRCLE
-        dictionary[ 'colours' ] = []
-        
         from hydrus.client.gui import ClientGUIRatings
         
-        if service_type == HC.LOCAL_RATING_LIKE:
+        dictionary[ 'colours' ] = []
+        
+        if service_type in HC.STAR_RATINGS_SERVICES:
             
-            dictionary[ 'colours' ] = list( ClientGUIRatings.default_like_colours.items() )
+            dictionary[ 'shape' ] = ClientRatings.CIRCLE
             
-        elif service_type == HC.LOCAL_RATING_NUMERICAL:
+            if service_type == HC.LOCAL_RATING_LIKE:
+                
+                dictionary[ 'colours' ] = list( ClientGUIRatings.default_like_colours.items() )
+                
+            elif service_type == HC.LOCAL_RATING_NUMERICAL:
+                
+                dictionary[ 'colours' ] = list( ClientGUIRatings.default_numerical_colours.items() )
+                dictionary[ 'num_stars' ] = 5
+                dictionary[ 'allow_zero' ]= True
+                
             
-            dictionary[ 'colours' ] = list( ClientGUIRatings.default_numerical_colours.items() )
-            dictionary[ 'num_stars' ] = 5
-            dictionary[ 'allow_zero' ]= True
+        
+        if service_type == HC.LOCAL_RATING_INCDEC:
+            
+            dictionary[ 'colours' ] = list( ClientGUIRatings.default_incdec_colours.items() )
             
         
     
@@ -141,6 +151,10 @@ def GenerateService( service_key, service_type, name, dictionary = None ):
     elif service_type == HC.LOCAL_RATING_NUMERICAL:
         
         cl = ServiceLocalRatingNumerical
+        
+    elif service_type == HC.LOCAL_RATING_INCDEC:
+        
+        cl = ServiceLocalRatingIncDec
         
     elif service_type in HC.REPOSITORIES:
         
@@ -192,7 +206,10 @@ class Service( object ):
         self._LoadFromDictionary( dictionary )
         
     
-    def __hash__( self ): return self._service_key.__hash__()
+    def __hash__( self ):
+        
+        return self._service_key.__hash__()
+        
     
     def _CheckFunctional( self ):
         
@@ -551,17 +568,18 @@ class ServiceClientAPI( ServiceLocalServerService ):
     
     pass
     
+
 class ServiceLocalTag( Service ):
     
     pass
     
+
 class ServiceLocalRating( Service ):
     
     def _GetSerialisableDictionary( self ):
         
         dictionary = Service._GetSerialisableDictionary( self )
         
-        dictionary[ 'shape' ] = self._shape
         dictionary[ 'colours' ] = list(self._colours.items())
         
         return dictionary
@@ -571,13 +589,7 @@ class ServiceLocalRating( Service ):
         
         Service._LoadFromDictionary( self, dictionary )
         
-        self._shape = dictionary[ 'shape' ]
         self._colours = dict( dictionary[ 'colours' ] )
-        
-    
-    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
-        
-        raise NotImplementedError()
         
     
     def GetColour( self, rating_state ):
@@ -588,6 +600,72 @@ class ServiceLocalRating( Service ):
             
         
     
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
+        
+        raise NotImplementedError()
+        
+    
+
+class ServiceLocalRatingIncDec( ServiceLocalRating ):
+    
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ int ] ):
+        
+        if rating is None:
+            
+            return 'not set'
+            
+        elif isinstance( rating, int ):
+            
+            return HydrusData.ToHumanInt( rating )
+            
+        
+        return 'unknown'
+        
+    
+    def ConvertRatingStateAndRatingToString( self, rating_state: int, rating: float ):
+        
+        if rating_state == ClientRatings.SET:
+            
+            return HydrusData.ToHumanInt( rating )
+            
+        elif rating_state == ClientRatings.MIXED:
+            
+            return 'mixed'
+            
+        elif rating_state == ClientRatings.NULL:
+            
+            return 'not set'
+            
+        else:
+            
+            return 'unknown'
+            
+        
+    
+
+class ServiceLocalRatingStars( ServiceLocalRating ):
+    
+    def _GetSerialisableDictionary( self ):
+        
+        dictionary = ServiceLocalRating._GetSerialisableDictionary( self )
+        
+        dictionary[ 'shape' ] = self._shape
+        
+        return dictionary
+        
+    
+    def _LoadFromDictionary( self, dictionary ):
+        
+        ServiceLocalRating._LoadFromDictionary( self, dictionary )
+        
+        self._shape = dictionary[ 'shape' ]
+        
+    
+    def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
+        
+        raise NotImplementedError()
+        
+    
     def GetShape( self ):
         
         with self._lock:
@@ -596,7 +674,7 @@ class ServiceLocalRating( Service ):
             
         
     
-class ServiceLocalRatingLike( ServiceLocalRating ):
+class ServiceLocalRatingLike( ServiceLocalRatingStars ):
     
     def ConvertNoneableRatingToString( self, rating: typing.Optional[ float ] ):
         
@@ -643,11 +721,11 @@ class ServiceLocalRatingLike( ServiceLocalRating ):
             
         
     
-class ServiceLocalRatingNumerical( ServiceLocalRating ):
+class ServiceLocalRatingNumerical( ServiceLocalRatingStars ):
     
     def _GetSerialisableDictionary( self ):
         
-        dictionary = ServiceLocalRating._GetSerialisableDictionary( self )
+        dictionary = ServiceLocalRatingStars._GetSerialisableDictionary( self )
         
         dictionary[ 'num_stars' ] = self._num_stars
         dictionary[ 'allow_zero' ] = self._allow_zero
@@ -657,7 +735,7 @@ class ServiceLocalRatingNumerical( ServiceLocalRating ):
     
     def _LoadFromDictionary( self, dictionary ):
         
-        ServiceLocalRating._LoadFromDictionary( self, dictionary )
+        ServiceLocalRatingStars._LoadFromDictionary( self, dictionary )
         
         self._num_stars = dictionary[ 'num_stars' ]
         self._allow_zero = dictionary[ 'allow_zero' ]
@@ -1017,7 +1095,7 @@ class ServiceRestricted( ServiceRemote ):
         dictionary[ 'account' ] = HydrusNetwork.Account.GenerateSerialisableTupleFromAccount( self._account )
         dictionary[ 'next_account_sync' ] = self._next_account_sync
         dictionary[ 'network_sync_paused' ] = self._network_sync_paused
-        dictionary[ 'service_options' ] = self._service_options
+        dictionary[ 'service_options' ] = HydrusSerialisable.SerialisableDictionary( self._service_options )
         
         return dictionary
         
@@ -1048,12 +1126,17 @@ class ServiceRestricted( ServiceRemote ):
             dictionary[ 'service_options' ] = HydrusSerialisable.SerialisableDictionary()
             
         
-        self._service_options = dictionary[ 'service_options' ]
+        self._service_options = HydrusSerialisable.SerialisableDictionary( dictionary[ 'service_options' ] )
         
     
-    def _SetNewServiceOptions( self, service_options ):
+    def _SetNewTagFilter( self, tag_filter: HydrusTags.TagFilter ):
         
-        self._service_options = service_options
+        self._service_options[ 'tag_filter' ] = tag_filter
+        
+    
+    def _UpdateServiceOptions( self, service_options ):
+        
+        self._service_options.update( service_options )
         
     
     def CanSyncAccount( self, including_external_communication = True ):
@@ -1308,15 +1391,11 @@ class ServiceRestricted( ServiceRemote ):
                     
                     self._DealWithFundamentalNetworkError()
                     
-                elif isinstance( e, HydrusExceptions.NotFoundException ):
-                    
-                    self._DelayFutureRequests( 'got an unexpected 404', SHORT_DELAY_PERIOD )
-                    
                 elif isinstance( e, HydrusExceptions.BandwidthException ):
                     
                     self._DelayFutureRequests( 'service has exceeded bandwidth', ACCOUNT_SYNC_PERIOD )
                     
-                else:
+                elif isinstance( e, HydrusExceptions.ServerException ):
                     
                     self._DelayFutureRequests( str( e ) )
                     
@@ -1413,12 +1492,52 @@ class ServiceRestricted( ServiceRemote ):
                         
                         service_options = options_response[ 'service_options' ]
                         
-                        self._SetNewServiceOptions( service_options )
+                        self._UpdateServiceOptions( service_options )
                         
                     
                 except HydrusExceptions.SerialisationException:
                     
                     pass
+                    
+                
+                if self._service_type == HC.TAG_REPOSITORY:
+                    
+                    try:
+                        
+                        tag_filter_response = self.Request( HC.GET, 'tag_filter' )
+                        
+                        with self._lock:
+                            
+                            tag_filter = tag_filter_response[ 'tag_filter' ]
+                            
+                            if 'tag_filter' in self._service_options and HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+                                
+                                old_tag_filter = self._service_options[ 'tag_filter' ]
+                                
+                                if old_tag_filter != tag_filter:
+                                    
+                                    try:
+                                        
+                                        summary = tag_filter.GetChangesSummaryText( old_tag_filter )
+                                        
+                                        message = 'The tag filter for "{}" just changed! Changes are:{}{}'.format( self._name, os.linesep * 2, summary )
+                                        
+                                        HydrusData.ShowText( message )
+                                        
+                                    except:
+                                        
+                                        pass
+                                        
+                                    
+                                
+                            
+                            self._SetNewTagFilter( tag_filter )
+                            
+                        
+                    except Exception: # any exception, screw it
+                        
+                        pass
+                        
                     
                 
             except ( HydrusExceptions.CancelledException, HydrusExceptions.NetworkException ) as e:
@@ -1603,24 +1722,12 @@ class ServiceRepository( ServiceRestricted ):
         popup_message = '{} {}: processing at {} rows/s'.format( row_name, HydrusData.ConvertValueRangeToPrettyString( rows_done, total_rows ), rows_s )
         
         HG.client_controller.frame_splash_status.SetText( popup_message, print_to_log = False )
-        job_key.SetVariable( 'popup_text_2', popup_message )
+        job_key.SetStatusText( popup_message, 2 )
         
         if HG.profile_mode:
             
             HG.client_controller.PrintProfile( popup_message )
             
-        
-    
-    def _SetNewServiceOptions( self, service_options ):
-        
-        if 'update_period' in service_options and 'update_period' in self._service_options and service_options[ 'update_period' ] != self._service_options[ 'update_period' ]:
-            
-            update_period = service_options[ 'update_period' ]
-            
-            self._metadata.CalculateNewNextUpdateDue( update_period )
-            
-        
-        ServiceRestricted._SetNewServiceOptions( self, service_options )
         
     
     def _SyncDownloadMetadata( self ):
@@ -1732,7 +1839,7 @@ class ServiceRepository( ServiceRestricted ):
                     status = 'update ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( update_hashes ) )
                     
                     HG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
-                    job_key.SetVariable( 'popup_text_1', status )
+                    job_key.SetStatusText( status )
                     job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( update_hashes ) ) )
                     
                     with self._lock:
@@ -1858,7 +1965,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                     
                 
-                job_key.SetVariable( 'popup_text_1', 'finished' )
+                job_key.SetStatusText( 'finished' )
                 job_key.DeleteVariable( 'popup_gauge_1' )
                 
             finally:
@@ -1936,7 +2043,7 @@ class ServiceRepository( ServiceRestricted ):
                     
                     status = 'processing {}'.format( progress_string )
                     
-                    job_key.SetVariable( 'popup_text_1', status )
+                    job_key.SetStatusText( status )
                     job_key.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
                     
                     try:
@@ -1947,7 +2054,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -2063,7 +2170,7 @@ class ServiceRepository( ServiceRestricted ):
                     
                     status = 'processing {}'.format( progress_string )
                     
-                    job_key.SetVariable( 'popup_text_1', status )
+                    job_key.SetStatusText( status )
                     job_key.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
                     
                     try:
@@ -2074,7 +2181,7 @@ class ServiceRepository( ServiceRestricted ):
                         
                         HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -2231,13 +2338,25 @@ class ServiceRepository( ServiceRestricted ):
                 HG.client_controller.pub( 'notify_new_tag_display_application' )
                 
             
-            job_key.DeleteVariable( 'popup_text_1' )
-            job_key.DeleteVariable( 'popup_text_2' )
+            job_key.DeleteStatusText()
+            job_key.DeleteStatusText( 2 )
             job_key.DeleteVariable( 'popup_gauge_1' )
             
             job_key.Finish()
             job_key.Delete( 3 )
             
+        
+    
+    def _UpdateServiceOptions( self, service_options ):
+        
+        if 'update_period' in service_options and 'update_period' in self._service_options and service_options[ 'update_period' ] != self._service_options[ 'update_period' ]:
+            
+            update_period = service_options[ 'update_period' ]
+            
+            self._metadata.CalculateNewNextUpdateDue( update_period )
+            
+        
+        ServiceRestricted._UpdateServiceOptions( self, service_options )
         
     
     def CanDoIdleShutdownWork( self ):
@@ -2338,6 +2457,33 @@ class ServiceRepository( ServiceRestricted ):
             else:
                 
                 raise HydrusExceptions.DataMissing( 'This service does not seem to have an anonymisation period! Try refreshing your account!' )
+                
+            
+        
+    
+    def GetTagFilter( self ) -> HydrusTags.TagFilter:
+        
+        with self._lock:
+            
+            if self._service_type != HC.TAG_REPOSITORY:
+                
+                raise Exception( 'This is not a tag repository! It does not have a tag filter!' )
+                
+            
+            if 'tag_filter' in self._service_options:
+                
+                tag_filter = self._service_options[ 'tag_filter' ]
+                
+                if not isinstance( tag_filter, HydrusTags.TagFilter ):
+                    
+                    raise HydrusExceptions.DataMissing( 'This service has a bad tag filter! Try refreshing your account!' )
+                    
+                
+                return tag_filter
+                
+            else:
+                
+                raise HydrusExceptions.DataMissing( 'This service does not seem to have a tag filter! Try refreshing your account!' )
                 
             
         
@@ -2537,6 +2683,19 @@ class ServiceRepository( ServiceRestricted ):
         HG.client_controller.Write( 'reset_repository', self )
         
     
+    def SetTagFilter( self, tag_filter: HydrusTags.TagFilter ):
+        
+        with self._lock:
+            
+            if self._service_type != HC.TAG_REPOSITORY:
+                
+                raise Exception( 'This is not a tag repository! It does not have a tag filter!' )
+                
+            
+            self._service_options[ 'tag_filter' ] = tag_filter
+            
+        
+    
     def SyncRemote( self, stop_time = None ):
         
         with self._sync_remote_lock:
@@ -2624,7 +2783,7 @@ class ServiceRepository( ServiceRestricted ):
                     status = 'thumbnail ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, num_to_do )
                     
                     HG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
-                    job_key.SetVariable( 'popup_text_1', status )
+                    job_key.SetStatusText( status )
                     job_key.SetVariable( 'popup_gauge_1', ( i + 1, num_to_do ) )
                     
                     with self._lock:
@@ -2676,7 +2835,7 @@ class ServiceRepository( ServiceRestricted ):
                     client_files_manager.AddThumbnailFromBytes( thumbnail_hash, thumbnail_bytes )
                     
                 
-                job_key.SetVariable( 'popup_text_1', 'finished' )
+                job_key.SetStatusText( 'finished' )
                 job_key.DeleteVariable( 'popup_gauge_1' )
                 
             finally:
@@ -2932,7 +3091,7 @@ class ServiceIPFS( ServiceRemote ):
             
             job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
             
-            job_key.SetVariable( 'popup_text_1', 'Looking up multihash information' )
+            job_key.SetStatusText( 'Looking up multihash information' )
             
             if not silent:
                 
@@ -2947,13 +3106,13 @@ class ServiceIPFS( ServiceRemote ):
                     
                 except HydrusExceptions.NotFoundException:
                     
-                    job_key.SetVariable( 'popup_text_1', 'Failed to find multihash information for "{}"!'.format( multihash ) )
+                    job_key.SetStatusText( 'Failed to find multihash information for "{}"!'.format( multihash ) )
                     
                     return
                     
                 except HydrusExceptions.ServerException as e:
                     
-                    job_key.SetVariable( 'popup_text_1', 'IPFS Error: "{}"!'.format( e ) )
+                    job_key.SetStatusText( 'IPFS Error: "{}"!'.format( e ) )
                     
                     return
                     
@@ -2966,7 +3125,7 @@ class ServiceIPFS( ServiceRemote ):
                     
                 else:
                     
-                    job_key.SetVariable( 'popup_text_1', 'Waiting for user selection' )
+                    job_key.SetStatusText( 'Waiting for user selection' )
                     
                     QP.CallAfter( on_qt_select_tree, job_key, url_tree )
                     
@@ -3049,12 +3208,12 @@ class ServiceIPFS( ServiceRemote ):
                 
                 if should_quit:
                     
-                    job_key.SetVariable( 'popup_text_1', 'cancelled!' )
+                    job_key.SetStatusText( 'cancelled!' )
                     
                     return
                     
                 
-                job_key.SetVariable( 'popup_text_1', 'ensuring files are pinned: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( hashes ) ) )
+                job_key.SetStatusText( 'ensuring files are pinned: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( hashes ) ) )
                 job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( hashes ) ) )
                 
                 media_result = HG.client_controller.Read( 'media_result', hash )
@@ -3103,12 +3262,12 @@ class ServiceIPFS( ServiceRemote ):
                 
                 if should_quit:
                     
-                    job_key.SetVariable( 'popup_text_1', 'cancelled!' )
+                    job_key.SetStatusText( 'cancelled!' )
                     
                     return
                     
                 
-                job_key.SetVariable( 'popup_text_1', 'creating directory: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( file_info ) ) )
+                job_key.SetStatusText( 'creating directory: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( file_info ) ) )
                 job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( file_info ) ) )
                 
                 object_multihash = response_json[ 'Hash' ]
@@ -3144,7 +3303,7 @@ class ServiceIPFS( ServiceRemote ):
             
             HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
             
-            job_key.SetVariable( 'popup_text_1', 'done!' )
+            job_key.SetStatusText( 'done!' )
             
             with self._lock:
                 
