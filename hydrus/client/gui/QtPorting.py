@@ -1,6 +1,7 @@
 #This file is licensed under the Do What the Fuck You Want To Public License aka WTFPL
 
 import os
+import typing
 
 import qtpy
 
@@ -15,8 +16,11 @@ from collections import defaultdict
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusProfiling
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import QtInit
 
 isValid = QtInit.isValid
@@ -169,7 +173,7 @@ class DirPickerCtrl( QW.QWidget ):
         
         kwargs = {}
         
-        if HG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
+        if CG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
             
             # careful here, QW.QFileDialog.Options doesn't exist on PyQt6
             kwargs[ 'options' ] = QW.QFileDialog.Option.DontUseNativeDialog
@@ -256,7 +260,7 @@ class FilePickerCtrl( QW.QWidget ):
         
         kwargs = {}
         
-        if HG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
+        if CG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
             
             # careful here, QW.QFileDialog.Options doesn't exist on PyQt6
             kwargs[ 'options' ] = QW.QFileDialog.Option.DontUseNativeDialog
@@ -331,6 +335,7 @@ class TabBar( QW.QTabBar ):
         
         self._last_clicked_tab_index = -1
         self._last_clicked_global_pos = None
+        self._last_clicked_timestamp_ms = 0
         
     
     def AddSupplementaryTabBarDropTarget( self, drop_target ):
@@ -343,6 +348,8 @@ class TabBar( QW.QTabBar ):
         self._last_clicked_tab_index = -1
         
         self._last_clicked_global_pos = None
+        
+        self._last_clicked_timestamp_ms = 0
         
     
     def event( self, event ):
@@ -364,6 +371,8 @@ class TabBar( QW.QTabBar ):
             self._last_clicked_tab_index = index
             
             self._last_clicked_global_pos = event.globalPosition().toPoint()
+            
+            self._last_clicked_timestamp_ms = HydrusTime.GetNowMS()
             
         
         QW.QTabBar.mousePressEvent( self, event )
@@ -444,11 +453,11 @@ class TabBar( QW.QTabBar ):
                 
                 if shift_down:
                     
-                    do_navigate = HG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_with_shift' )
+                    do_navigate = CG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_with_shift' )
                     
                 else:
                     
-                    do_navigate = HG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_normally' )
+                    do_navigate = CG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_normally' )
                     
                 
                 if do_navigate:
@@ -465,7 +474,7 @@ class TabBar( QW.QTabBar ):
     
     def lastClickedTabInfo( self ):
         
-        return ( self._last_clicked_tab_index, self._last_clicked_global_pos )
+        return ( self._last_clicked_tab_index, self._last_clicked_global_pos, self._last_clicked_timestamp_ms )
         
     
     def dropEvent( self, event ):
@@ -484,7 +493,7 @@ class TabBar( QW.QTabBar ):
         
         try:
             
-            if HG.client_controller.new_options.GetBoolean( 'wheel_scrolls_tab_bar' ):
+            if CG.client_controller.new_options.GetBoolean( 'wheel_scrolls_tab_bar' ):
                 
                 children = self.children()
                 
@@ -597,9 +606,13 @@ class TabWidgetWithDnD( QW.QTabWidget ):
     
     def mouseMoveEvent( self, e ):
         
-        if self.currentWidget() and self.currentWidget().rect().contains( self.currentWidget().mapFromGlobal( self.mapToGlobal( e.position().toPoint() ) ) ):
+        mouse_is_over_actual_page = self.currentWidget() and self.currentWidget().rect().contains( self.currentWidget().mapFromGlobal( self.mapToGlobal( e.position().toPoint() ) ) )
+        
+        if mouse_is_over_actual_page or CG.client_controller.new_options.GetBoolean( 'disable_page_tab_dnd' ):
             
             QW.QTabWidget.mouseMoveEvent( self, e )
+            
+            return
             
         
         if e.buttons() != QC.Qt.LeftButton:
@@ -621,16 +634,19 @@ class TabWidgetWithDnD( QW.QTabWidget ):
             return
             
         
-        ( clicked_tab_index, clicked_global_pos ) = self._tab_bar.lastClickedTabInfo()
+        ( clicked_tab_index, clicked_global_pos, clicked_timestamp_ms ) = self._tab_bar.lastClickedTabInfo()
         
         if clicked_tab_index == -1:
             
             return
             
         
-        if e.globalPosition().toPoint() == clicked_global_pos:
+        # I used to do manhattanlength stuff, but tbh this works better
+        # delta_pos = e.globalPosition().toPoint() - clicked_global_pos
+        
+        if not HydrusTime.TimeHasPassedMS( clicked_timestamp_ms + 100 ):
             
-            # don't start a drag until movement
+            # don't start a drag until decent movement
             
             return
             
@@ -695,11 +711,11 @@ class TabWidgetWithDnD( QW.QTabWidget ):
             
             if shift_down:
                 
-                do_navigate = HG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_with_shift' )
+                do_navigate = CG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_with_shift' )
                 
             else:
                 
-                do_navigate = HG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_normally' )
+                do_navigate = CG.client_controller.new_options.GetBoolean( 'page_drag_change_tab_normally' )
                 
             
             if do_navigate:
@@ -766,7 +782,7 @@ class TabWidgetWithDnD( QW.QTabWidget ):
             return
             
         
-        ( source_page_index, source_page_click_global_pos ) = source_tab_bar.lastClickedTabInfo()
+        ( source_page_index, source_page_click_global_pos, source_page_clicked_timestamp_ms ) = source_tab_bar.lastClickedTabInfo()
         
         source_tab_bar.clearLastClickedTabInfo()
         
@@ -868,7 +884,7 @@ class TabWidgetWithDnD( QW.QTabWidget ):
             
             follow_dropped_page = not shift_down
 
-            new_options = HG.client_controller.new_options
+            new_options = CG.client_controller.new_options
             
             if shift_down:
                 
@@ -896,7 +912,7 @@ class TabWidgetWithDnD( QW.QTabWidget ):
                     page_key = source_notebook.GetPageKey()
                     
                 
-                CallAfter( HG.client_controller.gui.ShowPage, page_key )
+                CallAfter( CG.client_controller.gui.ShowPage, page_key )
                 
             
         
@@ -977,10 +993,15 @@ class GridLayout( QW.QGridLayout ):
         self.setMargin( 2 )
         self.setSpacing( spacing )
         
+        self.next_row = 0
+        self.next_col = 0
+        
+    
     def GetFixedColumnCount( self ):
         
         return self._col_count
-
+        
+    
     def setMargin( self, val ):
         
         self.setContentsMargins( val, val, val, val )
@@ -990,29 +1011,40 @@ def AddToLayout( layout, item, flag = None, alignment = None ):
 
     if isinstance( layout, GridLayout ):
         
-        cols = layout.GetFixedColumnCount()
+        row = layout.next_row
         
-        count = layout.count()
+        col = layout.next_col
         
-        row = math.floor( count / cols )
-        
-        col = count % cols
-        
-        if isinstance( item, QW.QLayout ):
+        try:
             
-            layout.addLayout( item, row, col )
+            if isinstance( item, QW.QLayout ):
+                
+                layout.addLayout( item, row, col )
+                
+            elif isinstance( item, QW.QWidget ):
+                
+                layout.addWidget( item, row, col )
+                
+            elif isinstance( item, tuple ):
+                
+                spacer = QW.QPushButton()#QW.QSpacerItem( 0, 0, QW.QSizePolicy.Expanding, QW.QSizePolicy.Fixed )
+                layout.addWidget( spacer, row, col )
+                spacer.setVisible(False)
+                
+                return
+                
             
-        elif isinstance( item, QW.QWidget ):
+        finally:
             
-            layout.addWidget( item, row, col )
-            
-        elif isinstance( item, tuple ):
-            
-            spacer = QW.QPushButton()#QW.QSpacerItem( 0, 0, QW.QSizePolicy.Expanding, QW.QSizePolicy.Fixed )
-            layout.addWidget( spacer, row, col )
-            spacer.setVisible(False)
-            
-            return
+            if col == layout.GetFixedColumnCount() - 1:
+                
+                layout.next_row += 1
+                layout.next_col = 0
+                
+            else:
+                
+                layout.next_col += 1
+                
             
         
     else:
@@ -1222,7 +1254,7 @@ def ToKeySequence( modifiers, key ):
         
     
 
-def AddShortcut( widget, modifier, key, callable, *args ):
+def AddShortcut( widget, modifier, key, func: typing.Callable, *args ):
     
     shortcut = QW.QShortcut( widget )
     
@@ -1230,8 +1262,9 @@ def AddShortcut( widget, modifier, key, callable, *args ):
     
     shortcut.setContext( QC.Qt.WidgetWithChildrenShortcut )
     
-    shortcut.activated.connect( lambda: callable( *args ) )
+    shortcut.activated.connect( lambda: func( *args ) )
     
+
 def GetBackgroundColour( widget ):
     
     return widget.palette().color( QG.QPalette.Window )
@@ -1269,20 +1302,29 @@ class CallAfterEventCatcher( QC.QObject ):
     
     def eventFilter( self, watched, event ):
         
-        if event.type() == CallAfterEventType and isinstance( event, CallAfterEvent ):
+        try:
             
-            if HG.profile_mode:
+            if event.type() == CallAfterEventType and isinstance( event, CallAfterEvent ):
                 
-                summary = 'Profiling CallAfter Event: {}'.format( event._fn )
+                if HG.profile_mode:
+                    
+                    summary = 'Profiling CallAfter Event: {}'.format( event._fn )
+                    
+                    HydrusProfiling.Profile( summary, 'event.Execute()', globals(), locals(), min_duration_ms = HG.callto_profile_min_job_time_ms )
+                    
+                else:
+                    
+                    event.Execute()
+                    
                 
-                HydrusData.Profile( summary, 'event.Execute()', globals(), locals(), min_duration_ms = HG.callto_profile_min_job_time_ms )
+                event.accept()
                 
-            else:
-                
-                event.Execute()
+                return True
                 
             
-            event.accept()
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             
@@ -2027,7 +2069,7 @@ class DirDialog( QW.QFileDialog ):
         
         self.setOption( QW.QFileDialog.ShowDirsOnly, True )
         
-        if HG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
+        if CG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
             
             self.setOption( QW.QFileDialog.DontUseNativeDialog, True )
             
@@ -2095,7 +2137,7 @@ class FileDialog( QW.QFileDialog ):
             self.setNameFilter( wildcard )
             
         
-        if HG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
+        if CG.client_controller.new_options.GetBoolean( 'use_qt_file_dialogs' ):
             
             self.setOption( QW.QFileDialog.DontUseNativeDialog, True )
             
@@ -2140,35 +2182,78 @@ class TreeWidgetWithInheritedCheckState( QW.QTreeWidget ):
         
         QW.QTreeWidget.__init__( self, *args, **kwargs )
         
-        self.itemClicked.connect( self._HandleItemClickedForCheckStateUpdate )
+        self.itemChanged.connect( self._HandleItemCheckStateUpdate )
         
     
-    def _HandleItemClickedForCheckStateUpdate( self, item, column ):
+    def _GetChildren( self, item: QW.QTreeWidgetItem ) -> typing.List[ QW.QTreeWidgetItem ]:
         
-        self._UpdateCheckState( item, item.checkState( 0 ) )
+        children = [ item.child( i ) for i in range( item.childCount() ) ]
+        
+        return children
         
     
-    def _UpdateCheckState( self, item, check_state ):
+    def _HandleItemCheckStateUpdate( self, item, column ):
         
-        # this is an int, should be a checkstate
-        item.setCheckState( 0, check_state )
+        self.blockSignals( True )
         
-        for i in range( item.childCount() ):
+        self._UpdateChildrenCheckState( item, item.checkState( 0 ) )
+        self._UpdateParentCheckState( item )
+        
+        self.blockSignals( False )
+        
+    
+    def _UpdateChildrenCheckState( self, item, check_state ):
+        
+        for child in self._GetChildren( item ):
             
-            self._UpdateCheckState( item.child( i ), check_state )
+            child.setCheckState( 0, check_state )
+            
+            self._UpdateChildrenCheckState( child, check_state )
             
         
     
-def ListsToTuples( l ): # Since lists are not hashable, we need to (recursively) convert lists to tuples in data that is to be added to BetterListCtrl
+    def _UpdateParentCheckState( self, item: QW.QTreeWidgetItem ):
+        
+        parent = item.parent()
+        
+        if isinstance( parent, QW.QTreeWidgetItem ):
+            
+            all_values = { child.checkState( 0 ) for child in self._GetChildren( parent ) }
+            
+            if all_values == { QC.Qt.Checked }:
+                
+                end_state = QC.Qt.Checked
+                
+            elif all_values == { QC.Qt.Unchecked }:
+                
+                end_state = QC.Qt.Unchecked
+                
+            else:
+                
+                end_state = QC.Qt.PartiallyChecked
+                
+            
+            if end_state != parent.checkState( 0 ):
+                
+                parent.setCheckState( 0, end_state )
+                
+                self._UpdateParentCheckState( parent )
+                
+            
+        
     
-    if isinstance( l, list ) or isinstance( l, tuple ):
 
-        return tuple( map( ListsToTuples, l ) )
-
+def ListsToTuples( potentially_nested_lists ):
+    
+    if HydrusData.IsAListLikeCollection( potentially_nested_lists ):
+        
+        return tuple( map( ListsToTuples, potentially_nested_lists ) )
+        
     else:
         
-        return l
-
+        return potentially_nested_lists
+        
+    
 
 class WidgetEventFilter ( QC.QObject ):
     
@@ -2190,7 +2275,7 @@ class WidgetEventFilter ( QC.QObject ):
 
     def _ExecuteCallbacks( self, event_name, event ):
         
-        if not event_name in self._callback_map: return
+        if event_name not in self._callback_map: return
         
         event_killed = False
         
@@ -2203,101 +2288,111 @@ class WidgetEventFilter ( QC.QObject ):
 
     def eventFilter( self, watched, event ):
         
-        # Once somehow this got called with no _parent_widget set - which is probably fixed now but leaving the check just in case, wew
-        # Might be worth debugging this later if it still occurs - the only way I found to reproduce it is to run the help > debug > initialize server command
-        if not hasattr( self, '_parent_widget') or not isValid( self._parent_widget ): return False
-        
-        type = event.type()
-        
-        event_killed = False
-        
-        if type == QC.QEvent.KeyPress:
+        try:
             
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_KEY_DOWN', event )
+            # Once somehow this got called with no _parent_widget set - which is probably fixed now but leaving the check just in case, wew
+            # Might be worth debugging this later if it still occurs - the only way I found to reproduce it is to run the help > debug > initialize server command
+            if not hasattr( self, '_parent_widget') or not isValid( self._parent_widget ): return False
             
-        elif type == QC.QEvent.WindowStateChange:
+            type = event.type()
             
-            if isValid( self._parent_widget ):
+            event_killed = False
+            
+            if type == QC.QEvent.KeyPress:
                 
-                if self._parent_widget.isMaximized() or (event.oldState() & QC.Qt.WindowMaximized): event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MAXIMIZE', event )
-        
-        elif type == QC.QEvent.MouseMove:
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
-            
-        elif type == QC.QEvent.MouseButtonDblClick:
-            
-            if event.button() == QC.Qt.LeftButton:
-            
-                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_DCLICK', event )
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_KEY_DOWN', event )
                 
-            elif event.button() == QC.Qt.RightButton:
-
-                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_RIGHT_DCLICK', event )
-
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
-            
-        elif type == QC.QEvent.MouseButtonPress:
-            
-            if event.buttons() & QC.Qt.LeftButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_DOWN', event )
-            
-            if event.buttons() & QC.Qt.MiddleButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MIDDLE_DOWN', event )
-            
-            if event.buttons() & QC.Qt.RightButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_RIGHT_DOWN', event )
-
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
-            
-        elif type == QC.QEvent.MouseButtonRelease:
-            
-            if event.buttons() & QC.Qt.LeftButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_UP', event )
-
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
-            
-        elif type == QC.QEvent.Wheel:
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSEWHEEL', event )
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
-        
-        elif type == QC.QEvent.Scroll:
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_SCROLLWIN', event )
-            
-        elif type == QC.QEvent.Move:
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOVE', event )
-            
-            if isValid( self._parent_widget ) and self._parent_widget.isVisible():
+            elif type == QC.QEvent.WindowStateChange:
                 
-                self._user_moved_window = True
+                if isValid( self._parent_widget ):
+                    
+                    if self._parent_widget.isMaximized() or (event.oldState() & QC.Qt.WindowMaximized): event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MAXIMIZE', event )
             
-        elif type == QC.QEvent.Resize:
-            
-            event_killed = event_killed or self._ExecuteCallbacks( 'EVT_SIZE', event )
-            
-        elif type == QC.QEvent.NonClientAreaMouseButtonPress:
-            
-            self._user_moved_window = False
-        
-        elif type == QC.QEvent.NonClientAreaMouseButtonRelease:
-            
-            if self._user_moved_window:
+            elif type == QC.QEvent.MouseMove:
                 
-                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOVE_END', event )
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
+                
+            elif type == QC.QEvent.MouseButtonDblClick:
+                
+                if event.button() == QC.Qt.LeftButton:
+                    
+                    event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_DCLICK', event )
+                    
+                elif event.button() == QC.Qt.RightButton:
+                    
+                    event_killed = event_killed or self._ExecuteCallbacks( 'EVT_RIGHT_DCLICK', event )
+                    
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
+                
+            elif type == QC.QEvent.MouseButtonPress:
+                
+                if event.buttons() & QC.Qt.LeftButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_DOWN', event )
+                
+                if event.buttons() & QC.Qt.MiddleButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MIDDLE_DOWN', event )
+                
+                if event.buttons() & QC.Qt.RightButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_RIGHT_DOWN', event )
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
+                
+            elif type == QC.QEvent.MouseButtonRelease:
+                
+                if event.buttons() & QC.Qt.LeftButton: event_killed = event_killed or self._ExecuteCallbacks( 'EVT_LEFT_UP', event )
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
+                
+            elif type == QC.QEvent.Wheel:
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSEWHEEL', event )
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOUSE_EVENTS', event )
+                
+            elif type == QC.QEvent.Scroll:
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_SCROLLWIN', event )
+                
+            elif type == QC.QEvent.Move:
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOVE', event )
+                
+                if isValid( self._parent_widget ) and self._parent_widget.isVisible():
+                    
+                    self._user_moved_window = True
+                
+            elif type == QC.QEvent.Resize:
+                
+                event_killed = event_killed or self._ExecuteCallbacks( 'EVT_SIZE', event )
+                
+            elif type == QC.QEvent.NonClientAreaMouseButtonPress:
                 
                 self._user_moved_window = False
                 
+            elif type == QC.QEvent.NonClientAreaMouseButtonRelease:
+                
+                if self._user_moved_window:
+                    
+                    event_killed = event_killed or self._ExecuteCallbacks( 'EVT_MOVE_END', event )
+                    
+                    self._user_moved_window = False
+                    
+                
             
-        
-        if event_killed:
+            if event_killed:
+                
+                event.accept()
+                
+                return True
+                
             
-            event.accept()
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             
         
         return False
-
+        
     
     def _AddCallback( self, evt_name, callback ):
         

@@ -1,7 +1,6 @@
 import collections
 import os
 import threading
-import collections
 import tempfile
 import time
 import traceback
@@ -18,22 +17,25 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusPubSub
 from hydrus.core import HydrusSessions
+from hydrus.core import HydrusTemp
 from hydrus.core import HydrusThreading
 
 from hydrus.client import ClientAPI
-from hydrus.client import ClientCaches
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
 from hydrus.client import ClientFiles
+from hydrus.client import ClientFilesPhysical
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientOptions
 from hydrus.client import ClientManagers
 from hydrus.client import ClientServices
 from hydrus.client import ClientThreading
+from hydrus.client.caches import ClientCaches
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui import ClientGUISplash
 from hydrus.client.gui.lists import ClientGUIListManager
 from hydrus.client.importing import ClientImportFiles
-from hydrus.client.metadata import ClientTags
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTagsHandling
 from hydrus.client.networking import ClientNetworking
 from hydrus.client.networking import ClientNetworkingBandwidth
@@ -48,6 +50,7 @@ from hydrus.test import TestClientData
 from hydrus.test import TestClientDB
 from hydrus.test import TestClientDBDuplicates
 from hydrus.test import TestClientDBTags
+from hydrus.test import TestClientFileStorage
 from hydrus.test import TestClientImageHandling
 from hydrus.test import TestClientImportOptions
 from hydrus.test import TestClientImportSubscriptions
@@ -59,14 +62,15 @@ from hydrus.test import TestClientParsing
 from hydrus.test import TestClientTags
 from hydrus.test import TestClientThreading
 from hydrus.test import TestDialogs
-from hydrus.test import TestFunctions
 from hydrus.test import TestHydrusData
 from hydrus.test import TestHydrusNATPunch
 from hydrus.test import TestHydrusNetworking
+from hydrus.test import TestHydrusPaths
 from hydrus.test import TestHydrusSerialisable
 from hydrus.test import TestHydrusServer
 from hydrus.test import TestHydrusSessions
 from hydrus.test import TestHydrusTags
+from hydrus.test import TestHydrusTime
 from hydrus.test import TestServerDB
 
 DB_DIR = None
@@ -77,17 +81,6 @@ LOCAL_RATING_LIKE_SERVICE_KEY = HydrusData.GenerateKey()
 LOCAL_RATING_NUMERICAL_SERVICE_KEY = HydrusData.GenerateKey()
 LOCAL_RATING_INCDEC_SERVICE_KEY = HydrusData.GenerateKey()
 
-def ConvertServiceKeysToContentUpdatesToComparable( service_keys_to_content_updates ):
-    
-    comparable_dict = {}
-    
-    for ( service_key, content_updates ) in list(service_keys_to_content_updates.items()):
-        
-        comparable_dict[ service_key ] = set( content_updates )
-        
-    
-    return comparable_dict
-    
 class MockController( object ):
     
     def __init__( self ):
@@ -183,6 +176,8 @@ class Controller( object ):
         
         self.db_dir = tempfile.mkdtemp()
         
+        self._hydrus_temp_dir = HydrusTemp.InitialiseHydrusTempDir()
+        
         global DB_DIR
         
         DB_DIR = self.db_dir
@@ -197,9 +192,10 @@ class Controller( object ):
         HydrusPaths.MakeSureDirectoryExists( client_files_default )
         
         HG.controller = self
-        HG.client_controller = self
         HG.server_controller = self
         HG.test_controller = self
+        
+        CG.client_controller = self
         
         self.db = self
         self.gui = self
@@ -208,7 +204,7 @@ class Controller( object ):
         
         self._call_to_threads = []
         
-        self._pubsub = HydrusPubSub.HydrusPubSub( self, lambda o: True )
+        self._pubsub = HydrusPubSub.HydrusPubSub( lambda o: True )
         
         self.new_options = ClientOptions.ClientOptions()
         
@@ -229,6 +225,10 @@ class Controller( object ):
         self._name_read_responses[ 'media_results' ] = []
         
         self._param_read_responses = {}
+        
+        self.example_like_rating_service_key = LOCAL_RATING_LIKE_SERVICE_KEY
+        self.example_numerical_rating_service_key = LOCAL_RATING_NUMERICAL_SERVICE_KEY
+        self.example_incdec_rating_service_key = LOCAL_RATING_INCDEC_SERVICE_KEY
         
         self.example_file_repo_service_key_1 = HydrusData.GenerateKey()
         self.example_file_repo_service_key_2 = HydrusData.GenerateKey()
@@ -257,17 +257,19 @@ class Controller( object ):
         
         self._name_read_responses[ 'services' ] = services
         
-        client_files_locations = {}
+        client_files_subfolders = []
+        
+        base_location = ClientFilesPhysical.FilesStorageBaseLocation( client_files_default, 1 )
         
         for prefix in HydrusData.IterateHexPrefixes():
             
             for c in ( 'f', 't' ):
                 
-                client_files_locations[ c + prefix ] = client_files_default
+                client_files_subfolders.append( ClientFilesPhysical.FilesStorageSubfolder( c + prefix, base_location ) )
                 
             
         
-        self._name_read_responses[ 'client_files_locations' ] = client_files_locations
+        self._name_read_responses[ 'client_files_subfolders' ] = client_files_subfolders
         
         self._name_read_responses[ 'sessions' ] = []
         self._name_read_responses[ 'tag_parents' ] = {}
@@ -377,7 +379,7 @@ class Controller( object ):
     
     def CallBlockingToQt( self, win, func, *args, **kwargs ):
         
-        def qt_code( win: QW.QWidget, job_key: ClientThreading.JobKey ):
+        def qt_code( win: QW.QWidget, job_status: ClientThreading.JobStatus ):
             
             try:
                 
@@ -388,30 +390,30 @@ class Controller( object ):
                 
                 result = func( *args, **kwargs )
                 
-                job_key.SetVariable( 'result', result )
+                job_status.SetVariable( 'result', result )
                 
             except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.DBCredentialsException, HydrusExceptions.ShutdownException ) as e:
                 
-                job_key.SetErrorException( e )
+                job_status.SetErrorException( e )
                 
             except Exception as e:
                 
-                job_key.SetErrorException( e )
+                job_status.SetErrorException( e )
                 
                 HydrusData.Print( 'CallBlockingToQt just caught this error:' )
                 HydrusData.DebugPrint( traceback.format_exc() )
                 
             finally:
                 
-                job_key.Finish()
+                job_status.Finish()
                 
             
         
-        job_key = ClientThreading.JobKey()
+        job_status = ClientThreading.JobStatus( cancellable = True, cancel_on_shutdown = False )
         
-        QP.CallAfter( qt_code, win, job_key )
+        QP.CallAfter( qt_code, win, job_status )
         
-        while not job_key.IsDone():
+        while not job_status.IsDone():
             
             if HG.model_shutdown:
                 
@@ -421,18 +423,18 @@ class Controller( object ):
             time.sleep( 0.05 )
             
         
-        if job_key.HasVariable( 'result' ):
+        if job_status.HasVariable( 'result' ):
             
             # result can be None, for qt_code that has no return variable
             
-            result = job_key.GetIfHasVariable( 'result' )
+            result = job_status.GetIfHasVariable( 'result' )
             
             return result
             
         
-        if job_key.HadError():
+        if job_status.HadError():
             
-            e = job_key.GetErrorException()
+            e = job_status.GetErrorException()
             
             raise e
             
@@ -614,6 +616,11 @@ class Controller( object ):
         return read
         
     
+    def GetHydrusTempDir( self ):
+        
+        return self._hydrus_temp_dir
+        
+    
     def GetWrite( self, name ):
         
         write = self._write_call_args[ name ]
@@ -771,11 +778,11 @@ class Controller( object ):
             TestClientDaemons,
             TestClientConstants,
             TestClientData,
+            TestClientFileStorage,
             TestClientImportOptions,
             TestClientParsing,
             TestClientTags,
             TestClientThreading,
-            TestFunctions,
             TestHydrusSerialisable,
             TestHydrusSessions,
             TestClientDB,
@@ -783,6 +790,8 @@ class Controller( object ):
             TestClientDBDuplicates,
             TestClientDBTags,
             TestHydrusData,
+            TestHydrusPaths,
+            TestHydrusTime,
             TestHydrusNATPunch,
             TestClientNetworking,
             TestHydrusNetworking,
@@ -810,13 +819,15 @@ class Controller( object ):
         module_lookup[ 'data' ] = [
             TestClientConstants,
             TestClientData,
+            TestClientFileStorage,
             TestClientImportOptions,
             TestClientParsing,
             TestClientTags,
             TestClientThreading,
-            TestFunctions,
             TestHydrusData,
+            TestHydrusPaths,
             TestHydrusTags,
+            TestHydrusTime,
             TestHydrusSerialisable,
             TestHydrusSessions
         ]

@@ -7,9 +7,12 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusDB
 from hydrus.core import HydrusDBBase
 from hydrus.core import HydrusExceptions
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientLocation
+from hydrus.client import ClientTime
+from hydrus.client.db import ClientDBMaintenance
 from hydrus.client.db import ClientDBMaster
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBServices
@@ -28,6 +31,7 @@ def GenerateFilesTableNames( service_id: int ) -> typing.Tuple[ str, str, str, s
     
     return ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name )
     
+
 def GenerateFilesTableName( service_id: int, status: int ) -> str:
     
     ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
@@ -49,6 +53,7 @@ def GenerateFilesTableName( service_id: int, status: int ) -> str:
         return petitioned_files_table_name
         
     
+
 class DBLocationContext( object ):
     
     def __init__( self, location_context: ClientLocation.LocationContext ):
@@ -86,6 +91,7 @@ class DBLocationContext( object ):
         return False
         
     
+
 class DBLocationContextAllKnownFiles( DBLocationContext ):
     
     def GetTableJoinIteratedByFileDomain( self, table_phrase: str ) -> str:
@@ -98,6 +104,7 @@ class DBLocationContextAllKnownFiles( DBLocationContext ):
         return table_phrase
         
     
+
 class DBLocationContextLeaf( DBLocationContext ):
     
     def __init__( self, location_context: ClientLocation.LocationContext, files_table_name: str ):
@@ -132,6 +139,7 @@ class DBLocationContextLeaf( DBLocationContext ):
         return True
         
     
+
 class DBLocationContextBranch( DBLocationContext, ClientDBModule.ClientDBModule ):
     
     # this still sucks and should be random and then dropped neatly by a manager or something so we can have more than one of these guys at once
@@ -230,9 +238,10 @@ class DBLocationContextBranch( DBLocationContext, ClientDBModule.ClientDBModule 
     
 class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
     
-    def __init__( self, cursor: sqlite3.Cursor, cursor_transaction_wrapper: HydrusDBBase.DBCursorTransactionWrapper, modules_services: ClientDBServices.ClientDBMasterServices, modules_hashes: ClientDBMaster.ClientDBMasterHashes, modules_texts: ClientDBMaster.ClientDBMasterTexts ):
+    def __init__( self, cursor: sqlite3.Cursor, cursor_transaction_wrapper: HydrusDBBase.DBCursorTransactionWrapper, modules_db_maintenance: ClientDBMaintenance.ClientDBMaintenance, modules_services: ClientDBServices.ClientDBMasterServices, modules_hashes: ClientDBMaster.ClientDBMasterHashes, modules_texts: ClientDBMaster.ClientDBMasterTexts ):
         
         self._cursor_transaction_wrapper = cursor_transaction_wrapper
+        self.modules_db_maintenance = modules_db_maintenance
         self.modules_services = modules_services
         self.modules_hashes = modules_hashes
         self.modules_texts = modules_texts
@@ -257,12 +266,12 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         index_generation_dict = {}
         
         index_generation_dict[ current_files_table_name ] = [
-            ( [ 'timestamp' ], False, 447 )
+            ( [ 'timestamp_ms' ], False, 559 )
         ]
         
         index_generation_dict[ deleted_files_table_name ] = [
-            ( [ 'timestamp' ], False, 447 ),
-            ( [ 'original_timestamp' ], False, 447 )
+            ( [ 'timestamp_ms' ], False, 559 ),
+            ( [ 'original_timestamp_ms' ], False, 559 )
         ]
         
         index_generation_dict[ petitioned_files_table_name ] = [
@@ -277,8 +286,8 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
         
         return {
-            current_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, timestamp INTEGER );', 447 ),
-            deleted_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, timestamp INTEGER, original_timestamp INTEGER );', 447 ),
+            current_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, timestamp_ms INTEGER );', 447 ),
+            deleted_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, timestamp_ms INTEGER, original_timestamp_ms INTEGER );', 447 ),
             pending_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 447 ),
             petitioned_files_table_name : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, reason_id INTEGER );', 447 )
         }
@@ -286,31 +295,64 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
     
     def _GetServiceIdsWeGenerateDynamicTablesFor( self ):
         
-        return self.modules_services.GetServiceIds( HC.FILE_SERVICES_WITH_SPECIFIC_MAPPING_CACHES )
+        return self.modules_services.GetServiceIds( HC.REAL_FILE_SERVICES )
+        
+    
+    def _GetTimestampMS( self, service_id: int, timestamp_type: int, hash_id: int ) -> typing.Optional[ int ]:
+        
+        ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
+        
+        result = None
+        
+        if timestamp_type == HC.TIMESTAMP_TYPE_IMPORTED:
+            
+            result = self._Execute( 'SELECT timestamp_ms FROM {} WHERE hash_id = ?;'.format( current_files_table_name ), ( hash_id, ) ).fetchone()
+            
+        elif timestamp_type == HC.TIMESTAMP_TYPE_DELETED:
+            
+            result = self._Execute( 'SELECT timestamp_ms FROM {} WHERE hash_id = ?;'.format( deleted_files_table_name ), ( hash_id, ) ).fetchone()
+            
+        elif timestamp_type == HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED:
+            
+            result = self._Execute( 'SELECT original_timestamp_ms FROM {} WHERE hash_id = ?;'.format( deleted_files_table_name ), ( hash_id, ) ).fetchone()
+            
+        
+        if result is None:
+            
+            return None
+            
+        else:
+            
+            ( timestamp_ms, ) = result
+            
+            return timestamp_ms
+            
         
     
     def AddFiles( self, service_id, insert_rows ):
         
+        # just a note, the timestamp in insert_rows can be None
+        
         ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
         
-        self._ExecuteMany( 'INSERT OR IGNORE INTO {} VALUES ( ?, ? );'.format( current_files_table_name ), ( ( hash_id, timestamp ) for ( hash_id, timestamp ) in insert_rows ) )
+        self._ExecuteMany( 'INSERT OR IGNORE INTO {} VALUES ( ?, ? );'.format( current_files_table_name ), ( ( hash_id, timestamp_ms ) for ( hash_id, timestamp_ms ) in insert_rows ) )
         
-        self._ExecuteMany( 'DELETE FROM {} WHERE hash_id = ?;'.format( pending_files_table_name ), ( ( hash_id, ) for ( hash_id, timestamp ) in insert_rows ) )
+        self._ExecuteMany( 'DELETE FROM {} WHERE hash_id = ?;'.format( pending_files_table_name ), ( ( hash_id, ) for ( hash_id, timestamp_ms ) in insert_rows ) )
+        
+        pending_changed = self._GetRowCount() > 0
         
         if service_id == self.modules_services.combined_local_file_service_id:
             
-            for ( hash_id, timestamp ) in insert_rows:
+            for ( hash_id, timestamp_ms ) in insert_rows:
                 
                 self.ClearDeferredPhysicalDeleteIds( file_hash_id = hash_id, thumbnail_hash_id = hash_id )
                 
             
-        elif self.modules_services.GetService( service_id ).GetServiceType() == HC.FILE_REPOSITORY:
+        elif self.modules_services.GetService( service_id ).GetServiceType() in ( HC.FILE_REPOSITORY, HC.IPFS ):
             
             # it may be the case the files were just uploaded after being deleted
-            self.DeferFilesDeleteIfNowOrphan( [ hash_id for ( hash_id, timestamp ) in insert_rows ] )
+            self.DeferFilesDeleteIfNowOrphan( [ hash_id for ( hash_id, timestamp_ms ) in insert_rows ] )
             
-        
-        pending_changed = self._GetRowCount() > 0
         
         return pending_changed
         
@@ -369,11 +411,15 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
     
     def ClearLocalDeleteRecord( self, hash_ids = None ):
         
+        # Just as a side note, this guy should be accompanied by calls to SyncCombinedDeletedFiles above; this module can't do proper add/delete with mappings and stuff, so just this guy isn't enough
+        
         # we delete from everywhere, but not for files currently in the trash
         
         service_ids_to_nums_cleared = {}
         
-        local_non_trash_service_ids = self.modules_services.GetServiceIds( ( HC.COMBINED_LOCAL_FILE, HC.COMBINED_LOCAL_MEDIA, HC.LOCAL_FILE_DOMAIN ) )
+        local_non_trash_service_types = { HC.COMBINED_LOCAL_FILE, HC.COMBINED_LOCAL_MEDIA, HC.LOCAL_FILE_DOMAIN }
+        
+        local_non_trash_service_ids = self.modules_services.GetServiceIds( local_non_trash_service_types )
         
         if hash_ids is None:
             
@@ -472,10 +518,10 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
                 
             
         
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( current_files_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( deleted_files_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( pending_files_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( petitioned_files_table_name ) )
+        self.modules_db_maintenance.DeferredDropTable( current_files_table_name )
+        self.modules_db_maintenance.DeferredDropTable( deleted_files_table_name )
+        self.modules_db_maintenance.DeferredDropTable( pending_files_table_name )
+        self.modules_db_maintenance.DeferredDropTable( petitioned_files_table_name )
         
     
     def FilterAllCurrentHashIds( self, hash_ids, just_these_service_ids = None ):
@@ -628,7 +674,7 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         
         if len( orphan_hash_ids ) > 0:
             
-            just_these_service_ids = self.modules_services.GetServiceIds( ( HC.FILE_REPOSITORY, ) )
+            just_these_service_ids = self.modules_services.GetServiceIds( ( HC.FILE_REPOSITORY, HC.IPFS ) )
             
             if ignore_service_id is not None:
                 
@@ -789,39 +835,21 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         # hashes to size
         result = self._Execute( 'SELECT SUM( size ) FROM {} CROSS JOIN files_info USING ( hash_id );'.format( current_files_table_name ) ).fetchone()
         
-        ( count, ) = result
+        count = self._GetSumResult( result )
         
         return count
         
     
-    def GetCurrentHashIdsToTimestamps( self, service_id, hash_ids ):
+    def GetCurrentHashIdsToTimestampsMS( self, service_id, hash_ids ):
         
         current_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_CURRENT )
         
         with self._MakeTemporaryIntegerTable( hash_ids, 'hash_id' ) as temp_hash_ids_table_name:
             
-            rows = dict( self._Execute( 'SELECT hash_id, timestamp FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, current_files_table_name ) ) )
+            rows = dict( self._Execute( 'SELECT hash_id, timestamp_ms FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, current_files_table_name ) ) )
             
         
         return rows
-        
-    
-    def GetCurrentTimestamp( self, service_id: int, hash_id: int ):
-        
-        current_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_CURRENT )
-        
-        result = self._Execute( 'SELECT timestamp FROM {} WHERE hash_id = ?;'.format( current_files_table_name ), ( hash_id, ) ).fetchone()
-        
-        if result is None:
-            
-            return None
-            
-        else:
-            
-            ( timestamp, ) = result
-            
-            return timestamp
-            
         
     
     def GetDeferredPhysicalDelete( self ):
@@ -875,6 +903,18 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         return hash_ids
         
     
+    def GetDeletedHashIdsToTimestampsMS( self, service_id, hash_ids ):
+        
+        deleted_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_DELETED )
+        
+        with self._MakeTemporaryIntegerTable( hash_ids, 'hash_id' ) as temp_hash_ids_table_name:
+            
+            rows = self._Execute( 'SELECT hash_id, timestamp_ms, original_timestamp_ms FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, deleted_files_table_name ) ).fetchall()
+            
+        
+        return { hash_id : ( timestamp_ms, original_timestamp_ms ) for ( hash_id, timestamp_ms, original_timestamp_ms ) in rows }
+        
+    
     def GetDeletionStatus( self, service_id, hash_id ):
         
         # can have a value here and just be in trash, so we fetch it whatever the end result
@@ -894,18 +934,18 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         deleted_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_DELETED )
         
         is_deleted = False
-        timestamp = None
+        timestamp_ms = None
         
-        result = self._Execute( 'SELECT timestamp FROM {} WHERE hash_id = ?;'.format( deleted_files_table_name ), ( hash_id, ) ).fetchone()
+        result = self._Execute( 'SELECT timestamp_ms FROM {} WHERE hash_id = ?;'.format( deleted_files_table_name ), ( hash_id, ) ).fetchone()
         
         if result is not None:
             
             is_deleted = True
             
-            ( timestamp, ) = result
+            ( timestamp_ms, ) = result
             
         
-        return ( is_deleted, timestamp, file_deletion_reason )
+        return ( is_deleted, timestamp_ms, file_deletion_reason )
         
     
     def GetDBLocationContext( self, location_context: ClientLocation.LocationContext ):
@@ -974,8 +1014,9 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
     
     def GetHashIdsToServiceInfoDicts( self, temp_hash_ids_table_name ):
         
-        hash_ids_to_current_file_service_ids_and_timestamps = collections.defaultdict( list )
-        hash_ids_to_deleted_file_service_ids_and_timestamps = collections.defaultdict( list )
+        hash_ids_to_current_file_service_ids_to_timestamps_ms = collections.defaultdict( dict )
+        hash_ids_to_deleted_file_service_ids_to_timestamps_ms = collections.defaultdict( dict )
+        hash_ids_to_deleted_file_service_ids_to_previously_imported_timestamps_ms = collections.defaultdict( dict )
         hash_ids_to_pending_file_service_ids = collections.defaultdict( list )
         hash_ids_to_petitioned_file_service_ids = collections.defaultdict( list )
         
@@ -983,14 +1024,15 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
             
             ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
             
-            for ( hash_id, timestamp ) in self._Execute( 'SELECT hash_id, timestamp FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, current_files_table_name ) ):
+            for ( hash_id, timestamp_ms ) in self._Execute( 'SELECT hash_id, timestamp_ms FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, current_files_table_name ) ):
                 
-                hash_ids_to_current_file_service_ids_and_timestamps[ hash_id ].append( ( service_id, timestamp ) )
+                hash_ids_to_current_file_service_ids_to_timestamps_ms[ hash_id ][ service_id ] = timestamp_ms
                 
             
-            for ( hash_id, timestamp, original_timestamp ) in self._Execute( 'SELECT hash_id, timestamp, original_timestamp FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, deleted_files_table_name ) ):
+            for ( hash_id, timestamp_ms, original_timestamp_ms ) in self._Execute( 'SELECT hash_id, timestamp_ms, original_timestamp_ms FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, deleted_files_table_name ) ):
                 
-                hash_ids_to_deleted_file_service_ids_and_timestamps[ hash_id ].append( ( service_id, timestamp, original_timestamp ) )
+                hash_ids_to_deleted_file_service_ids_to_timestamps_ms[ hash_id ][ service_id ] = timestamp_ms
+                hash_ids_to_deleted_file_service_ids_to_previously_imported_timestamps_ms[ hash_id ][ service_id ] = original_timestamp_ms
                 
             
             for hash_id in self._Execute( 'SELECT hash_id FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, pending_files_table_name ) ):
@@ -1005,11 +1047,17 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
             
         
         return (
-            hash_ids_to_current_file_service_ids_and_timestamps,
-            hash_ids_to_deleted_file_service_ids_and_timestamps,
+            hash_ids_to_current_file_service_ids_to_timestamps_ms,
+            hash_ids_to_deleted_file_service_ids_to_timestamps_ms,
+            hash_ids_to_deleted_file_service_ids_to_previously_imported_timestamps_ms,
             hash_ids_to_pending_file_service_ids,
             hash_ids_to_petitioned_file_service_ids
         )
+        
+    
+    def GetImportedTimestampMS( self, service_id: int, hash_id: int ):
+        
+        return self._GetTimestampMS( service_id, HC.TIMESTAMP_TYPE_IMPORTED, hash_id )
         
     
     def GetLocationContextForAllServicesDeletedFiles( self ) -> ClientLocation.LocationContext:
@@ -1121,13 +1169,27 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         return tables_and_columns
         
     
+    def GetTimestampMS( self, hash_id: int, timestamp_data: ClientTime.TimestampData ) -> typing.Optional[ int ]:
+        
+        if timestamp_data.location is None:
+            
+            return
+            
+        
+        service_key = timestamp_data.location
+        
+        service_id = self.modules_services.GetServiceId( service_key )
+        
+        return self._GetTimestampMS( service_id, timestamp_data.timestamp_type, hash_id )
+        
+    
     def GetUndeleteRows( self, service_id, hash_ids ):
         
         deleted_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_DELETED )
         
         with self._MakeTemporaryIntegerTable( hash_ids, 'hash_id' ) as temp_hash_ids_table_name:
             
-            rows = self._Execute( 'SELECT hash_id, original_timestamp FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, deleted_files_table_name ) ).fetchall()
+            rows = self._Execute( 'SELECT hash_id, original_timestamp_ms FROM {} CROSS JOIN {} USING ( hash_id );'.format( temp_hash_ids_table_name, deleted_files_table_name ) ).fetchall()
             
         
         return rows
@@ -1216,11 +1278,11 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         
         deleted_files_table_name = GenerateFilesTableName( service_id, HC.CONTENT_STATUS_DELETED )
         
-        now = HydrusData.GetNow()
+        now_ms = HydrusTime.GetNowMS()
         
         self._ExecuteMany(
-            'INSERT OR IGNORE INTO {} ( hash_id, timestamp, original_timestamp ) VALUES ( ?, ?, ? );'.format( deleted_files_table_name ),
-            ( ( hash_id, now, original_timestamp ) for ( hash_id, original_timestamp ) in insert_rows )
+            'INSERT OR IGNORE INTO {} ( hash_id, timestamp_ms, original_timestamp_ms ) VALUES ( ?, ?, ? );'.format( deleted_files_table_name ),
+            ( ( hash_id, now_ms, original_timestamp_ms ) for ( hash_id, original_timestamp_ms ) in insert_rows )
         )
         
         num_new_deleted_files = self._GetRowCount()
@@ -1252,12 +1314,12 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         
         self._ExecuteMany( 'DELETE FROM {} WHERE hash_id = ?;'.format( petitioned_files_table_name ), ( ( hash_id, ) for hash_id in hash_ids ) )
         
-        if self.modules_services.GetService( service_id ).GetServiceType() in ( HC.COMBINED_LOCAL_FILE, HC.FILE_REPOSITORY ):
+        pending_changed = self._GetRowCount() > 0
+        
+        if self.modules_services.GetService( service_id ).GetServiceType() == HC.COMBINED_LOCAL_FILE:
             
             self.DeferFilesDeleteIfNowOrphan( hash_ids )
             
-        
-        pending_changed = self._GetRowCount() > 0
         
         return pending_changed
         
@@ -1268,3 +1330,38 @@ class ClientDBFilesStorage( ClientDBModule.ClientDBModule ):
         
         self._ExecuteMany( 'REPLACE INTO local_file_deletion_reasons ( hash_id, reason_id ) VALUES ( ?, ? );', ( ( hash_id, reason_id ) for hash_id in hash_ids ) )
         
+    
+    def SetTime( self, hash_ids: typing.Collection[ int ], timestamp_data: ClientTime.TimestampData ):
+        
+        if timestamp_data.location is None:
+            
+            return
+            
+        
+        if timestamp_data.timestamp_ms is None:
+            
+            return
+            
+        
+        service_key = timestamp_data.location
+        
+        service_id = self.modules_services.GetServiceId( service_key )
+        
+        ( current_files_table_name, deleted_files_table_name, pending_files_table_name, petitioned_files_table_name ) = GenerateFilesTableNames( service_id )
+        
+        timestamp_ms = timestamp_data.timestamp_ms
+        
+        if timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_IMPORTED:
+            
+            self._ExecuteMany( f'UPDATE {current_files_table_name} SET timestamp_ms = ? WHERE hash_id = ?;', ( ( timestamp_ms, hash_id ) for hash_id in hash_ids ) )
+            
+        elif timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_DELETED:
+            
+            self._ExecuteMany( f'UPDATE {deleted_files_table_name} SET timestamp_ms = ? WHERE hash_id = ?;', ( ( timestamp_ms, hash_id ) for hash_id in hash_ids ) )
+            
+        elif timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED:
+            
+            self._ExecuteMany( f'UPDATE {deleted_files_table_name} SET original_timestamp_ms = ? WHERE hash_id = ?;', ( ( timestamp_ms, hash_id ) for hash_id in hash_ids ) )
+            
+        
+    

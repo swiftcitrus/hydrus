@@ -5,9 +5,11 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
@@ -249,7 +251,7 @@ class ManageServerServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
     
     def __init__( self, parent, service_key ):
         
-        self._clientside_admin_service = HG.client_controller.services_manager.GetService( service_key )
+        self._clientside_admin_service = CG.client_controller.services_manager.GetService( service_key )
         
         ClientGUIScrolledPanels.ManagePanel.__init__( self, parent )
         
@@ -461,9 +463,9 @@ class ManageServerServicesPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         with HG.dirty_object_lock:
             
-            HG.client_controller.WriteSynchronous( 'update_server_services', admin_service_key, services, service_keys_to_access_keys, self._deletee_service_keys )
+            CG.client_controller.WriteSynchronous( 'update_server_services', admin_service_key, services, service_keys_to_access_keys, self._deletee_service_keys )
             
-            HG.client_controller.RefreshServices()
+            CG.client_controller.RefreshServices()
             
         
     

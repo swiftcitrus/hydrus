@@ -56,8 +56,11 @@ elif PLATFORM_LINUX:
 elif PLATFORM_HAIKU:
     NICE_PLATFORM_STRING = 'Haiku'
 
-RUNNING_FROM_SOURCE = sys.argv[0].endswith( '.py' ) or sys.argv[0].endswith( '.pyw' )
 RUNNING_FROM_MACOS_APP = os.path.exists( os.path.join( BASE_DIR, 'running_from_app' ) )
+
+# I used to check argv[0], but it is unreliable
+# sys.argv[0].endswith( '.py' ) or sys.argv[0].endswith( '.pyw' )
+RUNNING_FROM_SOURCE = not ( RUNNING_FROM_FROZEN_BUILD or RUNNING_FROM_MACOS_APP )
 
 if RUNNING_FROM_SOURCE:
     NICE_RUNNING_AS_STRING = 'from source'
@@ -91,6 +94,8 @@ if USERPATH_DB_DIR == desired_userpath_db_dir:
     USERPATH_DB_DIR = None
     
 
+WE_SWITCHED_TO_USERPATH = False
+
 LICENSE_PATH = os.path.join( BASE_DIR, 'license.txt' )
 
 #
@@ -100,8 +105,8 @@ options = {}
 # Misc
 
 NETWORK_VERSION = 20
-SOFTWARE_VERSION = 522
-CLIENT_API_VERSION = 43
+SOFTWARE_VERSION = 564
+CLIENT_API_VERSION = 61
 
 SERVER_THUMBNAIL_DIMENSIONS = ( 200, 200 )
 
@@ -120,7 +125,7 @@ noneable_str = typing.Optional[ str ]
 
 BANDWIDTH_TYPE_DATA = 0
 BANDWIDTH_TYPE_REQUESTS = 1
-
+    
 bandwidth_type_string_lookup = {
     BANDWIDTH_TYPE_DATA : 'data',
     BANDWIDTH_TYPE_REQUESTS : 'requests'
@@ -136,14 +141,20 @@ content_merge_string_lookup = {
     CONTENT_MERGE_ACTION_COPY : 'copy from worse to better',
     CONTENT_MERGE_ACTION_MOVE : 'move from worse to better',
     CONTENT_MERGE_ACTION_TWO_WAY_MERGE : 'copy in both directions',
-    CONTENT_MERGE_ACTION_NONE : 'do nothing'
+    CONTENT_MERGE_ACTION_NONE : 'make no change'
 }
 
 content_number_merge_string_lookup = {
     CONTENT_MERGE_ACTION_COPY : 'add worse to better',
     CONTENT_MERGE_ACTION_MOVE : 'take from worse and add to better',
     CONTENT_MERGE_ACTION_TWO_WAY_MERGE : 'add in both directions',
-    CONTENT_MERGE_ACTION_NONE : 'do nothing'
+    CONTENT_MERGE_ACTION_NONE : 'make no change'
+}
+
+content_modified_date_merge_string_lookup = {
+    CONTENT_MERGE_ACTION_COPY : 'earlier worse overwrites later better',
+    CONTENT_MERGE_ACTION_TWO_WAY_MERGE : 'both get earliest',
+    CONTENT_MERGE_ACTION_NONE : 'make no change'
 }
 
 CONTENT_STATUS_CURRENT = 0
@@ -227,6 +238,7 @@ CONTENT_UPDATE_CLEAR_DELETE_RECORD = 17
 CONTENT_UPDATE_INCREMENT = 18
 CONTENT_UPDATE_DECREMENT = 19
 CONTENT_UPDATE_MOVE = 20
+CONTENT_UPDATE_DELETE_FROM_SOURCE_AFTER_MIGRATE = 21
 
 content_update_string_lookup = {
     CONTENT_UPDATE_ADD : 'add',
@@ -316,10 +328,10 @@ NICE_RESOLUTIONS = {
     ( 640, 480 ) : '480p',
     ( 1280, 720 ) : '720p',
     ( 1920, 1080 ) : '1080p',
-    ( 3840, 2160 ) : '4k',
+    ( 3840, 2160 ) : '2160p',
     ( 720, 1280 ) : 'vertical 720p',
     ( 1080, 1920 ) : 'vertical 1080p',
-    ( 2160, 3840 ) : 'vertical 4k'
+    ( 2160, 3840 ) : 'vertical 2160p'
 }
 
 NICE_RATIOS = {
@@ -454,15 +466,13 @@ REPOSITORIES = ( TAG_REPOSITORY, FILE_REPOSITORY, RATING_LIKE_REPOSITORY, RATING
 RESTRICTED_SERVICES = REPOSITORIES + ( SERVER_ADMIN, MESSAGE_DEPOT )
 REMOTE_SERVICES = RESTRICTED_SERVICES + ( IPFS, )
 REMOTE_FILE_SERVICES = ( FILE_REPOSITORY, IPFS )
-FILE_SERVICES = LOCAL_FILE_SERVICES + ( FILE_REPOSITORY, IPFS )
+REAL_FILE_SERVICES = LOCAL_FILE_SERVICES + ( COMBINED_DELETED_FILE, ) + REMOTE_FILE_SERVICES
 REAL_TAG_SERVICES = ( LOCAL_TAG, TAG_REPOSITORY )
 ADDREMOVABLE_SERVICES = ( LOCAL_TAG, LOCAL_FILE_DOMAIN, LOCAL_RATING_LIKE, LOCAL_RATING_NUMERICAL, LOCAL_RATING_INCDEC, FILE_REPOSITORY, TAG_REPOSITORY, SERVER_ADMIN, IPFS )
 MUST_HAVE_AT_LEAST_ONE_SERVICES = ( LOCAL_TAG, LOCAL_FILE_DOMAIN )
 MUST_BE_EMPTY_OF_FILES_SERVICES = ( LOCAL_FILE_DOMAIN, )
 
-FILE_SERVICES_WITH_NO_DELETE_RECORD = ( LOCAL_FILE_TRASH_DOMAIN, COMBINED_DELETED_FILE )
-
-FILE_SERVICES_WITH_SPECIFIC_MAPPING_CACHES = SPECIFIC_LOCAL_FILE_SERVICES + ( COMBINED_LOCAL_FILE, COMBINED_LOCAL_MEDIA, COMBINED_DELETED_FILE ) + REMOTE_FILE_SERVICES
+FILE_SERVICES_WITH_SPECIFIC_MAPPING_CACHES = REAL_FILE_SERVICES
 FILE_SERVICES_WITH_SPECIFIC_TAG_LOOKUP_CACHES = ( COMBINED_LOCAL_FILE, COMBINED_DELETED_FILE, FILE_REPOSITORY, IPFS )
 
 FILE_SERVICES_COVERED_BY_COMBINED_LOCAL_MEDIA = ( LOCAL_FILE_DOMAIN, )
@@ -471,7 +481,10 @@ FILE_SERVICES_COVERED_BY_COMBINED_DELETED_FILE = ( COMBINED_LOCAL_MEDIA, LOCAL_F
 
 ALL_SERVICES = REMOTE_SERVICES + LOCAL_SERVICES + ( COMBINED_FILE, COMBINED_TAG, COMBINED_DELETED_FILE )
 ALL_TAG_SERVICES = REAL_TAG_SERVICES + ( COMBINED_TAG, )
-ALL_FILE_SERVICES = FILE_SERVICES + ( COMBINED_FILE, )
+ALL_FILE_SERVICES = REAL_FILE_SERVICES + ( COMBINED_FILE, )
+
+FILE_SERVICES_WITH_NO_DELETE_RECORD = ( COMBINED_FILE, LOCAL_FILE_TRASH_DOMAIN, COMBINED_DELETED_FILE )
+FILE_SERVICES_WITH_DELETE_RECORD = tuple( ( t for t in REAL_FILE_SERVICES if t not in FILE_SERVICES_WITH_NO_DELETE_RECORD ) )
 
 SERVICES_WITH_THUMBNAILS = [ FILE_REPOSITORY, LOCAL_FILE_DOMAIN ]
 
@@ -614,6 +627,26 @@ TAG_REPOSITORY_SERVICE_INFO_TYPES = [
 SERVICE_UPDATE_DELETE_PENDING = 0
 SERVICE_UPDATE_RESET = 1
 
+TIMESTAMP_TYPE_MODIFIED_DOMAIN = 0
+TIMESTAMP_TYPE_MODIFIED_FILE = 1 # simple
+TIMESTAMP_TYPE_MODIFIED_AGGREGATE = 2 # virtual
+TIMESTAMP_TYPE_IMPORTED = 3
+TIMESTAMP_TYPE_DELETED = 4
+TIMESTAMP_TYPE_ARCHIVED = 5 # simple
+TIMESTAMP_TYPE_LAST_VIEWED = 6
+TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED = 7
+
+timestamp_type_str_lookup = {
+    TIMESTAMP_TYPE_MODIFIED_DOMAIN : 'domain modified time',
+    TIMESTAMP_TYPE_MODIFIED_FILE : 'file modified time',
+    TIMESTAMP_TYPE_MODIFIED_AGGREGATE : 'aggregate modified time',
+    TIMESTAMP_TYPE_IMPORTED : 'imported time',
+    TIMESTAMP_TYPE_DELETED : 'deleted time',
+    TIMESTAMP_TYPE_ARCHIVED : 'archived time',
+    TIMESTAMP_TYPE_LAST_VIEWED : 'last viewed time',
+    TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED : 'previous imported time (for undelete)'
+}
+
 ADD = 0
 DELETE = 1
 EDIT = 2
@@ -635,7 +668,7 @@ query_type_string_lookup = {
 APPLICATION_HYDRUS_CLIENT_COLLECTION = 0
 IMAGE_JPEG = 1
 IMAGE_PNG = 2
-IMAGE_GIF = 3
+ANIMATION_GIF = 3
 IMAGE_BMP = 4
 APPLICATION_FLASH = 5
 APPLICATION_YAML = 6
@@ -655,7 +688,7 @@ UNDETERMINED_WM = 19
 VIDEO_MKV = 20
 VIDEO_WEBM = 21
 APPLICATION_JSON = 22
-IMAGE_APNG = 23
+ANIMATION_APNG = 23
 UNDETERMINED_PNG = 24
 VIDEO_MPEG = 25
 VIDEO_MOV = 26
@@ -686,31 +719,206 @@ UNDETERMINED_MP4 = 50
 APPLICATION_CBOR = 51
 APPLICATION_WINDOWS_EXE = 52
 AUDIO_WAVPACK = 53
+APPLICATION_SAI2 = 54
+APPLICATION_KRITA = 55
+IMAGE_SVG = 56
+APPLICATION_XCF = 57
+APPLICATION_GZIP = 58
+GENERAL_APPLICATION_ARCHIVE = 59
+GENERAL_IMAGE_PROJECT = 60
+IMAGE_HEIF = 61
+IMAGE_HEIF_SEQUENCE = 62
+IMAGE_HEIC = 63
+IMAGE_HEIC_SEQUENCE = 64
+IMAGE_AVIF = 65
+IMAGE_AVIF_SEQUENCE = 66
+UNDETERMINED_GIF = 67
+IMAGE_GIF = 68
+APPLICATION_PROCREATE = 69
+IMAGE_QOI = 70
+APPLICATION_EPUB = 71
+APPLICATION_DJVU = 72
+APPLICATION_CBZ = 73
+ANIMATION_UGOIRA = 74
+APPLICATION_RTF = 75
 APPLICATION_OCTET_STREAM = 100
 APPLICATION_UNKNOWN = 101
 
-GENERAL_FILETYPES = { GENERAL_APPLICATION, GENERAL_AUDIO, GENERAL_IMAGE, GENERAL_VIDEO, GENERAL_ANIMATION }
+GENERAL_FILETYPES = {
+    GENERAL_APPLICATION,
+    GENERAL_AUDIO,
+    GENERAL_IMAGE,
+    GENERAL_VIDEO,
+    GENERAL_ANIMATION,
+    GENERAL_APPLICATION_ARCHIVE,
+    GENERAL_IMAGE_PROJECT
+}
 
-SEARCHABLE_MIMES = { IMAGE_JPEG, IMAGE_PNG, IMAGE_APNG, IMAGE_GIF, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON, APPLICATION_FLASH, VIDEO_AVI, VIDEO_FLV, VIDEO_MOV, VIDEO_MP4, VIDEO_MKV, VIDEO_REALMEDIA, VIDEO_WEBM, VIDEO_OGV, VIDEO_MPEG, APPLICATION_CLIP, APPLICATION_PSD, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z, AUDIO_M4A, AUDIO_MP3, AUDIO_REALMEDIA, AUDIO_OGG, AUDIO_FLAC, AUDIO_WAVE, AUDIO_TRUEAUDIO, AUDIO_WMA, VIDEO_WMV, AUDIO_MKV, AUDIO_MP4, AUDIO_WAVPACK }
+SEARCHABLE_MIMES = {
+    IMAGE_JPEG,
+    IMAGE_PNG,
+    ANIMATION_APNG,
+    IMAGE_GIF,
+    ANIMATION_GIF,
+    IMAGE_WEBP,
+    IMAGE_TIFF,
+    IMAGE_QOI,
+    IMAGE_ICON,
+    IMAGE_SVG,
+    IMAGE_HEIF,
+    IMAGE_HEIF_SEQUENCE,
+    IMAGE_HEIC,
+    IMAGE_HEIC_SEQUENCE,
+    IMAGE_AVIF,
+    IMAGE_AVIF_SEQUENCE,
+    IMAGE_BMP,
+    ANIMATION_UGOIRA,
+    APPLICATION_FLASH,
+    VIDEO_AVI,
+    VIDEO_FLV,
+    VIDEO_MOV,
+    VIDEO_MP4,
+    VIDEO_MKV,
+    VIDEO_REALMEDIA,
+    VIDEO_WEBM,
+    VIDEO_OGV,
+    VIDEO_MPEG,
+    APPLICATION_CBZ,
+    APPLICATION_CLIP,
+    APPLICATION_PSD,
+    APPLICATION_SAI2,
+    APPLICATION_KRITA,
+    APPLICATION_XCF,
+    APPLICATION_PROCREATE,
+    APPLICATION_PDF,
+    APPLICATION_EPUB,
+    APPLICATION_DJVU,
+    APPLICATION_RTF,
+    APPLICATION_ZIP,
+    APPLICATION_RAR,
+    APPLICATION_7Z,
+    APPLICATION_GZIP,
+    AUDIO_M4A,
+    AUDIO_MP3,
+    AUDIO_REALMEDIA,
+    AUDIO_OGG,
+    AUDIO_FLAC,
+    AUDIO_WAVE,
+    AUDIO_TRUEAUDIO,
+    AUDIO_WMA,
+    VIDEO_WMV,
+    AUDIO_MKV,
+    AUDIO_MP4,
+    AUDIO_WAVPACK
+}
 
-STORABLE_MIMES = set( SEARCHABLE_MIMES ).union( { APPLICATION_HYDRUS_UPDATE_CONTENT, APPLICATION_HYDRUS_UPDATE_DEFINITIONS } )
+ALLOWED_MIMES = set( SEARCHABLE_MIMES ).union( { APPLICATION_HYDRUS_UPDATE_CONTENT, APPLICATION_HYDRUS_UPDATE_DEFINITIONS } )
 
-ALLOWED_MIMES = set( STORABLE_MIMES ).union( { IMAGE_BMP } )
+DECOMPRESSION_BOMB_IMAGES = {
+    IMAGE_JPEG,
+    IMAGE_PNG
+}
 
-DECOMPRESSION_BOMB_IMAGES = { IMAGE_JPEG, IMAGE_PNG }
+# Keep these as ordered lists, bro--we use that in a couple places in UI
+IMAGES = [
+    IMAGE_JPEG,
+    IMAGE_PNG,
+    IMAGE_GIF,
+    IMAGE_WEBP,
+    IMAGE_AVIF,
+    IMAGE_BMP,
+    IMAGE_HEIC,
+    IMAGE_HEIF,
+    IMAGE_ICON,
+    IMAGE_QOI,
+    IMAGE_TIFF
+]
 
-IMAGES = { IMAGE_JPEG, IMAGE_PNG, IMAGE_BMP, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON }
+ANIMATIONS = [
+    ANIMATION_GIF,
+    ANIMATION_APNG,
+    IMAGE_AVIF_SEQUENCE,
+    IMAGE_HEIC_SEQUENCE,
+    IMAGE_HEIF_SEQUENCE,
+    ANIMATION_UGOIRA
+]
 
-ANIMATIONS = { IMAGE_GIF, IMAGE_APNG }
+VIEWABLE_ANIMATIONS = [
+    ANIMATION_GIF,
+    ANIMATION_APNG,
+    IMAGE_AVIF_SEQUENCE,
+    IMAGE_HEIC_SEQUENCE,
+    IMAGE_HEIF_SEQUENCE
+]
 
-AUDIO = { AUDIO_M4A, AUDIO_MP3, AUDIO_OGG, AUDIO_FLAC, AUDIO_WAVE, AUDIO_WMA, AUDIO_REALMEDIA, AUDIO_TRUEAUDIO, AUDIO_MKV, AUDIO_MP4, AUDIO_WAVPACK }
+HEIF_TYPE_SEQUENCES = [
+    IMAGE_AVIF_SEQUENCE,
+    IMAGE_HEIC_SEQUENCE,
+    IMAGE_HEIF_SEQUENCE
+]
 
-VIDEO = { VIDEO_AVI, VIDEO_FLV, VIDEO_MOV, VIDEO_MP4, VIDEO_WMV, VIDEO_MKV, VIDEO_REALMEDIA, VIDEO_WEBM, VIDEO_OGV, VIDEO_MPEG }
+AUDIO = [
+    AUDIO_MP3,
+    AUDIO_OGG,
+    AUDIO_FLAC,
+    AUDIO_M4A,
+    AUDIO_MKV,
+    AUDIO_MP4,
+    AUDIO_REALMEDIA,
+    AUDIO_TRUEAUDIO,
+    AUDIO_WAVE,
+    AUDIO_WAVPACK,
+    AUDIO_WMA
+]
 
-APPLICATIONS = { APPLICATION_FLASH, APPLICATION_PSD, APPLICATION_CLIP, APPLICATION_PDF, APPLICATION_ZIP, APPLICATION_RAR, APPLICATION_7Z }
+VIDEO = [
+    VIDEO_MP4,
+    VIDEO_WEBM,
+    VIDEO_MKV,
+    VIDEO_AVI,
+    VIDEO_FLV,
+    VIDEO_MOV,
+    VIDEO_MPEG,
+    VIDEO_OGV,
+    VIDEO_REALMEDIA,
+    VIDEO_WMV
+]
+
+APPLICATIONS = [
+    APPLICATION_FLASH,
+    APPLICATION_PDF,
+    APPLICATION_EPUB,
+    APPLICATION_DJVU,
+    APPLICATION_RTF
+]
+
+IMAGE_PROJECT_FILES = [
+    APPLICATION_CLIP,
+    APPLICATION_KRITA,
+    APPLICATION_PROCREATE,
+    APPLICATION_PSD,
+    APPLICATION_SAI2,
+    IMAGE_SVG,
+    APPLICATION_XCF
+]
+
+ARCHIVES = [
+    APPLICATION_CBZ,
+    APPLICATION_7Z,
+    APPLICATION_GZIP,
+    APPLICATION_RAR,
+    APPLICATION_ZIP
+]
+
+VIEWABLE_IMAGE_PROJECT_FILES = { APPLICATION_PSD, APPLICATION_KRITA }
+
+# zip files that have a `mimetype` file inside
+OPEN_DOCUMENT_ZIPS = { APPLICATION_KRITA, APPLICATION_EPUB }
 
 general_mimetypes_to_mime_groups = {
     GENERAL_APPLICATION : APPLICATIONS,
+    GENERAL_APPLICATION_ARCHIVE : ARCHIVES,
+    GENERAL_IMAGE_PROJECT : IMAGE_PROJECT_FILES,
     GENERAL_AUDIO : AUDIO,
     GENERAL_IMAGE : IMAGES,
     GENERAL_VIDEO : VIDEO,
@@ -727,21 +935,61 @@ for ( general_mime_type, mimes_in_type ) in general_mimetypes_to_mime_groups.ite
         
     
 
+# AVIF sequence is not here since it doesn't rely on PIL
+PIL_HEIF_MIMES = {
+    IMAGE_HEIF,
+    IMAGE_HEIF_SEQUENCE,
+    IMAGE_HEIC,
+    IMAGE_HEIC_SEQUENCE,
+    IMAGE_AVIF
+}
+
 MIMES_THAT_DEFINITELY_HAVE_AUDIO = tuple( [ APPLICATION_FLASH ] + list( AUDIO ) )
 MIMES_THAT_MAY_HAVE_AUDIO = tuple( list( MIMES_THAT_DEFINITELY_HAVE_AUDIO ) + list( VIDEO ) )
 
-ARCHIVES = { APPLICATION_ZIP, APPLICATION_HYDRUS_ENCRYPTED_ZIP, APPLICATION_RAR, APPLICATION_7Z }
+MIMES_THAT_WE_CAN_CHECK_FOR_TRANSPARENCY = {
+    IMAGE_PNG,
+    IMAGE_GIF,
+    IMAGE_WEBP,
+    IMAGE_BMP,
+    IMAGE_ICON,
+    IMAGE_TIFF,
+    IMAGE_QOI,
+    IMAGE_AVIF,
+    IMAGE_HEIF,
+    IMAGE_HEIC,
+    ANIMATION_GIF,
+    ANIMATION_APNG
+}
 
-MIMES_WITH_THUMBNAILS = set( IMAGES ).union( ANIMATIONS ).union( VIDEO ).union( { APPLICATION_FLASH, APPLICATION_CLIP, APPLICATION_PSD } )
+MIMES_THAT_MAY_THEORETICALLY_HAVE_TRANSPARENCY = MIMES_THAT_WE_CAN_CHECK_FOR_TRANSPARENCY.union( {
+    APPLICATION_PSD,
+    APPLICATION_SAI2,
+    APPLICATION_KRITA,
+    APPLICATION_XCF,
+    APPLICATION_PROCREATE,
+    APPLICATION_CLIP,
+    IMAGE_SVG,
+    IMAGE_AVIF_SEQUENCE,
+    IMAGE_HEIF_SEQUENCE,
+    IMAGE_HEIC_SEQUENCE,
+    ANIMATION_APNG
+} )
 
-FILES_THAT_CAN_HAVE_ICC_PROFILE = { IMAGE_JPEG, IMAGE_PNG, IMAGE_GIF, IMAGE_TIFF }
+APPLICATIONS_WITH_THUMBNAILS = { IMAGE_SVG, APPLICATION_PDF, APPLICATION_FLASH, APPLICATION_CLIP, APPLICATION_PROCREATE }.union( VIEWABLE_IMAGE_PROJECT_FILES ).union( { APPLICATION_CBZ } )
 
-FILES_THAT_CAN_HAVE_EXIF = { IMAGE_JPEG, IMAGE_TIFF }
+MIMES_WITH_THUMBNAILS = set( IMAGES ).union( ANIMATIONS ).union( VIDEO ).union( APPLICATIONS_WITH_THUMBNAILS )
+
+FILES_THAT_CAN_HAVE_ICC_PROFILE = { IMAGE_BMP, IMAGE_JPEG, IMAGE_PNG, IMAGE_GIF, IMAGE_TIFF, APPLICATION_PSD }.union( PIL_HEIF_MIMES )
+
+FILES_THAT_CAN_HAVE_EXIF = { IMAGE_JPEG, IMAGE_TIFF, IMAGE_PNG, IMAGE_WEBP }.union( PIL_HEIF_MIMES )
 # images and animations that PIL can handle
-FILES_THAT_CAN_HAVE_HUMAN_READABLE_EMBEDDED_METADATA = { IMAGE_JPEG, IMAGE_PNG, IMAGE_BMP, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON, IMAGE_GIF, IMAGE_APNG }
+FILES_THAT_CAN_HAVE_HUMAN_READABLE_EMBEDDED_METADATA = { IMAGE_JPEG, IMAGE_PNG, IMAGE_BMP, IMAGE_WEBP, IMAGE_TIFF, IMAGE_ICON, IMAGE_GIF, ANIMATION_GIF, ANIMATION_APNG }
+FILES_THAT_CAN_HAVE_HUMAN_READABLE_EMBEDDED_METADATA.update( PIL_HEIF_MIMES )
+FILES_THAT_CAN_HAVE_HUMAN_READABLE_EMBEDDED_METADATA.add( APPLICATION_PDF )
 
-FILES_THAT_CAN_HAVE_PIXEL_HASH = set( IMAGES ).union( { IMAGE_GIF } )
-FILES_THAT_HAVE_PERCEPTUAL_HASH = set( IMAGES )
+FILES_THAT_CAN_HAVE_PIXEL_HASH = set( IMAGES ).union( VIEWABLE_IMAGE_PROJECT_FILES )
+FILES_THAT_HAVE_PERCEPTUAL_HASH = set( IMAGES ).union( VIEWABLE_IMAGE_PROJECT_FILES )
 
 HYDRUS_UPDATE_FILES = ( APPLICATION_HYDRUS_UPDATE_DEFINITIONS, APPLICATION_HYDRUS_UPDATE_CONTENT )
 
@@ -752,25 +1000,46 @@ mime_enum_lookup = {
     'image/jpg' : IMAGE_JPEG,
     'image/x-png' : IMAGE_PNG,
     'image/png' : IMAGE_PNG,
-    'image/apng' : IMAGE_APNG,
-    'image/gif' : IMAGE_GIF,
+    'image/apng' : ANIMATION_APNG,
+    'image/gif' : ANIMATION_GIF, # no lookup goes to static gif
     'image/bmp' : IMAGE_BMP,
     'image/webp' : IMAGE_WEBP,
     'image/tiff' : IMAGE_TIFF,
+    'image/qoi' : IMAGE_QOI,
     'image/x-icon' : IMAGE_ICON,
+    'image/svg+xml': IMAGE_SVG,
+    'image/heif' : IMAGE_HEIF,
+    'image/heif-sequence' : IMAGE_HEIF_SEQUENCE,
+    'image/heic' : IMAGE_HEIC,
+    'image/heic-sequence' : IMAGE_HEIC_SEQUENCE,
+    'image/avif' : IMAGE_AVIF,
+    'image/avif-sequence' : IMAGE_AVIF_SEQUENCE,
     'image/vnd.microsoft.icon' : IMAGE_ICON,
     'image' : IMAGES,
     'application/x-shockwave-flash' : APPLICATION_FLASH,
     'application/x-photoshop' : APPLICATION_PSD,
     'image/vnd.adobe.photoshop' : APPLICATION_PSD,
-    'application/clip' : APPLICATION_CLIP,
+    'application/vnd.adobe.photoshop' : APPLICATION_PSD,
+    'application/clip' : APPLICATION_CLIP, # made up
+    'application/sai2': APPLICATION_SAI2, # made up
+    'application/x-krita': APPLICATION_KRITA,
+    'application/x-procreate': APPLICATION_PROCREATE, # made up
+    'image/x-xcf' : APPLICATION_XCF,
     'application/octet-stream' : APPLICATION_OCTET_STREAM,
     'application/x-yaml' : APPLICATION_YAML,
     'PDF document' : APPLICATION_PDF,
     'application/pdf' : APPLICATION_PDF,
+    'application/epub+zip' : APPLICATION_EPUB,
+    'image/vnd.djvu' : APPLICATION_DJVU,
+    'image/vnd.djvu+multipage' : APPLICATION_DJVU,
+    'image/x-djvu' : APPLICATION_DJVU,
+    'text/rtf' : APPLICATION_RTF,
+    'application/rtf': APPLICATION_RTF,
+    'application/vnd.comicbook+zip' : APPLICATION_CBZ,
     'application/zip' : APPLICATION_ZIP,
     'application/vnd.rar' : APPLICATION_RAR,
     'application/x-7z-compressed' : APPLICATION_7Z,
+    'application/gzip': APPLICATION_GZIP,
     'application/json' : APPLICATION_JSON,
     'application/cbor': APPLICATION_CBOR,
     'application/hydrus-encrypted-zip' : APPLICATION_HYDRUS_ENCRYPTED_ZIP,
@@ -809,23 +1078,42 @@ mime_string_lookup = {
     APPLICATION_HYDRUS_CLIENT_COLLECTION : 'collection',
     IMAGE_JPEG : 'jpeg',
     IMAGE_PNG : 'png',
-    IMAGE_APNG : 'apng',
-    IMAGE_GIF : 'gif',
-    IMAGE_BMP : 'bmp',
+    ANIMATION_APNG : 'apng',
+    IMAGE_GIF : 'static gif',
+    ANIMATION_GIF : 'animated gif',
+    IMAGE_BMP : 'bitmap',
     IMAGE_WEBP : 'webp',
     IMAGE_TIFF : 'tiff',
+    IMAGE_QOI : 'qoi',
     IMAGE_ICON : 'icon',
+    IMAGE_SVG : 'svg',
+    IMAGE_HEIF : 'heif',
+    IMAGE_HEIF_SEQUENCE : 'heif sequence',
+    IMAGE_HEIC : 'heic',
+    IMAGE_HEIC_SEQUENCE : 'heic sequence',
+    IMAGE_AVIF : 'avif',
+    IMAGE_AVIF_SEQUENCE : 'avif sequence',
+    ANIMATION_UGOIRA : 'ugoira',
+    APPLICATION_CBZ : 'cbz',
     APPLICATION_FLASH : 'flash',
     APPLICATION_OCTET_STREAM : 'application/octet-stream',
     APPLICATION_YAML : 'yaml',
     APPLICATION_JSON : 'json',
     APPLICATION_CBOR : 'cbor',
     APPLICATION_PDF : 'pdf',
-    APPLICATION_PSD : 'photoshop psd',
+    APPLICATION_EPUB : 'epub',
+    APPLICATION_DJVU : 'djvu',
+    APPLICATION_RTF : 'rtf',
+    APPLICATION_PSD : 'psd',
     APPLICATION_CLIP : 'clip',
+    APPLICATION_SAI2 : 'sai2',
+    APPLICATION_KRITA : 'krita',
+    APPLICATION_XCF : 'xcf',
+    APPLICATION_PROCREATE : 'procreate',
     APPLICATION_ZIP : 'zip',
     APPLICATION_RAR : 'rar',
     APPLICATION_7Z : '7z',
+    APPLICATION_GZIP: 'gzip',
     APPLICATION_WINDOWS_EXE : 'windows exe',
     APPLICATION_HYDRUS_ENCRYPTED_ZIP : 'application/hydrus-encrypted-zip',
     APPLICATION_HYDRUS_UPDATE_CONTENT : 'application/hydrus-update-content',
@@ -858,33 +1146,56 @@ mime_string_lookup = {
     UNDETERMINED_PNG : 'png or apng',
     APPLICATION_UNKNOWN : 'unknown filetype',
     GENERAL_APPLICATION : 'application',
+    GENERAL_APPLICATION_ARCHIVE : 'archive',
+    GENERAL_IMAGE_PROJECT : 'image project file',
     GENERAL_AUDIO : 'audio',
     GENERAL_IMAGE : 'image',
     GENERAL_VIDEO : 'video',
-    GENERAL_ANIMATION : 'animation'
+    GENERAL_ANIMATION : 'animation',
 }
+
+string_enum_lookup = { s : enum for ( enum, s ) in mime_string_lookup.items() }
 
 mime_mimetype_string_lookup = {
     APPLICATION_HYDRUS_CLIENT_COLLECTION : 'collection',
     IMAGE_JPEG : 'image/jpeg',
     IMAGE_PNG : 'image/png',
-    IMAGE_APNG : 'image/apng',
+    ANIMATION_APNG : 'image/apng',
     IMAGE_GIF : 'image/gif',
+    ANIMATION_GIF : 'image/gif',
     IMAGE_BMP : 'image/bmp',
     IMAGE_WEBP : 'image/webp',
     IMAGE_TIFF : 'image/tiff',
+    IMAGE_QOI : 'image/qoi',
     IMAGE_ICON : 'image/x-icon',
+    IMAGE_SVG : 'image/svg+xml',
+    IMAGE_HEIF: 'image/heif',
+    IMAGE_HEIF_SEQUENCE: 'image/heif-sequence',
+    IMAGE_HEIC: 'image/heic',
+    IMAGE_HEIC_SEQUENCE: 'image/heic-sequence',
+    IMAGE_AVIF: 'image/avif',
+    IMAGE_AVIF_SEQUENCE: 'image/avif-sequence',
+    ANIMATION_UGOIRA : 'application/zip',
     APPLICATION_FLASH : 'application/x-shockwave-flash',
     APPLICATION_OCTET_STREAM : 'application/octet-stream',
+    APPLICATION_CBZ: 'application/vnd.comicbook+zip',
     APPLICATION_YAML : 'application/x-yaml',
     APPLICATION_JSON : 'application/json',
     APPLICATION_CBOR : 'application/cbor',
     APPLICATION_PDF : 'application/pdf',
-    APPLICATION_PSD : 'application/x-photoshop',
-    APPLICATION_CLIP : 'application/clip',
+    APPLICATION_EPUB : 'application/epub+zip',
+    APPLICATION_DJVU : 'image/vnd.djvu',
+    APPLICATION_RTF: 'application/rtf',
+    APPLICATION_PSD : 'image/vnd.adobe.photoshop',
+    APPLICATION_CLIP : 'application/clip', # made up
+    APPLICATION_SAI2: 'application/sai2', # made up
+    APPLICATION_KRITA: 'application/x-krita',
+    APPLICATION_XCF : 'image/x-xcf',
+    APPLICATION_PROCREATE : 'application/x-procreate', # made up
     APPLICATION_ZIP : 'application/zip',
     APPLICATION_RAR : 'application/vnd.rar',
     APPLICATION_7Z : 'application/x-7z-compressed',
+    APPLICATION_GZIP: 'application/gzip',
     APPLICATION_WINDOWS_EXE : 'application/octet-stream',
     APPLICATION_HYDRUS_ENCRYPTED_ZIP : 'application/hydrus-encrypted-zip',
     APPLICATION_HYDRUS_UPDATE_CONTENT : 'application/hydrus-update-content',
@@ -914,36 +1225,57 @@ mime_mimetype_string_lookup = {
     VIDEO_WEBM : 'video/webm',
     APPLICATION_UNKNOWN : 'unknown filetype',
     GENERAL_APPLICATION : 'application',
+    GENERAL_APPLICATION_ARCHIVE : 'archive',
+    GENERAL_IMAGE_PROJECT : 'image project file',
     GENERAL_AUDIO : 'audio',
     GENERAL_IMAGE : 'image',
     GENERAL_VIDEO : 'video',
-    GENERAL_ANIMATION : 'animation'
+    GENERAL_ANIMATION : 'animation',
 }
 
 mime_mimetype_string_lookup[ UNDETERMINED_WM ] = '{} or {}'.format( mime_mimetype_string_lookup[ AUDIO_WMA ], mime_mimetype_string_lookup[ VIDEO_WMV ] )
 mime_mimetype_string_lookup[ UNDETERMINED_MP4 ] = '{} or {}'.format( mime_mimetype_string_lookup[ AUDIO_MP4 ], mime_mimetype_string_lookup[ VIDEO_MP4 ] )
-mime_mimetype_string_lookup[ UNDETERMINED_PNG ] = '{} or {}'.format( mime_mimetype_string_lookup[ IMAGE_PNG ], mime_mimetype_string_lookup[ IMAGE_APNG ] )
+mime_mimetype_string_lookup[ UNDETERMINED_PNG ] = '{} or {}'.format( mime_mimetype_string_lookup[ IMAGE_PNG ], mime_mimetype_string_lookup[ ANIMATION_APNG ] )
 
 mime_ext_lookup = {
     APPLICATION_HYDRUS_CLIENT_COLLECTION : '.collection',
     IMAGE_JPEG : '.jpg',
     IMAGE_PNG : '.png',
-    IMAGE_APNG : '.png',
+    ANIMATION_APNG : '.png',
     IMAGE_GIF : '.gif',
+    ANIMATION_GIF : '.gif',
     IMAGE_BMP : '.bmp',
     IMAGE_WEBP : '.webp',
     IMAGE_TIFF : '.tiff',
+    IMAGE_QOI: '.qoi',
     IMAGE_ICON : '.ico',
+    IMAGE_SVG : '.svg',
+    IMAGE_HEIF: '.heif',
+    IMAGE_HEIF_SEQUENCE: '.heifs',
+    IMAGE_HEIC: '.heic',
+    IMAGE_HEIC_SEQUENCE: '.heics',
+    IMAGE_AVIF: '.avif',
+    IMAGE_AVIF_SEQUENCE: '.avifs',
+    ANIMATION_UGOIRA : '.zip',
+    APPLICATION_CBZ : '.cbz',   
     APPLICATION_FLASH : '.swf',
     APPLICATION_OCTET_STREAM : '.bin',
     APPLICATION_YAML : '.yaml',
     APPLICATION_JSON : '.json',
     APPLICATION_PDF : '.pdf',
+    APPLICATION_EPUB : '.epub',
+    APPLICATION_DJVU : '.djvu',
+    APPLICATION_RTF : '.rtf',
     APPLICATION_PSD : '.psd',
     APPLICATION_CLIP : '.clip',
+    APPLICATION_SAI2: '.sai2',
+    APPLICATION_KRITA: '.kra',
+    APPLICATION_XCF : '.xcf',
+    APPLICATION_PROCREATE : '.procreate',
     APPLICATION_ZIP : '.zip',
     APPLICATION_RAR : '.rar',
     APPLICATION_7Z : '.7z',
+    APPLICATION_GZIP: '.gz',
     APPLICATION_WINDOWS_EXE : '.exe',
     APPLICATION_HYDRUS_ENCRYPTED_ZIP : '.zip.encrypted',
     APPLICATION_HYDRUS_UPDATE_CONTENT : '',
@@ -973,6 +1305,10 @@ mime_ext_lookup = {
     VIDEO_WEBM : '.webm',
     APPLICATION_UNKNOWN : ''
 }
+
+IMAGE_FILE_EXTS = { mime_ext_lookup[ mime ] for mime in IMAGES }
+IMAGE_FILE_EXTS.update( ( '.jpe', '.jpeg' ) )
+VIDEO_FILE_EXTS = { mime_ext_lookup[ mime ] for mime in VIDEO }
 
 ALLOWED_MIME_EXTENSIONS = [ mime_ext_lookup[ mime ] for mime in ALLOWED_MIMES ]
 
@@ -1014,11 +1350,16 @@ site_type_string_lookup = {
     SITE_TYPE_WATCHER : 'watcher'
 }
 
-TIMESTAMP_TYPE_SOURCE = 0
-
-TIMEZONE_GMT = 0
+TIMEZONE_UTC = 0
 TIMEZONE_LOCAL = 1
 TIMEZONE_OFFSET = 2
+
+UNICODE_APPROX_EQUAL = '\u2248'
+UNICODE_BYTE_ORDER_MARK = '\uFEFF'
+UNICODE_ELLIPSIS = '\u2026'
+UNICODE_NOT_EQUAL = '\u2260'
+UNICODE_REPLACEMENT_CHARACTER = '\ufffd'
+UNICODE_PLUS_OR_MINUS = '\u00B1'
 
 URL_TYPE_POST = 0
 URL_TYPE_API = 1
@@ -1033,7 +1374,7 @@ URL_TYPE_SUB_GALLERY = 9
 
 url_type_string_lookup = {
     URL_TYPE_POST : 'post url',
-    URL_TYPE_API : 'api url',
+    URL_TYPE_API : 'api/redirect url',
     URL_TYPE_FILE : 'file url',
     URL_TYPE_GALLERY : 'gallery url',
     URL_TYPE_WATCHABLE : 'watchable url',
@@ -1042,6 +1383,26 @@ url_type_string_lookup = {
     URL_TYPE_DESIRED : 'downloadable/pursuable url',
     URL_TYPE_SUB_GALLERY : 'sub-gallery url (is queued even if creator found no post/file urls)'
 }
+
+REMOTE_HELP = "https://hydrusnetwork.github.io/hydrus"
+
+DOCUMENTATION_INDEX = "index.html"
+DOCUMENTATION_CHANGELOG = f"changelog.html#version_{SOFTWARE_VERSION}"
+DOCUMENTATION_DOWNLOADER_GUGS = "downloader_gugs.html"
+DOCUMENTATION_DOWNLOADER_LOGIN = 'downloader_login.html'
+DOCUMENTATION_ADDING_NEW_DOWNLOADERS = 'adding_new_downloaders.html'
+DOCUMENTATION_DOWNLOADER_URL_CLASSES = 'downloader_url_classes.html'
+DOCUMENTATION_GETTING_STARTED_SUBSCRIPTIONS = 'getting_started_subscriptions.html'
+DOCUMENTATION_DATABASE_MIGRATION = 'database_migration.html'
+DOCUMENTATION_DUPLICATES = 'duplicates.html'
+DOCUMENTATION_DOWNLOADER_SHARING = 'downloader_sharing.html'
+DOCUMENTATION_DOWNLOADER_PARSERS_PAGE_PARSERS_PAGE_PARSERS = 'downloader_parsers_page_parsers.html#page_parsers'
+DOCUMENTATION_DOWNLOADER_PARSERS_CONTENT_PARSERS_CONTENT_PARSERS = 'downloader_parsers_content_parsers.html#content_parsers'
+DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_COMPOUND_FORMULA = 'downloader_parsers_formulae.html#compound_formula'
+DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_CONTEXT_VARIABLE_FORMULA = 'downloader_parsers_formulae.html#context_variable_formula'
+DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_HTML_FORMULA = 'downloader_parsers_formulae.html#html_formula'
+DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_JSON_FORMULA = 'downloader_parsers_formulae.html#json_formula'
+DOCUMENTATION_ABOUT_DOCS = "about_docs.html"
 
 # default options
 
@@ -1054,6 +1415,7 @@ def construct_python_tuple( self, node ):
     
     return tuple( self.construct_sequence( node ) )
     
+
 def represent_python_tuple( self, data ):
     
     return self.represent_sequence( 'tag:yaml.org,2002:python/tuple', data )

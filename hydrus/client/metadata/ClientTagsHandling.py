@@ -5,13 +5,14 @@ import time
 import typing
 
 from hydrus.core import HydrusConstants as HC
-from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
 
 class TagAutocompleteOptions( HydrusSerialisable.SerialisableBase ):
@@ -372,7 +373,9 @@ class TagDisplayMaintenanceManager( object ):
         self._controller.sub( self, 'NotifyNewDisplayData', 'notify_new_tag_display_application' )
         
     
-    def _GetAfterWorkWaitTime( self, service_key, expected_work_time, actual_work_time ):
+    def _GetRestTime( self, service_key, expected_work_time, actual_work_time ):
+        
+        rest_ratio = None
         
         with self._lock:
             
@@ -383,28 +386,37 @@ class TagDisplayMaintenanceManager( object ):
                     self._go_faster.discard( service_key )
                     
                 
-                return 0.1
+                rest_ratio = CG.client_controller.new_options.GetInteger( 'tag_display_processing_rest_percentage_work_hard' ) / 100
                 
             
         
-        if self._controller.CurrentlyIdle():
+        if rest_ratio is None:
             
-            return 0.5
-            
-        else:
-            
-            if actual_work_time > expected_work_time * 10:
+            if self._controller.CurrentlyIdle():
                 
-                # if suddenly a job blats the user for ten seconds or _ten minutes_ during normal time, we are going to take a big break
-                work_rest_ratio = 30
+                rest_ratio = CG.client_controller.new_options.GetInteger( 'tag_display_processing_rest_percentage_idle' ) / 100
                 
             else:
                 
-                work_rest_ratio = 9
+                rest_ratio = CG.client_controller.new_options.GetInteger( 'tag_display_processing_rest_percentage_normal' ) / 100
+                
+                if actual_work_time > expected_work_time * 10:
+                    
+                    # if suddenly a job blats the user for ten seconds or _ten minutes_ during normal time, we are going to take a big break
+                    rest_ratio *= 5
+                    
                 
             
-            return max( actual_work_time, expected_work_time ) * work_rest_ratio
+        
+        if actual_work_time > expected_work_time * 10:
             
+            # if suddenly a job blats the user for ten seconds or _ten minutes_ during normal time, we are going to take a big break
+            rest_ratio *= 30
+            
+        
+        reasonable_work_time = min( 5 * expected_work_time, actual_work_time )
+        
+        return reasonable_work_time * rest_ratio
         
     
     def _GetServiceKeyToWorkOn( self ):
@@ -432,25 +444,24 @@ class TagDisplayMaintenanceManager( object ):
         
         with self._lock:
             
+            # TODO: reinstitute accelerating time here with a new object
+            # ok, this previously did a thing where it remembered the last last work time and accelerated the work time up to 30s
+            # we should convert all this work/rest ratio thing, which we use all over the place, into an object we get a context around or something similar and unify it all
+            # and then we can do clever stuff like accelerating code in one location!
+            
             if service_key in self._go_faster:
                 
-                ideally = 30
-                
-                base = max( 0.5, self._last_loop_work_time )
-                
-                accelerating_time = min( base * 1.2, ideally )
-                
-                return accelerating_time
+                return CG.client_controller.new_options.GetInteger( 'tag_display_processing_work_time_ms_work_hard' ) / 1000
                 
             
         
         if self._controller.CurrentlyIdle():
             
-            return 15
+            return CG.client_controller.new_options.GetInteger( 'tag_display_processing_work_time_ms_idle' ) / 1000
             
         else:
             
-            return 0.1
+            return CG.client_controller.new_options.GetInteger( 'tag_display_processing_work_time_ms_normal' ) / 1000
             
         
     
@@ -462,7 +473,7 @@ class TagDisplayMaintenanceManager( object ):
             
         
         # we are getting new display data pretty fast. if it is streaming in, let's take a break
-        if not HydrusData.TimeHasPassed( self._last_last_new_data_event_time + 10 ):
+        if not HydrusTime.TimeHasPassed( self._last_last_new_data_event_time + 10 ):
             
             return False
             
@@ -578,17 +589,17 @@ class TagDisplayMaintenanceManager( object ):
                     
                     work_time = self._GetWorkTime( service_key )
                     
-                    start_time = HydrusData.GetNowPrecise()
+                    start_time = HydrusTime.GetNowPrecise()
                     
                     still_needs_work = self._controller.WriteSynchronous( 'sync_tag_display_maintenance', service_key, work_time )
                     
-                    finish_time = HydrusData.GetNowPrecise()
+                    finish_time = HydrusTime.GetNowPrecise()
                     
                     total_time_took = finish_time - start_time
                     
                     self._service_keys_to_needs_work[ service_key ] = still_needs_work
                     
-                    wait_time = self._GetAfterWorkWaitTime( service_key, work_time, total_time_took )
+                    wait_time = self._GetRestTime( service_key, work_time, total_time_took )
                     
                     self._last_loop_work_time = work_time
                     
@@ -606,7 +617,7 @@ class TagDisplayMaintenanceManager( object ):
                     time.sleep( 1 )
                     
                     self._last_last_new_data_event_time = self._last_new_data_event_time
-                    self._last_new_data_event_time = HydrusData.GetNow()
+                    self._last_new_data_event_time = HydrusTime.GetNow()
                     
                     self._service_keys_to_needs_work = {}
                     
@@ -859,11 +870,16 @@ class TagDisplayManager( HydrusSerialisable.SerialisableBase ):
     
     def HideTag( self, tag_display_type, service_key, tag ):
         
+        self.HideTags( tag_display_type, service_key, ( tag, ) )
+        
+    
+    def HideTags( self, tag_display_type, service_key, tags ):
+        
         with self._lock:
             
             tag_filter = self._tag_display_types_to_service_keys_to_tag_filters[ tag_display_type ][ service_key ]
             
-            tag_filter.SetRule( tag, HC.FILTER_BLACKLIST )
+            tag_filter.SetRules( tags, HC.FILTER_BLACKLIST )
             
             self._dirty = True
             

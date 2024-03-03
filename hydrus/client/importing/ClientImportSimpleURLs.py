@@ -1,5 +1,6 @@
 import threading
 import time
+import typing
 import urllib.parse
 
 from hydrus.core import HydrusConstants as HC
@@ -7,8 +8,10 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.importing import ClientImportControl
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportFileSeeds
@@ -61,7 +64,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
         
         self._last_serialisable_change_timestamp = 0
         
-        HG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
+        CG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
         
     
     def _DelayWork( self, time_delta, reason ):
@@ -71,7 +74,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
             reason = reason.splitlines()[0]
             
         
-        self._no_work_until = HydrusData.GetNow() + time_delta
+        self._no_work_until = HydrusTime.GetNow() + time_delta
         self._no_work_until_reason = reason
         
     
@@ -148,7 +151,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
     
     def _SerialisableChangeMade( self ):
         
-        self._last_serialisable_change_timestamp = HydrusData.GetNow()
+        self._last_serialisable_change_timestamp = HydrusTime.GetNow()
         
     
     def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
@@ -233,7 +236,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
             
         except HydrusExceptions.NetworkException as e:
             
-            delay = HG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
+            delay = CG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
             
             self._DelayWork( delay, str( e ) )
             
@@ -296,7 +299,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
                 
                 network_job.OverrideBandwidth( 30 )
                 
-                HG.client_controller.network_engine.AddJob( network_job )
+                CG.client_controller.network_engine.AddJob( network_job )
                 
                 with self._PageNetworkJobPresentationContextFactory( network_job ):
                     
@@ -368,7 +371,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
                 
             except HydrusExceptions.NetworkException as e:
                 
-                delay = HG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
+                delay = CG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
                 
                 self._DelayWork( delay, str( e ) )
                 
@@ -552,8 +555,13 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            gallery_text = ClientImportControl.GenerateLiveStatusText( self._gallery_status, self._gallery_paused, self._no_work_until, self._no_work_until_reason )
-            file_text = ClientImportControl.GenerateLiveStatusText( self._files_status, self._files_paused, self._no_work_until, self._no_work_until_reason )
+            currently_working = self._gallery_repeating_job is not None and self._gallery_repeating_job.CurrentlyWorking()
+            
+            gallery_text = ClientImportControl.GenerateLiveStatusText( self._gallery_status, self._gallery_paused, currently_working, self._no_work_until, self._no_work_until_reason )
+            
+            currently_working = self._files_repeating_job is not None and self._files_repeating_job.CurrentlyWorking()
+            
+            file_text = ClientImportControl.GenerateLiveStatusText( self._files_status, self._files_paused, currently_working, self._no_work_until, self._no_work_until_reason )
             
             return ( list( self._pending_jobs ), gallery_text, file_text, self._gallery_paused, self._files_paused )
             
@@ -661,8 +669,8 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
             
             self._page_key = page_key
             
-            self._files_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
-            self._gallery_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
+            self._files_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
+            self._gallery_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
             
             self._files_repeating_job.SetThreadSlotType( 'misc' )
             self._gallery_repeating_job.SetThreadSlotType( 'misc' )
@@ -735,7 +743,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
                 
                 self._WorkOnFiles()
                 
-                HG.client_controller.WaitUntilViewFree()
+                CG.client_controller.WaitUntilViewFree()
                 
                 self._SerialisableChangeMade()
                 
@@ -803,7 +811,7 @@ class SimpleDownloaderImport( HydrusSerialisable.SerialisableBase ):
                 
                 time.sleep( 1 )
                 
-                HG.client_controller.WaitUntilViewFree()
+                CG.client_controller.WaitUntilViewFree()
                 
                 self._SerialisableChangeMade()
                 
@@ -868,8 +876,8 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
         
         self._last_serialisable_change_timestamp = 0
         
-        HG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
-        HG.client_controller.sub( self, 'NotifyGallerySeedsUpdated', 'gallery_seed_log_gallery_seeds_updated' )
+        CG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
+        CG.client_controller.sub( self, 'NotifyGallerySeedsUpdated', 'gallery_seed_log_gallery_seeds_updated' )
         
     
     def _DelayWork( self, time_delta, reason ):
@@ -879,7 +887,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
             reason = reason.splitlines()[0]
             
         
-        self._no_work_until = HydrusData.GetNow() + time_delta
+        self._no_work_until = HydrusTime.GetNow() + time_delta
         self._no_work_until_reason = reason
         
     
@@ -956,7 +964,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
     
     def _SerialisableChangeMade( self ):
         
-        self._last_serialisable_change_timestamp = HydrusData.GetNow()
+        self._last_serialisable_change_timestamp = HydrusTime.GetNow()
         
     
     def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
@@ -1032,7 +1040,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
             
         except HydrusExceptions.NetworkException as e:
             
-            delay = HG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
+            delay = CG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
             
             self._DelayWork( delay, str( e ) )
             
@@ -1078,7 +1086,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
             
         except HydrusExceptions.NetworkException as e:
             
-            delay = HG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
+            delay = CG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
             
             self._DelayWork( delay, str( e ) )
             
@@ -1235,7 +1243,6 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
             
             self._SerialisableChangeMade()
             
-        
     
     def PendURLs( self, urls, filterable_tags = None, additional_service_keys_to_tags = None ):
         
@@ -1261,7 +1268,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
                 
                 try:
                     
-                    url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url )
+                    url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url )
                     
                 except HydrusExceptions.URLClassException:
                     
@@ -1272,8 +1279,8 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
                     
                     file_seed = ClientImportFileSeeds.FileSeed( ClientImportFileSeeds.FILE_SEED_TYPE_URL, url )
                     
-                    file_seed.SetExternalFilterableTags( filterable_tags )
-                    file_seed.SetExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
+                    file_seed.AddExternalFilterableTags( filterable_tags )
+                    file_seed.AddExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
                     
                     file_seeds.append( file_seed )
                     
@@ -1283,8 +1290,8 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
                     
                     gallery_seed = ClientImportGallerySeeds.GallerySeed( url, can_generate_more_pages = can_generate_more_pages )
                     
-                    gallery_seed.SetExternalFilterableTags( filterable_tags )
-                    gallery_seed.SetExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
+                    gallery_seed.AddExternalFilterableTags( filterable_tags )
+                    gallery_seed.AddExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
                     
                     gallery_seeds.append( gallery_seed )
                     
@@ -1360,8 +1367,8 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
             
             self._page_key = page_key
             
-            self._files_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
-            self._gallery_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
+            self._files_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
+            self._gallery_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnGallery )
             
             self._files_repeating_job.SetThreadSlotType( 'misc' )
             self._gallery_repeating_job.SetThreadSlotType( 'misc' )
@@ -1434,7 +1441,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
                 
                 self._WorkOnFiles()
                 
-                HG.client_controller.WaitUntilViewFree()
+                CG.client_controller.WaitUntilViewFree()
                 
                 self._SerialisableChangeMade()
                 
@@ -1497,7 +1504,7 @@ class URLsImport( HydrusSerialisable.SerialisableBase ):
                 
                 time.sleep( 1 )
                 
-                HG.client_controller.WaitUntilViewFree()
+                CG.client_controller.WaitUntilViewFree()
                 
                 self._SerialisableChangeMade()
                 

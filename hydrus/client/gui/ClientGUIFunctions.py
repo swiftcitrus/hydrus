@@ -6,11 +6,15 @@ from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
 from hydrus.core import HydrusConstants as HC
+from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusText
 
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import QtInit
 from hydrus.client.gui import QtPorting as QP
+from hydrus.core.files.images import HydrusImageNormalisation
 
 def ClientToScreen( win: QW.QWidget, pos: QC.QPoint ) -> QC.QPoint:
     
@@ -67,7 +71,41 @@ def ConvertPixelsToTextWidth( window, pixels, round_down = False ) -> int:
         return round( pixels / one_char_width )
         
     
-def ConvertQtImageToNumPy( qt_image: QG.QImage ):
+def ConvertQtImageToNumPy( qt_image: QG.QImage, strip_useless_alpha = True ):
+    
+    #        _     _                          _        _                           
+    #    _  | |   (_)          _             | |      | |                          
+    #  _| |_| |__  _  ___    _| |_ ___   ___ | |  _   | |__   ___  _   _  ____ ___ 
+    # (_   _)  _ \| |/___)  (_   _) _ \ / _ \| |_/ )  |  _ \ / _ \| | | |/ ___)___)
+    #   | |_| | | | |___ |    | || |_| | |_| |  _ (   | | | | |_| | |_| | |  |___ |
+    #    \__)_| |_|_(___/      \__)___/ \___/|_| \_)  |_| |_|\___/|____/|_|  (___/ 
+    #
+    # Ok so I don't know what is going on, but QImage 'ARGB32' bitmaps seem to actually be stored BGRA!!!
+    # if you tell them to convert to RGB888, they switch their bytes around to RGB, so this is probably some internal Qt gubbins
+    # The spec says they are 0xAARRGGBB, so I'm guessing it is swapped for some X-endian reason???
+    # unfortunately this messes with us a little, since we rip these bits and assume we are getting RGBA
+    # Ok, I figured it out, just convert to RGBA8888 (which supposedly _is_ endian ordered) and it sorts itself out
+    # I guess someone on different endian-ness won't get the right answer? I'd believe it if ARGB32 wasn't reversed
+    # if that is the case, we can inspect the 'PixelFormat' of the bmp and it'll say our endianness, and then I guess I reverse or something
+    # probably easier, whatever the case, to do that sort of clever channel swapping once we are in numpy
+    # another ultimate answer is probably to convert to rgb888 and rip the alpha too and recombine, or just ditch the alpha who cares
+    
+    qt_image = qt_image.copy()
+    
+    if qt_image.hasAlphaChannel():
+        
+        if qt_image.format() != QG.QImage.Format_RGBA8888:
+            
+            qt_image.convertTo( QG.QImage.Format_RGBA8888 )
+            
+        
+    else:
+        
+        if qt_image.format() != QG.QImage.Format_RGB888:
+            
+            qt_image.convertTo( QG.QImage.Format_RGB888 )
+            
+        
     
     width = qt_image.width()
     height = qt_image.height()
@@ -94,7 +132,30 @@ def ConvertQtImageToNumPy( qt_image: QG.QImage ):
         data_bytes = data_bytearray.asstring( height * width * depth )
         
     
-    numpy_image = numpy.fromstring( data_bytes, dtype = 'uint8' ).reshape( ( height, width, depth ) )
+    if qt_image.bytesPerLine() == width * depth:
+        
+        numpy_image = numpy.fromstring( data_bytes, dtype = 'uint8' ).reshape( ( height, width, depth ) )
+        
+    else:
+        
+        # ok bro, so in some cases a qt_image stores its lines with a bit of \x00 padding. you have a 990-pixel line that is 2970+2 bytes long
+        # apparently this is system memory storage limitations blah blah blah. it can also happen when you qt_image.copy(), so I guess it makes for pleasant memory layout little-endian something
+        # so far I have only encountered simple instances of this, with data up front and zero bytes at the end
+        # so let's just strip it lad
+        
+        bytes_per_line = qt_image.bytesPerLine()
+        desired_bytes_per_line = width * depth
+        excess_bytes_to_trim = bytes_per_line - desired_bytes_per_line
+        
+        numpy_padded = numpy.fromstring( data_bytes, dtype = 'uint8' ).reshape( ( height, bytes_per_line ) )
+        
+        numpy_image = numpy_padded[ :, : -excess_bytes_to_trim ].reshape( ( height, width, depth ) )
+        
+    
+    if strip_useless_alpha:
+        
+        numpy_image = HydrusImageNormalisation.StripOutAnyUselessAlphaChannel( numpy_image )
+        
     
     return numpy_image
     
@@ -113,6 +174,7 @@ def ConvertTextToPixelWidth( window, char_cols ) -> int:
     
     return round( char_cols * one_char_width )
     
+
 def DialogIsOpen():
     
     tlws = QW.QApplication.topLevelWidgets()
@@ -198,7 +260,7 @@ def GetLighterDarkerColour( colour, intensity = 3 ):
         return colour.lighter( qt_intensity )
         
     
-def GetMouseScreen():
+def GetMouseScreen() -> typing.Optional[ QG.QScreen ]:
     
     return QW.QApplication.screenAt( QG.QCursor.pos() )
     
@@ -268,7 +330,7 @@ def IsQtAncestor( child: QW.QWidget, ancestor: QW.QWidget, through_tlws = False 
     
     if through_tlws:
         
-        while not parent is None:
+        while parent is not None:
             
             if parent == ancestor:
                 
@@ -299,6 +361,12 @@ def MouseIsOnMyDisplay( window ):
     
     mouse_screen = GetMouseScreen()
     
+    # something's busted!
+    if mouse_screen is None:
+        
+        return True
+        
+    
     return mouse_screen is window_screen
     
 def MouseIsOverWidget( win: QW.QWidget ):
@@ -319,6 +387,31 @@ def NotebookScreenToHitTest( notebook, screen_position ):
     
     return notebook.tabBar().tabAt( tab_pos )
     
+
+def PresentClipboardParseError( win: QW.QWidget, content: str, expected_content_description: str, e: Exception ):
+    
+    MAX_CONTENT_SIZE = 1024
+    
+    log_message = 'Clipboard Error!\nI was expecting: {}'.format( expected_content_description )
+    
+    if len( content ) > MAX_CONTENT_SIZE:
+        
+        log_message += '\nFirst {} of content received (total was {}):\n'.format( HydrusData.ToHumanBytes( MAX_CONTENT_SIZE ), HydrusData.ToHumanBytes( len( content ) ) ) + content[:MAX_CONTENT_SIZE]
+        
+    else:
+        
+        log_message += '\nContent received ({}):\n'.format( HydrusData.ToHumanBytes( len( content ) ) ) + content[:MAX_CONTENT_SIZE]
+        
+    
+    HydrusData.DebugPrint( log_message )
+    
+    HydrusData.PrintException( e, do_wait = False )
+    
+    message = 'Sorry, I could not understand what was in the clipboard. I was expecting "{}" but received this text:\n\n{}\n\nMore details have been written to the log, but the general error was:\n\n{}'.format( expected_content_description, HydrusText.ElideText( content, 64 ), repr( e ) )
+    
+    ClientGUIDialogsMessage.ShowCritical( win, 'Clipboard Error!', message )
+    
+
 def SetBitmapButtonBitmap( button, bitmap ):
     
     # old wx stuff, but still basically relevant
@@ -341,7 +434,7 @@ def SetBitmapButtonBitmap( button, bitmap ):
     
 def SetFocusLater( win: QW.QWidget ):
     
-    HG.client_controller.CallAfterQtSafe( win, 'set focus to a window', win.setFocus, QC.Qt.OtherFocusReason )
+    CG.client_controller.CallAfterQtSafe( win, 'set focus to a window', win.setFocus, QC.Qt.OtherFocusReason )
     
 def TLWIsActive( window ):
     
@@ -368,9 +461,10 @@ def TLWOrChildIsActive( win ):
     
     return False
     
+
 def UpdateAppDisplayName():
     
-    app_display_name = HG.client_controller.new_options.GetString( 'app_display_name' )
+    app_display_name = CG.client_controller.new_options.GetString( 'app_display_name' )
     
     QW.QApplication.instance().setApplicationDisplayName( '{} {}'.format( app_display_name, HC.SOFTWARE_VERSION ) )
     
@@ -386,6 +480,7 @@ def UpdateAppDisplayName():
             
         
     
+
 def WidgetOrAnyTLWChildHasFocus( window ):
     
     active_window = QW.QApplication.activeWindow()

@@ -8,23 +8,29 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client import ClientStrings
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIStringControls
+from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.metadata import ClientGUIMetadataMigrationCommon
 from hydrus.client.gui.parsing import ClientGUIParsingFormulae
 from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.metadata import ClientMetadataMigrationImporters
+from hydrus.client.metadata import ClientTags
 
 choice_tuple_label_lookup = {
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes : 'a file\'s notes',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags : 'a file\'s tags',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs : 'a file\'s URLs',
+    ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps : 'a file\'s timestamps',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT : 'a .txt sidecar',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON : 'a .json sidecar'
 }
@@ -33,6 +39,7 @@ choice_tuple_description_lookup = {
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes : 'The notes that a file has.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags : 'The tags that a file has on a particular service.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs : 'The known URLs that a file has.',
+    ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps : 'A recorded timestamp that a file has.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT : 'A list of raw newline-separated texts in a .txt file.',
     ClientMetadataMigrationImporters.SingleFileMetadataImporterJSON : 'Strings somewhere in a JSON file.'
 }
@@ -69,13 +76,41 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
-        self._service_selection_panel = QW.QWidget( self )
+        self._tag_service_panel = QW.QWidget( self )
         
         self._service_selection_button = ClientGUICommon.BetterButton( self, 'service', self._SelectService )
         
-        hbox = ClientGUICommon.WrapInText( self._service_selection_button, self._service_selection_panel, 'tag service: ' )
+        tag_display_types = [
+            ClientTags.TAG_DISPLAY_STORAGE,
+            ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL
+        ]
         
-        self._service_selection_panel.setLayout( hbox )
+        choice_tuples = [ ( ClientTags.tag_display_str_lookup[ tag_display_type ], tag_display_type ) for tag_display_type in tag_display_types ]
+        
+        self._tag_display_type_button = ClientGUIMenuButton.MenuChoiceButton( self, choice_tuples )
+        
+        tt = '"storage" = no sibling or parents (what you see in the manage tags dialog, good for cloning to another hydrus client with the same siblings/parents)'
+        tt += '\n'
+        tt += '"display" = with sibling replacements and implied parents (what you see in normal views, good for export to other programs)'
+        
+        self._tag_display_type_button.setToolTip( tt )
+        
+        rows = []
+        
+        rows.append( ( 'tag service: ', self._service_selection_button ) )
+        rows.append( ( 'tag display type: ', self._tag_display_type_button ) )
+        
+        gridbox = ClientGUICommon.WrapInGrid( self._tag_service_panel, rows )
+        
+        self._tag_service_panel.setLayout( gridbox )
+        
+        #
+        
+        self._timestamp_data_stub_panel = ClientGUICommon.StaticBox( self, 'timestamp type' )
+        
+        self._timestamp_data_stub = ClientGUITime.TimestampDataStubCtrl( self._timestamp_data_stub_panel )
+        
+        self._timestamp_data_stub_panel.Add( self._timestamp_data_stub, CC.FLAGS_EXPAND_BOTH_WAYS )
         
         #
         
@@ -115,7 +150,8 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         vbox = QP.VBoxLayout()
         
         QP.AddToLayout( vbox, self._change_type_button, CC.FLAGS_EXPAND_PERPENDICULAR )
-        QP.AddToLayout( vbox, self._service_selection_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._tag_service_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._timestamp_data_stub_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._json_parsing_formula_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._txt_separator_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._sidecar_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -140,7 +176,7 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             message = 'Sorry, you can only have this one!'
             
-            QW.QMessageBox.information( self, 'Information', message )
+            ClientGUIDialogsMessage.ShowInformation( self, message )
             
         
         try:
@@ -176,6 +212,10 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         elif isinstance( importer, ( ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ) ):
             
             pass
+            
+        elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps ):
+            
+            importer.SetTimestampDataStub( self._timestamp_data_stub.GetValue() )
             
         elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT ):
             
@@ -227,7 +267,9 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags:
             
-            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( string_processor = string_processor, service_key = self._service_key )
+            tag_display_type = self._tag_display_type_button.GetValue()
+            
+            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( string_processor = string_processor, service_key = self._service_key, tag_display_type = tag_display_type )
             
         elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes:
             
@@ -236,6 +278,12 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs:
             
             importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs( string_processor = string_processor )
+            
+        elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps:
+            
+            importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps( string_processor = string_processor )
+            
+            importer.SetTimestampDataStub( self._timestamp_data_stub.GetValue() )
             
         elif self._current_importer_class == ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT:
             
@@ -286,10 +334,11 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._string_processor_button.SetValue( string_processor )
         
-        self._service_selection_panel.setVisible( False )
+        self._tag_service_panel.setVisible( False )
         self._json_parsing_formula_panel.setVisible( False )
         self._txt_separator_panel.setVisible( False )
         self._sidecar_panel.setVisible( False )
+        self._timestamp_data_stub_panel.setVisible( False )
         
         if isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterSidecar ):
             
@@ -310,11 +359,21 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._UpdateServiceKeyButtonLabel()
             
-            self._service_selection_panel.setVisible( True )
+            tag_display_type = importer.GetTagDisplayType()
+            
+            self._tag_display_type_button.SetValue( tag_display_type )
+            
+            self._tag_service_panel.setVisible( True )
             
         elif isinstance( importer, ( ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ) ):
             
             pass
+            
+        elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps ):
+            
+            self._timestamp_data_stub.SetValue( importer.GetTimestampDataStub() )
+            
+            self._timestamp_data_stub_panel.setVisible( True )
             
         elif isinstance( importer, ClientMetadataMigrationImporters.SingleFileMetadataImporterTXT ):
             
@@ -344,7 +403,7 @@ class EditSingleFileMetadataImporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         try:
             
-            name = HG.client_controller.services_manager.GetName( self._service_key )
+            name = CG.client_controller.services_manager.GetName( self._service_key )
             
         except HydrusExceptions.DataMissing:
             

@@ -6,6 +6,7 @@ import urllib.parse
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusExceptions
 
+from hydrus.client import ClientGlobals as CG
 def AddCookieToSession( session, name, value, domain, path, expires, secure = False, rest = None ):
     
     version = 0
@@ -323,7 +324,7 @@ def GetSearchURLs( url ):
     
     try:
         
-        normalised_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+        normalised_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
         
         search_urls.add( normalised_url )
         
@@ -390,6 +391,31 @@ def GetSearchURLs( url ):
     
     return search_urls
     
+
+def LooksLikeAFullURL( text: str ) -> bool:
+    
+    try:
+        
+        result = urllib.parse.urlparse( text )
+        
+        if result.scheme == '':
+            
+            return False
+            
+        
+        if result.netloc == '':
+            
+            return False
+            
+        
+        return True
+        
+    except:
+        
+        return False
+        
+    
+
 def NormaliseAndFilterAssociableURLs( urls ):
     
     normalised_urls = set()
@@ -398,7 +424,7 @@ def NormaliseAndFilterAssociableURLs( urls ):
         
         try:
             
-            url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+            url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
             
         except HydrusExceptions.URLClassException:
             
@@ -408,7 +434,7 @@ def NormaliseAndFilterAssociableURLs( urls ):
         normalised_urls.add( url )
         
     
-    associable_urls = { url for url in normalised_urls if HG.client_controller.network_engine.domain_manager.ShouldAssociateURLWithFiles( url ) }
+    associable_urls = { url for url in normalised_urls if CG.client_controller.network_engine.domain_manager.ShouldAssociateURLWithFiles( url ) }
     
     return associable_urls
     
@@ -418,7 +444,14 @@ def ParseURL( url: str ) -> urllib.parse.ParseResult:
     
     url = UnicodeNormaliseURL( url )
     
-    return urllib.parse.urlparse( url )
+    try:
+        
+        return urllib.parse.urlparse( url )
+        
+    except Exception as e:
+        
+        raise HydrusExceptions.URLClassException( str( e ) )
+        
     
 
 OH_NO_NO_NETLOC_CHARACTERS = '?#'

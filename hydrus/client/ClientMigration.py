@@ -2,10 +2,13 @@ import os
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
+from hydrus.core import HydrusLists
 from hydrus.core import HydrusTagArchive
+from hydrus.core import HydrusTime
 
-from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientThreading
+from hydrus.client import ClientLocation
+from hydrus.client.metadata import ClientContentUpdates
 
 pair_types_to_content_types = {}
 
@@ -25,7 +28,7 @@ def GetBasicSpeedStatement( num_done, time_started_precise ):
         
     else:
         
-        time_taken = HydrusData.GetNowPrecise() - time_started_precise
+        time_taken = HydrusTime.GetNowPrecise() - time_started_precise
         
         rows_s = int( num_done / time_taken )
         
@@ -80,7 +83,7 @@ class MigrationDestinationHTA( MigrationDestination ):
         
         self._hta.CommitBigJob()
         
-        if HydrusData.TimeHasPassed( self._time_started + 120 ):
+        if HydrusTime.TimeHasPassed( self._time_started + 120 ):
             
             self._hta.Optimise()
             
@@ -92,7 +95,7 @@ class MigrationDestinationHTA( MigrationDestination ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         num_done = 0
         
@@ -110,7 +113,7 @@ class MigrationDestinationHTA( MigrationDestination ):
     
     def Prepare( self ):
         
-        self._time_started = HydrusData.GetNow()
+        self._time_started = HydrusTime.GetNow()
         
         self._hta = HydrusTagArchive.HydrusTagArchive( self._path )
         
@@ -141,7 +144,7 @@ class MigrationDestinationHTPA( MigrationDestination ):
         
         self._htpa.CommitBigJob()
         
-        if HydrusData.TimeHasPassed( self._time_started + 120 ):
+        if HydrusTime.TimeHasPassed( self._time_started + 120 ):
             
             self._htpa.Optimise()
             
@@ -153,7 +156,7 @@ class MigrationDestinationHTPA( MigrationDestination ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         data = source.GetSomeData()
         
@@ -166,7 +169,7 @@ class MigrationDestinationHTPA( MigrationDestination ):
     
     def Prepare( self ):
         
-        self._time_started = HydrusData.GetNow()
+        self._time_started = HydrusTime.GetNow()
         
         self._htpa = HydrusTagArchive.HydrusTagPairArchive( self._path )
         
@@ -204,7 +207,7 @@ class MigrationDestinationListMappings( MigrationDestinationList ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         num_done = 0
         
@@ -224,7 +227,7 @@ class MigrationDestinationListPairs( MigrationDestinationList ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         data = source.GetSomeData()
         
@@ -260,7 +263,7 @@ class MigrationDestinationTagServiceMappings( MigrationDestinationTagService ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         data = source.GetSomeData()
         
@@ -288,12 +291,12 @@ class MigrationDestinationTagServiceMappings( MigrationDestinationTagService ):
         
         for ( tag, hashes ) in tags_to_hashes.items():
             
-            content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, self._content_action, ( tag, hashes ), reason = reason ) )
+            content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, self._content_action, ( tag, hashes ), reason = reason ) )
             
         
-        service_keys_to_content_updates = { self._tag_service_key : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._tag_service_key, content_updates )
         
-        self._controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+        self._controller.WriteSynchronous( 'content_updates', content_update_package )
         
         return GetBasicSpeedStatement( num_done, time_started_precise )
         
@@ -309,7 +312,7 @@ class MigrationDestinationTagServicePairs( MigrationDestinationTagService ):
     
     def DoSomeWork( self, source ):
         
-        time_started_precise = HydrusData.GetNowPrecise()
+        time_started_precise = HydrusTime.GetNowPrecise()
         
         data = source.GetSomeData()
         
@@ -324,11 +327,11 @@ class MigrationDestinationTagServicePairs( MigrationDestinationTagService ):
             reason = None
             
         
-        content_updates = [ HydrusData.ContentUpdate( self._content_type, self._content_action, tag_pair, reason = reason ) for tag_pair in data ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( self._content_type, self._content_action, tag_pair, reason = reason ) for tag_pair in data ]
         
-        service_keys_to_content_updates = { self._tag_service_key : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._tag_service_key, content_updates )
         
-        self._controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+        self._controller.WriteSynchronous( 'content_updates', content_update_package )
         
         num_done = len( data )
         
@@ -347,21 +350,21 @@ class MigrationJob( object ):
     
     def Run( self ):
         
-        job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
+        job_status = ClientThreading.JobStatus( pausable = True, cancellable = True )
         
-        job_key.SetStatusTitle( self._title )
+        job_status.SetStatusTitle( self._title )
         
-        self._controller.pub( 'message', job_key )
+        self._controller.pub( 'message', job_status )
         
-        job_key.SetStatusText( 'preparing source' )
+        job_status.SetStatusText( 'preparing source' )
         
         self._source.Prepare()
         
-        job_key.SetStatusText( 'preparing destination' )
+        job_status.SetStatusText( 'preparing destination' )
         
         self._destination.Prepare()
         
-        job_key.SetStatusText( 'beginning work' )
+        job_status.SetStatusText( 'beginning work' )
         
         try:
             
@@ -369,11 +372,11 @@ class MigrationJob( object ):
                 
                 progress_statement = self._destination.DoSomeWork( self._source )
                 
-                job_key.SetStatusText( progress_statement )
+                job_status.SetStatusText( progress_statement )
                 
-                job_key.WaitIfNeeded()
+                job_status.WaitIfNeeded()
                 
-                if job_key.IsCancelled():
+                if job_status.IsCancelled():
                     
                     break
                     
@@ -381,19 +384,17 @@ class MigrationJob( object ):
             
         finally:
             
-            job_key.SetStatusText( 'done, cleaning up source' )
+            job_status.SetStatusText( 'done, cleaning up source' )
             
             self._source.CleanUp()
             
-            job_key.SetStatusText( 'done, cleaning up destination' )
+            job_status.SetStatusText( 'done, cleaning up destination' )
             
             self._destination.CleanUp()
             
-            job_key.SetStatusText( 'done!' )
+            job_status.SetStatusText( 'done!' )
             
-            job_key.Finish()
-            
-            job_key.Delete( 3 )
+            job_status.FinishAndDismiss( 3 )
             
         
     
@@ -434,14 +435,14 @@ class MigrationSource( object ):
     
 class MigrationSourceHTA( MigrationSource ):
     
-    def __init__( self, controller, path, file_service_key, desired_hash_type, hashes, tag_filter ):
+    def __init__( self, controller, path, location_context: ClientLocation.LocationContext, desired_hash_type, hashes, tag_filter ):
         
         name = os.path.basename( path )
         
         MigrationSource.__init__( self, controller, name )
         
         self._path = path
-        self._file_service_key = file_service_key
+        self._location_context = location_context
         self._desired_hash_type = desired_hash_type
         self._hashes = hashes
         self._tag_filter = tag_filter
@@ -484,7 +485,7 @@ class MigrationSourceHTA( MigrationSource ):
             data = [ ( hash, tags ) for ( hash, tags ) in data if hash in self._hashes ]
             
         
-        if self._file_service_key != CC.COMBINED_FILE_SERVICE_KEY:
+        if not self._location_context.IsAllKnownFiles():
             
             filtered_data = []
             
@@ -498,7 +499,7 @@ class MigrationSourceHTA( MigrationSource ):
                     
                     media_result = hashes_to_media_results[ hash ]
                     
-                    if self._file_service_key not in media_result.GetLocationsManager().GetCurrent():
+                    if not media_result.GetLocationsManager().IsInLocationContext( self._location_context ):
                         
                         continue
                         
@@ -515,7 +516,7 @@ class MigrationSourceHTA( MigrationSource ):
     
     def _SHA256FilteringNeeded( self ):
         
-        return self._hashes is not None or self._file_service_key != CC.COMBINED_FILE_SERVICE_KEY
+        return self._hashes is not None or not self._location_context.IsAllKnownFiles()
         
     
     def CleanUp( self ):
@@ -530,7 +531,7 @@ class MigrationSourceHTA( MigrationSource ):
     
     def GetSomeData( self ):
         
-        data = HydrusData.PullNFromIterator( self._iterator, 256 )
+        data = HydrusLists.PullNFromIterator( self._iterator, 256 )
         
         if len( data ) == 0:
             
@@ -626,7 +627,7 @@ class MigrationSourceHTPA( MigrationSource ):
     
     def GetSomeData( self ):
         
-        data = HydrusData.PullNFromIterator( self._iterator, 256 )
+        data = HydrusLists.PullNFromIterator( self._iterator, 256 )
         
         if len( data ) == 0:
             
@@ -666,7 +667,7 @@ class MigrationSourceList( MigrationSource ):
     
     def GetSomeData( self ):
         
-        some_data = HydrusData.PullNFromIterator( self._iterator, 5 )
+        some_data = HydrusLists.PullNFromIterator( self._iterator, 5 )
         
         if len( some_data ) == 0:
             
@@ -683,13 +684,13 @@ class MigrationSourceList( MigrationSource ):
     
 class MigrationSourceTagServiceMappings( MigrationSource ):
     
-    def __init__( self, controller, tag_service_key, file_service_key, desired_hash_type, hashes, tag_filter, content_statuses ):
+    def __init__( self, controller, tag_service_key, location_context, desired_hash_type, hashes, tag_filter, content_statuses ):
         
         name = controller.services_manager.GetName( tag_service_key )
         
         MigrationSource.__init__( self, controller, name )
         
-        self._file_service_key = file_service_key
+        self._location_context = location_context
         self._tag_service_key = tag_service_key
         self._desired_hash_type = desired_hash_type
         self._hashes = hashes
@@ -706,7 +707,7 @@ class MigrationSourceTagServiceMappings( MigrationSource ):
     
     def GetSomeData( self ):
         
-        data = self._controller.Read( 'migration_get_mappings', self._database_temp_job_name, self._file_service_key, self._tag_service_key, self._desired_hash_type, self._tag_filter, self._content_statuses )
+        data = self._controller.Read( 'migration_get_mappings', self._database_temp_job_name, self._location_context, self._tag_service_key, self._desired_hash_type, self._tag_filter, self._content_statuses )
         
         if len( data ) == 0:
             
@@ -720,7 +721,7 @@ class MigrationSourceTagServiceMappings( MigrationSource ):
         
         # later can spread this out into bunch of small jobs, a start and a continue, based on tag filter subsets
         
-        self._controller.WriteSynchronous( 'migration_start_mappings_job', self._database_temp_job_name, self._file_service_key, self._tag_service_key, self._hashes, self._content_statuses )
+        self._controller.WriteSynchronous( 'migration_start_mappings_job', self._database_temp_job_name, self._location_context, self._tag_service_key, self._hashes, self._content_statuses )
         
     
 class MigrationSourceTagServicePairs( MigrationSource ):

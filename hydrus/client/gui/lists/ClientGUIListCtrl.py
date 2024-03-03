@@ -8,12 +8,16 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientSerialisable
 from hydrus.client.gui import ClientGUIDragDrop
 from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIFunctions
+from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
@@ -40,11 +44,11 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         self._have_shown_a_column_data_error = False
         
-        self._creation_time = HydrusData.GetNow()
+        self._creation_time = HydrusTime.GetNow()
         
         self._column_list_type = column_list_type
         
-        self._column_list_status: ClientGUIListStatus.ColumnListStatus = HG.client_controller.column_list_manager.GetStatus( self._column_list_type )
+        self._column_list_status: ClientGUIListStatus.ColumnListStatus = CG.client_controller.column_list_manager.GetStatus( self._column_list_type )
         self._original_column_list_status = self._column_list_status
         
         self.setAlternatingRowColors( True )
@@ -56,12 +60,14 @@ class BetterListCtrl( QW.QTreeWidget ):
         self._initial_height_num_chars = height_num_chars
         self._forced_height_num_chars = None
         
+        self._has_initialised_size = False
+        
         self._data_to_tuples_func = data_to_tuples_func
         
         self._use_simple_delete = use_simple_delete
         self._can_delete_callback = can_delete_callback
         
-        self._menu_callable = None
+        self._rows_menu_callable = None
         
         ( self._sort_column_type, self._sort_asc ) = self._column_list_status.GetSort()
         
@@ -103,7 +109,8 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         self.setMinimumWidth( total_width )
         '''
-        main_tlw = HG.client_controller.GetMainTLW()
+        
+        main_tlw = CG.client_controller.GetMainTLW()
         
         # if last section is set too low, for instance 3, the column seems unable to ever shrink from initial (expanded to fill space) size
         #  _    _  ___  _    _    __     __   ___  
@@ -114,13 +121,14 @@ class BetterListCtrl( QW.QTreeWidget ):
         # I think this is because of mismatch between set size and min size! So ensuring we never set smaller than that initially should fix this???!?
         
         MIN_SECTION_SIZE_CHARS = 3
-        MIN_LAST_SECTION_SIZE_CHARS = 10
         
         self._min_section_width = ClientGUIFunctions.ConvertTextToPixelWidth( main_tlw, MIN_SECTION_SIZE_CHARS )
         
         self.header().setMinimumSectionSize( self._min_section_width )
         
         last_column_index = self._column_list_status.GetColumnCount() - 1
+        
+        self.header().setStretchLastSection( True )
         
         for ( i, column_type ) in enumerate( self._column_list_status.GetColumnTypes() ):
             
@@ -157,14 +165,12 @@ class BetterListCtrl( QW.QTreeWidget ):
             self.setColumnWidth( i, width_pixels )
             
         
-        self.header().setStretchLastSection( True )
-        
         self._delete_key_callback = delete_key_callback
         self._activation_callback = activation_callback
         
         self._widget_event_filter = QP.WidgetEventFilter( self )
         self._widget_event_filter.EVT_KEY_DOWN( self.EventKeyDown )
-        self.itemDoubleClicked.connect( self.EventItemActivated )
+        self.itemDoubleClicked.connect( self.ProcessActivateAction )
         
         self.header().setSectionsMovable( False ) # can only turn this on when we move from data/sort tuples
         # self.header().setFirstSectionMovable( True ) # same
@@ -173,6 +179,46 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         #self.header().sectionMoved.connect( self._DoStatusChanged ) # same
         self.header().sectionResized.connect( self._SectionsResized )
+        
+        self.header().setContextMenuPolicy( QC.Qt.CustomContextMenu )
+        self.header().customContextMenuRequested.connect( self._ShowHeaderMenu )
+        
+        CG.client_controller.CallAfterQtSafe( self, 'initialising multi-column list widths', self._InitialiseColumnWidths )
+        
+        CG.client_controller.sub( self, 'NotifySettingsUpdated', 'reset_all_listctrl_status' )
+        CG.client_controller.sub( self, 'NotifySettingsUpdated', 'reset_listctrl_status' )
+        
+    
+    def _InitialiseColumnWidths( self ):
+        
+        MIN_SECTION_SIZE_CHARS = 3
+        
+        main_tlw = CG.client_controller.GetMainTLW()
+        
+        last_column_index = self._column_list_status.GetColumnCount() - 1
+        
+        for ( i, column_type ) in enumerate( self._column_list_status.GetColumnTypes() ):
+            
+            if i == last_column_index:
+                
+                width_chars = MIN_SECTION_SIZE_CHARS
+                
+            else:
+                
+                width_chars = self._column_list_status.GetColumnWidth( column_type )
+                
+            
+            width_chars = max( width_chars, MIN_SECTION_SIZE_CHARS )
+            
+            # ok this is a pain in the neck issue, but fontmetrics changes afte widget init. I guess font gets styled on top afterwards
+            # this means that if I use this window's fontmetrics here, in init, then it is different later on, and we get creeping growing columns lmao
+            # several other places in the client are likely affected in different ways by this also!
+            width_pixels = ClientGUIFunctions.ConvertTextToPixelWidth( main_tlw, width_chars )
+            
+            self.setColumnWidth( i, width_pixels )
+            
+        
+        self._has_initialised_size = True
         
     
     def _AddDataInfo( self, data_info ):
@@ -209,16 +255,19 @@ class BetterListCtrl( QW.QTreeWidget ):
     
     def _SectionsResized( self, logical_index, old_size, new_size ):
         
-        self._DoStatusChanged()
-        
-        self.updateGeometry()
+        if self._has_initialised_size:
+            
+            self._DoStatusChanged()
+            
+            self.updateGeometry()
+            
         
     
     def _DoStatusChanged( self ):
         
         self._column_list_status = self._GenerateCurrentStatus()
         
-        HG.client_controller.column_list_manager.SaveStatus( self._column_list_status )
+        CG.client_controller.column_list_manager.SaveStatus( self._column_list_status )
         
     
     def _GenerateCurrentStatus( self ) -> ClientGUIListStatus.ColumnListStatus:
@@ -227,7 +276,7 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         status.SetColumnListType( self._column_list_type )
         
-        main_tlw = HG.client_controller.GetMainTLW()
+        main_tlw = CG.client_controller.GetMainTLW()
         
         columns = []
         
@@ -321,7 +370,7 @@ class BetterListCtrl( QW.QTreeWidget ):
         return ( display_tuple, sort_tuple )
         
     
-    def _GetSelected( self ):           
+    def _GetSelectedIndices( self ) -> typing.List[ int ]:
         
         indices = []
         
@@ -352,11 +401,51 @@ class BetterListCtrl( QW.QTreeWidget ):
             
         
     
-    def _ShowMenu( self ):
+    def _RefreshHeaderNames( self ):
+        
+        for i in range( self.header().count() ):
+            
+            column_type = self.headerItem().data( i, QC.Qt.UserRole )
+            
+            name = CGLC.column_list_column_name_lookup[ self._column_list_type ][ column_type ]
+            
+            if column_type == self._sort_column_type:
+                
+                char = '\u25B2' if self._sort_asc else '\u25BC'
+                
+                name_for_title = '{} {}'.format( name, char )
+                
+            else:
+                
+                name_for_title = name
+                
+            
+            self.headerItem().setText( i, name_for_title )
+            self.headerItem().setToolTip( i, name )
+            
+        
+    
+    def _ShowHeaderMenu( self ):
+        
+        menu = ClientGUIMenus.GenerateMenu( self )
+        
+        name = CGLC.column_list_type_name_lookup[ self._column_list_type ]
+        
+        ClientGUIMenus.AppendMenuItem( menu, f'reset default column widths for "{name}" lists', 'Reset the column widths and other display settings for all lists of this type', CG.client_controller.column_list_manager.ResetToDefaults, self._column_list_type )
+        
+        CGC.core().PopupMenu( self, menu )
+        
+    
+    def _ShowRowsMenu( self ):
+        
+        if self._rows_menu_callable is None:
+            
+            return
+            
         
         try:
             
-            menu = self._menu_callable()
+            menu = self._rows_menu_callable()
             
         except HydrusExceptions.DataMissing:
             
@@ -426,6 +515,8 @@ class BetterListCtrl( QW.QTreeWidget ):
                 
             
         
+        self._RefreshHeaderNames()
+        
     
     def _UpdateRow( self, index, display_tuple ):
         
@@ -460,9 +551,9 @@ class BetterListCtrl( QW.QTreeWidget ):
         self.columnListContentsChanged.emit()
         
     
-    def AddMenuCallable( self, menu_callable ):
+    def AddRowsMenuCallable( self, menu_callable ):
         
-        self._menu_callable = menu_callable
+        self._rows_menu_callable = menu_callable
         
         self.setContextMenuPolicy( QC.Qt.CustomContextMenu )
         self.customContextMenuRequested.connect( self.EventShowMenu )
@@ -470,7 +561,12 @@ class BetterListCtrl( QW.QTreeWidget ):
     
     def DeleteDatas( self, datas: typing.Iterable[ object ] ):
         
-        deletees = [ ( self._data_to_indices[ data ], data ) for data in datas ]
+        deletees = [ ( self._data_to_indices[ data ], data ) for data in datas if data in self._data_to_indices ]
+        
+        if len( deletees ) == 0:
+            
+            return
+            
         
         deletees.sort( reverse = True )
         
@@ -502,7 +598,7 @@ class BetterListCtrl( QW.QTreeWidget ):
     
     def DeleteSelected( self ):
         
-        indices = self._GetSelected()
+        indices = self._GetSelectedIndices()
         
         indices.sort( reverse = True )
         
@@ -548,7 +644,14 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         if self._activation_callback is not None:
             
-            self._activation_callback()
+            try:
+                
+                self._activation_callback()
+                
+            except Exception as e:
+                
+                HydrusData.ShowException( e )
+                
             
         
     
@@ -576,7 +679,7 @@ class BetterListCtrl( QW.QTreeWidget ):
     
     def EventShowMenu( self ):
         
-        QP.CallAfter( self._ShowMenu )
+        QP.CallAfter( self._ShowRowsMenu )
         
     
     def ForceHeight( self, rows ):
@@ -598,12 +701,14 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         if only_selected:
             
-            indices = self._GetSelected()
+            indices = self._GetSelectedIndices()
             
         else:
             
             indices = list( self._indices_to_data_info.keys() )
             
+        
+        indices.sort()
         
         result = []
         
@@ -638,11 +743,69 @@ class BetterListCtrl( QW.QTreeWidget ):
         return len( self.selectedItems() ) > 0 
         
     
+    def NotifySettingsUpdated( self, column_list_type = None ):
+        
+        if column_list_type is not None and column_list_type != self._column_list_type:
+            
+            return
+            
+        
+        self.blockSignals( True )
+        self.header().blockSignals( True )
+        
+        self._column_list_status: ClientGUIListStatus.ColumnListStatus = CG.client_controller.column_list_manager.GetStatus( self._column_list_type )
+        self._original_column_list_status = self._column_list_status
+        
+        #
+        
+        ( self._sort_column_type, self._sort_asc ) = self._column_list_status.GetSort()
+        
+        #
+        
+        main_tlw = CG.client_controller.GetMainTLW()
+        
+        MIN_SECTION_SIZE_CHARS = 3
+        
+        last_column_index = self._column_list_status.GetColumnCount() - 1
+        
+        for ( i, column_type ) in enumerate( self._column_list_status.GetColumnTypes() ):
+            
+            if i == last_column_index:
+                
+                width_chars = MIN_SECTION_SIZE_CHARS
+                
+            else:
+                
+                width_chars = self._column_list_status.GetColumnWidth( column_type )
+                
+            
+            width_chars = max( width_chars, MIN_SECTION_SIZE_CHARS )
+            
+            width_pixels = ClientGUIFunctions.ConvertTextToPixelWidth( main_tlw, width_chars )
+            
+            self.setColumnWidth( i, width_pixels )
+            
+        
+        self.header().blockSignals( False )
+        self.blockSignals( False )
+        
+        #
+        
+        self.Sort() # note this saves the current status, so don't do it until we resize stuff
+        
+    
     def ProcessActivateAction( self ):
         
         if self._activation_callback is not None:
             
-            self._activation_callback()
+            try:
+                
+                self._activation_callback()
+                
+            except Exception as e:
+                
+                HydrusData.ShowException( e )
+                
             
         
     
@@ -771,9 +934,15 @@ class BetterListCtrl( QW.QTreeWidget ):
     
     def resizeEvent( self, event ):
         
-        self._DoStatusChanged()
+        result = QW.QTreeWidget.resizeEvent( self, event )
         
-        return QW.QTreeWidget.resizeEvent( self, event )
+        # do not touch this! weird hack that fixed a new bug in 6.6.1 where all columns would reset on load to 100px wide!
+        if self._has_initialised_size:
+            
+            self._DoStatusChanged()
+            
+        
+        return result
         
     
     def sizeHint( self ):
@@ -799,7 +968,7 @@ class BetterListCtrl( QW.QTreeWidget ):
         
         last_column_type = self._column_list_status.GetColumnTypes()[-1]
         
-        if HydrusData.TimeHasPassed( self._creation_time + 2 ):
+        if HydrusTime.TimeHasPassed( self._creation_time + 2 ):
             
             width += self.columnWidth( self.columnCount() - 1 )
             
@@ -811,7 +980,7 @@ class BetterListCtrl( QW.QTreeWidget ):
             
             last_column_chars = self._original_column_list_status.GetColumnWidth( last_column_type )
             
-            main_tlw = HG.client_controller.GetMainTLW()
+            main_tlw = CG.client_controller.GetMainTLW()
             
             width += ClientGUIFunctions.ConvertTextToPixelWidth( main_tlw, last_column_chars )
             
@@ -881,11 +1050,19 @@ class BetterListCtrl( QW.QTreeWidget ):
             
             existing_data_info = self._indices_to_data_info[ index ]
             
-            if data_info != existing_data_info:
+            # catching an object that __eq__ with another but is actually a different lad--we want to swap the new one in
+            the_data_is_actually_a_different_object = data is not existing_data_info[0]
+            
+            if the_data_is_actually_a_different_object:
+                
+                self._data_to_indices[ data ] = index
+                
+            
+            if data_info != existing_data_info or the_data_is_actually_a_different_object:
                 
                 if not sort_data_has_changed:
                     
-                    ( existing_data, existing_display_tuple, existing_sort_tuple ) = existing_data_info
+                    existing_sort_tuple = existing_data_info[2]
                     
                     if existing_sort_tuple is not None and sort_tuple is not None:
                         
@@ -1034,7 +1211,7 @@ class BetterListCtrlPanel( QW.QWidget ):
             
             json = export_object.DumpToString()
             
-            HG.client_controller.pub( 'clipboard', 'text', json )
+            CG.client_controller.pub( 'clipboard', 'text', json )
             
         
     
@@ -1166,11 +1343,11 @@ class BetterListCtrlPanel( QW.QWidget ):
     
     def _ImportFromClipboard( self ):
         
-        if HG.client_controller.ClipboardHasImage():
+        if CG.client_controller.ClipboardHasImage():
             
             try:
                 
-                qt_image = HG.client_controller.GetClipboardImage()
+                qt_image = CG.client_controller.GetClipboardImage()
                 
             except:
                 
@@ -1186,13 +1363,13 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
             except HydrusExceptions.SerialisationException as e:
                 
-                QW.QMessageBox.critical( self, 'Problem loading', 'Problem loading that object: {}'.format( str( e ) ) )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', f'Problem loading that object: {e}' )
                 
                 return
                 
             except Exception as e:
                 
-                QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard: {}'.format( str( e ) ) )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', f'I could not understand what was in the clipboard: {e}' )
                 
                 return
                 
@@ -1201,11 +1378,11 @@ class BetterListCtrlPanel( QW.QWidget ):
             
             try:
                 
-                raw_text = HG.client_controller.GetClipboardText()
+                raw_text = CG.client_controller.GetClipboardText()
                 
             except HydrusExceptions.DataMissing as e:
                 
-                QW.QMessageBox.critical( self, 'Error', str(e) )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str(e) )
                 
                 return
                 
@@ -1214,15 +1391,9 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
                 obj = HydrusSerialisable.CreateFromString( raw_text, raise_error_on_future_version = True )
                 
-            except HydrusExceptions.SerialisationException as e:
-                
-                QW.QMessageBox.critical( self, 'Problem loading', 'Problem loading that object: {}'.format( str( e ) ) )
-                
-                return
-                
             except Exception as e:
                 
-                QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard: {}'.format( str( e ) ) )
+                ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Hydrus Object(s)', e )
                 
                 return
                 
@@ -1234,7 +1405,7 @@ class BetterListCtrlPanel( QW.QWidget ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'Problem importing: {}'.format( str( e ) ) )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str( e ) )
             
         
         self._listctrl.Sort()
@@ -1309,14 +1480,14 @@ class BetterListCtrlPanel( QW.QWidget ):
             message += os.linesep * 2
             message += os.linesep.join( ( HydrusData.GetTypeName( o ) for o in self._permitted_object_types ) )
             
-            QW.QMessageBox.critical( self, 'Error', message )
+            ClientGUIDialogsMessage.ShowWarning( self, message )
             
         
         if can_present_messages and num_added > 0:
             
             message = '{} objects added!'.format( HydrusData.ToHumanInt( num_added ) )
             
-            QW.QMessageBox.information( self, 'Success', message )
+            ClientGUIDialogsMessage.ShowInformation( self, message )
             
         
         return ( num_added, bad_object_type_names )
@@ -1337,7 +1508,9 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
             except Exception as e:
                 
-                QW.QMessageBox.critical( self, 'Error', str(e) )
+                HydrusData.PrintException( e )
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', str(e) )
                 
                 return
                 
@@ -1350,6 +1523,8 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
             except HydrusExceptions.SerialisationException as e:
                 
+                HydrusData.PrintException( e )
+                
                 if not have_shown_load_error:
                     
                     message = str( e )
@@ -1360,14 +1535,16 @@ class BetterListCtrlPanel( QW.QWidget ):
                         message += 'If there are more objects in this import with similar load problems, they will now be skipped silently.'
                         
                     
-                    QW.QMessageBox.critical( self, 'Problem loading', str( e ) )
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str( e ) )
                     
                     have_shown_load_error = True
                     
                 
-            except:
+            except Exception as e:
                 
-                QW.QMessageBox.critical( self, 'Error', 'I could not understand what was encoded in "{}"!'.format( path ) )
+                HydrusData.PrintException( e )
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', f'I could not understand what was encoded in "{path}"!' )
                 
                 return
                 
@@ -1386,7 +1563,9 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
             except Exception as e:
                 
-                QW.QMessageBox.critical( self, 'Error', str(e) )
+                HydrusData.PrintException( e )
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str(e) )
                 
                 return
                 
@@ -1399,6 +1578,8 @@ class BetterListCtrlPanel( QW.QWidget ):
                 
             except HydrusExceptions.SerialisationException as e:
                 
+                HydrusData.PrintException( e )
+                
                 if not have_shown_load_error:
                     
                     message = str( e )
@@ -1409,14 +1590,16 @@ class BetterListCtrlPanel( QW.QWidget ):
                         message += 'If there are more objects in this import with similar load problems, they will now be skipped silently.'
                         
                     
-                    QW.QMessageBox.critical( self, 'Problem loading', str( e ) )
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str( e ) )
                     
                     have_shown_load_error = True
                     
                 
             except:
                 
-                QW.QMessageBox.critical( self, 'Error', 'I could not understand what was encoded in "{}"!'.format( path ) )
+                HydrusData.PrintException( e )
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', 'I could not understand what was encoded in "{path}"!' )
                 
                 return
                 
@@ -1569,7 +1752,14 @@ class BetterListCtrlPanel( QW.QWidget ):
             return
             
         
-        self._UpdateButtons()
+        try:
+            
+            self._UpdateButtons()
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
+            
         
     
     def ImportFromDragDrop( self, paths ):

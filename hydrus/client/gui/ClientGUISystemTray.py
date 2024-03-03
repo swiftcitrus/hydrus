@@ -7,6 +7,7 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import QtPorting as QP
 
@@ -58,7 +59,7 @@ class ClientSystemTrayIcon( QW.QSystemTrayIcon ):
         # I'm not a qwidget, but a qobject, so use my parent for this
         parent_widget = self.parent()
         
-        new_menu = QW.QMenu( parent_widget )
+        new_menu = ClientGUIMenus.GenerateMenu( parent_widget )
         
         self._show_hide_menu_item = ClientGUIMenus.AppendMenuItem( new_menu, 'show/hide', 'Hide or show the hydrus client', self.flip_show_ui.emit )
         
@@ -107,7 +108,7 @@ class ClientSystemTrayIcon( QW.QSystemTrayIcon ):
         
         self._minimise_restore_menu_item.setText( label )
         
-        show_it = self._ui_is_currently_shown and not HG.client_controller.new_options.GetBoolean( 'minimise_client_to_system_tray' )
+        show_it = self._ui_is_currently_shown and not CG.client_controller.new_options.GetBoolean( 'minimise_client_to_system_tray' )
         
         self._minimise_restore_menu_item.setVisible( show_it )
         
@@ -156,7 +157,7 @@ class ClientSystemTrayIcon( QW.QSystemTrayIcon ):
     
     def _UpdateTooltip( self ):
         
-        app_display_name = HG.client_controller.new_options.GetString( 'app_display_name' )
+        app_display_name = CG.client_controller.new_options.GetString( 'app_display_name' )
         
         tooltip = app_display_name
         
@@ -178,7 +179,7 @@ class ClientSystemTrayIcon( QW.QSystemTrayIcon ):
     
     def _WasActivated( self, activation_reason ):
         
-        if not QP.isValid( self ):
+        if not QP.isValid( self ) or HC.PLATFORM_MACOS:
             
             return
             

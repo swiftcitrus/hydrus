@@ -2,21 +2,26 @@ import os
 import numpy
 import threading
 import time
+import typing
 
 from qtpy import QtCore as QC
-from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
 from hydrus.core import HydrusCompression
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusImageHandling
+from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusVideoHandling
+from hydrus.core.files import HydrusAnimationHandling
+from hydrus.core.files import HydrusVideoHandling
+from hydrus.core.files.images import HydrusImageColours
+from hydrus.core.files.images import HydrusImageHandling
 
 from hydrus.client import ClientFiles
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientImageHandling
 from hydrus.client import ClientVideoHandling
+from hydrus.client.caches import ClientCachesBase
 
 def FrameIndexOutOfRange( index, range_start, range_end ):
     
@@ -65,19 +70,36 @@ def GenerateHydrusBitmapFromPILImage( pil_image, compressed = True ):
         depth = 3
         
     
-    return HydrusBitmap( pil_image.tobytes(), pil_image.size, depth, compressed = compressed )
+    try:
+        
+        return HydrusBitmap( pil_image.tobytes(), pil_image.size, depth, compressed = compressed )
+        
+    except IOError:
+        
+        raise HydrusExceptions.DamagedOrUnusualFileException( 'Looks like a truncated file that PIL could not handle!' )
+        
     
-class ImageRenderer( object ):
+
+class ImageRenderer( ClientCachesBase.CacheableObject ):
     
     def __init__( self, media, this_is_for_metadata_alone = False ):
         
+        ClientCachesBase.CacheableObject.__init__( self )
+        
         self._numpy_image = None
+        self._render_failed = False
+        self._is_ready = False
         
         self._hash = media.GetHash()
         self._mime = media.GetMime()
         
         self._num_frames = media.GetNumFrames()
         self._resolution = media.GetResolution()
+        
+        if None in self._resolution:
+            
+            self._resolution = ( 100, 100 )
+            
         
         self._icc_profile_bytes = None
         self._qt_colourspace = None
@@ -86,7 +108,12 @@ class ImageRenderer( object ):
         
         self._this_is_for_metadata_alone = this_is_for_metadata_alone
         
-        HG.client_controller.CallToThread( self._Initialise )
+        CG.client_controller.CallToThread( self._Initialise )
+
+
+    def GetNumPyImage(self):
+
+        return self._numpy_image
         
     
     def _GetNumPyImage( self, clip_rect: QC.QRect, target_resolution: QC.QSize ):
@@ -214,7 +241,7 @@ class ImageRenderer( object ):
     def _Initialise( self ):
         
         # do this here so we are off the main thread and can wait
-        client_files_manager = HG.client_controller.client_files_manager
+        client_files_manager = CG.client_controller.client_files_manager
         
         self._path = client_files_manager.GetFilePath( self._hash, self._mime )
         
@@ -224,28 +251,38 @@ class ImageRenderer( object ):
             
         except Exception as e:
             
-            HydrusData.ShowText( 'Problem rendering image at "{}"! Error follows:'.format( self._path ) )
+            self._numpy_image = self._InitialiseErrorImage( e )
             
-            HydrusData.ShowException( e )
+            self._render_failed = True
             
+            HydrusData.Print( 'Problem rendering image at "{}"! Error follows:'.format( self._path ) )
+            
+            HydrusData.PrintException( e, do_wait = False )
+            
+        
+        self._is_ready = True
         
         if not self._this_is_for_metadata_alone:
             
-            if self._numpy_image is None:
-                
-                m = 'There was a problem rendering the image with hash {}! It may be damaged.'.format(
-                    self._hash.hex()
-                )
-                
-                m += os.linesep * 2
-                m += 'Jobs to check its integrity and metadata have been scheduled. If it is damaged, it may be redownloaded or removed from the client completely. If it is not damaged, it may be fixed automatically or further action may be required.'
-                
-                HydrusData.ShowText( m )
-                
-                HG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD )
-                HG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
-                
-            else:
+            # TODO: Move this error code to a nice button or something
+            # old recovery code, before the ErrorImage
+            # I think move to show a nice 'check integrity' button when a file errors, so the user can kick it off, and we avoid the popup spam
+            '''
+            # (if image failed to render)
+            m = 'There was a problem rendering the image with hash {}! It may be damaged.'.format(
+                self._hash.hex()
+            )
+            
+            m += os.linesep * 2
+            m += 'Jobs to check its integrity and metadata have been scheduled. If it is damaged, it may be redownloaded or removed from the client completely. If it is not damaged, it may be fixed automatically or further action may be required.'
+            
+            HydrusData.ShowText( m )
+            
+            CG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD )
+            CG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
+            '''
+            
+            if not self._render_failed:
                 
                 my_resolution_size = QC.QSize( self._resolution[0], self._resolution[1] )
                 my_numpy_size = QC.QSize( self._numpy_image.shape[1], self._numpy_image.shape[0] )
@@ -263,10 +300,52 @@ class ImageRenderer( object ):
                     
                     HydrusData.ShowText( m )
                     
-                    HG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
+                    CG.client_controller.Write( 'file_maintenance_add_jobs_hashes', { self._hash }, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                     
                 
             
+        
+    
+    def _InitialiseErrorImage( self, e: Exception ):
+        
+        ( width, height ) = self._resolution
+        
+        qt_image = QG.QImage( width, height, QG.QImage.Format_RGB888 )
+        
+        painter = QG.QPainter( qt_image )
+        
+        painter.setBackground( QG.QBrush( QC.Qt.white ) )
+        
+        painter.eraseRect( painter.viewport() )
+        
+        pen = QG.QPen( QG.QColor( 20, 20, 20 ) )
+        
+        pen.setWidth( 5 )
+        
+        painter.setPen( pen )
+        painter.setBrush( QC.Qt.NoBrush )
+        
+        painter.drawRect( 0, 0, width - 1, height - 1 )
+        
+        from hydrus.client.gui import ClientGUIFunctions
+        
+        font = painter.font()
+        
+        font.setPixelSize( height // 20 )
+        
+        painter.setFont( font )
+        
+        text = 'Image failed to render:'
+        text += '\n'
+        text += str( e )
+        text += '\n'
+        text += 'Full info written to the log.'
+        
+        painter.drawText( QC.QRectF( 0, 0, width, height ), QC.Qt.AlignCenter, text )
+        
+        del painter
+        
+        return ClientGUIFunctions.ConvertQtImageToNumPy( qt_image )
         
     
     def GetEstimatedMemoryFootprint( self ):
@@ -289,7 +368,7 @@ class ImageRenderer( object ):
     
     def GetResolution( self ): return self._resolution
     
-    def GetQtImage( self, clip_rect = None, target_resolution = None ):
+    def GetQtImage( self, clip_rect: typing.Optional[ QC.QRect ] = None, target_resolution: typing.Optional[ QC.QSize ] = None ):
         
         if clip_rect is None:
             
@@ -309,7 +388,7 @@ class ImageRenderer( object ):
         
         data = numpy_image.data
         
-        qt_image = HG.client_controller.bitmap_manager.GetQtImageFromBuffer( width, height, depth * 8, data )
+        qt_image = CG.client_controller.bitmap_manager.GetQtImageFromBuffer( width, height, depth * 8, data )
         
         # ok this stuff was originally for image ICC, as loaded using PIL's image.info dict
         # ultimately I figured out how to do the conversion with PIL itself, which was more universal
@@ -375,7 +454,7 @@ class ImageRenderer( object ):
                 
                 data = numpy_image.data
                 
-                return HG.client_controller.bitmap_manager.GetQtPixmapFromBuffer( width, height, depth * 8, data )
+                return CG.client_controller.bitmap_manager.GetQtPixmapFromBuffer( width, height, depth * 8, data )
                 
             except Exception as e:
                 
@@ -392,24 +471,22 @@ class ImageRenderer( object ):
         return pixmap
         
     
-    def HasTransparency( self ):
-        
-        if not self.IsReady():
-            
-            raise Exception( 'I cannot know this yet--the image is not ready!' )
-            
-        
-        return HydrusImageHandling.NumPyImageHasAlphaChannel( self._numpy_image )
-        
-    
     def IsReady( self ):
         
-        return self._numpy_image is not None
+        return self._is_ready
         
     
-class ImageTile( object ):
+    def RenderFailed( self ):
+        
+        return self._render_failed
+        
+    
+
+class ImageTile( ClientCachesBase.CacheableObject ):
     
     def __init__( self, hash: bytes, clip_rect: QC.QRect, qt_pixmap: QG.QPixmap ):
+        
+        ClientCachesBase.CacheableObject.__init__( self )
         
         self.hash = hash
         self.clip_rect = clip_rect
@@ -453,7 +530,7 @@ class RasterContainer( object ):
         hash = self._media.GetHash()
         mime = self._media.GetMime()
         
-        client_files_manager = HG.client_controller.client_files_manager
+        client_files_manager = CG.client_controller.client_files_manager
         
         self._path = client_files_manager.GetFilePath( hash, mime )
         
@@ -494,7 +571,7 @@ class RasterContainerVideo( RasterContainer ):
         
         ( x, y ) = self._target_resolution
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         video_buffer_size = new_options.GetInteger( 'video_buffer_size' )
         
@@ -531,7 +608,7 @@ class RasterContainerVideo( RasterContainer ):
         
         max_streaming_buffer_size = max( 48, int( num_frames_in_video / ( duration / 3.0 ) ) ) # 48 or 3 seconds
         
-        if max_streaming_buffer_size < frame_buffer_length and frame_buffer_length < num_frames_in_video:
+        if max_streaming_buffer_size < frame_buffer_length < num_frames_in_video:
             
             frame_buffer_length = max_streaming_buffer_size
             
@@ -546,7 +623,7 @@ class RasterContainerVideo( RasterContainer ):
         self._rendered_first_frame = False
         self._ideal_next_frame = 0
         
-        HG.client_controller.CallToThread( self.THREADRender )
+        CG.client_controller.CallToThread( self.THREADRender )
         
     
     def _HasFrame( self, index ):
@@ -569,6 +646,241 @@ class RasterContainerVideo( RasterContainer ):
             
         
     
+    def CanHaveVariableFramerate( self ):
+        
+        with self._lock:
+            
+            return self._media.GetMime() == HC.ANIMATION_GIF
+            
+        
+    
+    def GetBufferIndices( self ):
+        
+        if self._last_index_rendered == -1:
+            
+            return None
+            
+        else:
+            
+            return ( self._buffer_start_index, self._last_index_rendered, self._buffer_end_index )
+            
+        
+    
+    def GetDurationMS( self, index ):
+        
+        if self._media.GetMime() == HC.ANIMATION_GIF:
+            
+            if index in self._durations:
+                
+                return self._durations[ index ]
+                
+            
+        
+        return self._average_frame_duration
+        
+    
+    def GetFrame( self, index ):
+        
+        with self._lock:
+            
+            frame = self._frames[ index ]
+            
+        
+        num_frames_in_video = self.GetNumFrames()
+        
+        if index == num_frames_in_video - 1:
+            
+            next_index = 0
+            
+        else:
+            
+            next_index = index + 1
+            
+        
+        self.GetReadyForFrame( next_index )
+        
+        return frame
+        
+    
+    def GetHash( self ):
+        
+        return self._media.GetHash()
+        
+    
+    def GetKey( self ):
+        
+        return ( self._media.GetHash(), self._target_resolution )
+        
+    
+    def GetNumFrames( self ):
+        
+        return self._media.GetNumFrames()
+        
+    
+    def GetReadyForFrame( self, next_index_to_expect ):
+        
+        num_frames_in_video = self.GetNumFrames()
+        
+        frame_request_is_impossible = FrameIndexOutOfRange( next_index_to_expect, 0, num_frames_in_video - 1 )
+        
+        if frame_request_is_impossible:
+            
+            return
+            
+        
+        with self._lock:
+            
+            self._ideal_next_frame = next_index_to_expect
+            
+            video_is_bigger_than_buffer = num_frames_in_video > self._num_frames_backwards + 1 + self._num_frames_forwards
+            
+            if video_is_bigger_than_buffer:
+                
+                current_ideal_is_out_of_buffer = self._buffer_start_index == -1 or FrameIndexOutOfRange( self._ideal_next_frame, self._buffer_start_index, self._buffer_end_index )
+                
+                ideal_buffer_start_index = max( 0, self._ideal_next_frame - self._num_frames_backwards )
+                
+                ideal_buffer_end_index = ( self._ideal_next_frame + self._num_frames_forwards ) % num_frames_in_video
+                
+                if current_ideal_is_out_of_buffer:
+                    
+                    # the current buffer won't get to where we want, so remake it
+                    
+                    self._buffer_start_index = ideal_buffer_start_index
+                    self._buffer_end_index = ideal_buffer_end_index
+                    
+                else:
+                    
+                    # we can get to our desired position, but should we move the start and beginning on a bit?
+                    
+                    # we do not ever want to shunt left (rewind)
+                    # we do not want to shunt right if we don't have the earliest frames yet--be patient
+                    
+                    # i.e. it is between the current start and the ideal
+                    next_ideal_start_would_shunt_right = self._IndexInRange( ideal_buffer_start_index, self._buffer_start_index, self._ideal_next_frame )
+                    have_next_ideal_start = self._HasFrame( ideal_buffer_start_index )
+                    
+                    if next_ideal_start_would_shunt_right and have_next_ideal_start:
+                        
+                        self._buffer_start_index = ideal_buffer_start_index
+                        
+                    
+                    next_ideal_end_would_shunt_right = self._IndexInRange( ideal_buffer_end_index, self._buffer_end_index, self._buffer_start_index )
+                    
+                    if next_ideal_end_would_shunt_right:
+                    
+                        self._buffer_end_index = ideal_buffer_end_index
+                        
+                
+            else:
+                
+                self._buffer_start_index = 0
+                
+                self._buffer_end_index = num_frames_in_video - 1
+                
+            
+        
+        self._render_event.set()
+        
+    
+    def GetResolution( self ):
+        
+        return self._media.GetResolution()
+        
+    
+    def GetSize( self ):
+        
+        return self._target_resolution
+        
+    
+    def GetTimesToPlayAnimation( self ):
+        
+        return self._times_to_play_animation
+        
+    
+    def GetFrameIndex( self, timestamp_ms ):
+        
+        if self._media.GetMime() == HC.ANIMATION_GIF:
+            
+            so_far = 0
+            
+            for ( frame_index, duration_ms ) in enumerate( self._durations ):
+                
+                so_far += duration_ms
+                
+                if so_far > timestamp_ms:
+                    
+                    result = frame_index
+                    
+                    if FrameIndexOutOfRange( result, 0, self.GetNumFrames() - 1 ):
+                        
+                        return 0
+                        
+                    else:
+                        
+                        return result
+                        
+                    
+                
+            
+            return 0
+            
+        else:
+            
+            return timestamp_ms // self._average_frame_duration
+            
+        
+    
+    def GetTimestampMS( self, frame_index ):
+        
+        if self._media.GetMime() == HC.ANIMATION_GIF:
+            
+            return sum( self._durations[ : frame_index ] )
+            
+        else:
+            
+            return self._average_frame_duration * frame_index
+            
+        
+    
+    def GetTotalDuration( self ):
+        
+        if self._media.GetMime() == HC.ANIMATION_GIF:
+            
+            return sum( self._durations )
+            
+        else:
+            
+            return self._average_frame_duration * self.GetNumFrames()
+            
+        
+    
+    def HasFrame( self, index ):
+        
+        with self._lock:
+            
+            return self._HasFrame( index )
+            
+        
+    
+    def IsInitialised( self ):
+        
+        with self._lock:
+            
+            return self._initialised
+            
+        
+    
+    def IsScaled( self ):
+        
+        return self._zoom != 1.0
+        
+    
+    def Stop( self ):
+        
+        self._stop = True
+        
+    
     def THREADRender( self ):
         
         mime = self._media.GetMime()
@@ -577,18 +889,19 @@ class RasterContainerVideo( RasterContainer ):
         
         time.sleep( 0.00001 )
         
-        if self._media.GetMime() == HC.IMAGE_APNG:
+        # OK so just a note, you can switch GIF to the FFMPEG renderer these days and it works fine mate, transparency included
+        if self._media.GetMime() == HC.ANIMATION_GIF:
             
-            self._times_to_play_animation = HydrusVideoHandling.GetAPNGTimesToPlay( self._path )
-            
-        
-        if self._media.GetMime() == HC.IMAGE_GIF:
-            
-            ( self._durations, self._times_to_play_animation ) = HydrusImageHandling.GetGIFFrameDurations( self._path )
+            ( self._durations, self._times_to_play_animation ) = HydrusAnimationHandling.GetFrameDurationsPILAnimation( self._path )
             
             self._renderer = ClientVideoHandling.GIFRenderer( self._path, num_frames_in_video, self._target_resolution )
             
         else:
+            
+            if self._media.GetMime() == HC.ANIMATION_APNG:
+                
+                self._times_to_play_animation = HydrusAnimationHandling.GetTimesToPlayAPNG( self._path )
+                
             
             self._renderer = HydrusVideoHandling.VideoRendererFFMPEG( self._path, mime, duration, num_frames_in_video, self._target_resolution )
             
@@ -736,244 +1049,12 @@ class RasterContainerVideo( RasterContainer ):
             
         
     
-    def GetBufferIndices( self ):
-        
-        if self._last_index_rendered == -1:
-            
-            return None
-            
-        else:
-            
-            return ( self._buffer_start_index, self._last_index_rendered, self._buffer_end_index )
-            
-        
-    
-    def GetDurationMS( self, index ):
-        
-        if self._media.GetMime() == HC.IMAGE_GIF:
-            
-            if index in self._durations:
-                
-                return self._durations[ index ]
-                
-            
-        
-        return self._average_frame_duration
-        
-    
-    def GetFrame( self, index ):
-        
-        with self._lock:
-            
-            frame = self._frames[ index ]
-            
-        
-        num_frames_in_video = self.GetNumFrames()
-        
-        if index == num_frames_in_video - 1:
-            
-            next_index = 0
-            
-        else:
-            
-            next_index = index + 1
-            
-        
-        self.GetReadyForFrame( next_index )
-        
-        return frame
-        
-    
-    def GetHash( self ):
-        
-        return self._media.GetHash()
-        
-    
-    def GetKey( self ):
-        
-        return ( self._media.GetHash(), self._target_resolution )
-        
-    
-    def GetNumFrames( self ):
-        
-        return self._media.GetNumFrames()
-        
-    
-    def GetReadyForFrame( self, next_index_to_expect ):
-        
-        num_frames_in_video = self.GetNumFrames()
-        
-        frame_request_is_impossible = FrameIndexOutOfRange( next_index_to_expect, 0, num_frames_in_video - 1 )
-        
-        if frame_request_is_impossible:
-            
-            return
-            
-        
-        with self._lock:
-            
-            self._ideal_next_frame = next_index_to_expect
-            
-            video_is_bigger_than_buffer = num_frames_in_video > self._num_frames_backwards + 1 + self._num_frames_forwards
-            
-            if video_is_bigger_than_buffer:
-                
-                current_ideal_is_out_of_buffer = self._buffer_start_index == -1 or FrameIndexOutOfRange( self._ideal_next_frame, self._buffer_start_index, self._buffer_end_index )
-                
-                ideal_buffer_start_index = max( 0, self._ideal_next_frame - self._num_frames_backwards )
-                
-                ideal_buffer_end_index = ( self._ideal_next_frame + self._num_frames_forwards ) % num_frames_in_video
-                
-                if current_ideal_is_out_of_buffer:
-                    
-                    # the current buffer won't get to where we want, so remake it
-                    
-                    self._buffer_start_index = ideal_buffer_start_index
-                    self._buffer_end_index = ideal_buffer_end_index
-                    
-                else:
-                    
-                    # we can get to our desired position, but should we move the start and beginning on a bit?
-                    
-                    # we do not ever want to shunt left (rewind)
-                    # we do not want to shunt right if we don't have the earliest frames yet--be patient
-                    
-                    # i.e. it is between the current start and the ideal
-                    next_ideal_start_would_shunt_right = self._IndexInRange( ideal_buffer_start_index, self._buffer_start_index, self._ideal_next_frame )
-                    have_next_ideal_start = self._HasFrame( ideal_buffer_start_index )
-                    
-                    if next_ideal_start_would_shunt_right and have_next_ideal_start:
-                        
-                        self._buffer_start_index = ideal_buffer_start_index
-                        
-                    
-                    next_ideal_end_would_shunt_right = self._IndexInRange( ideal_buffer_end_index, self._buffer_end_index, self._buffer_start_index )
-                    
-                    if next_ideal_end_would_shunt_right:
-                    
-                        self._buffer_end_index = ideal_buffer_end_index
-                        
-                
-            else:
-                
-                self._buffer_start_index = 0
-                
-                self._buffer_end_index = num_frames_in_video - 1
-                
-            
-        
-        self._render_event.set()
-        
-    
-    def GetResolution( self ):
-        
-        return self._media.GetResolution()
-        
-    
-    def GetSize( self ):
-        
-        return self._target_resolution
-        
-    
-    def GetTimesToPlayAnimation( self ):
-        
-        return self._times_to_play_animation
-        
-    
-    def GetFrameIndex( self, timestamp_ms ):
-        
-        if self._media.GetMime() == HC.IMAGE_GIF:
-            
-            so_far = 0
-            
-            for ( frame_index, duration_ms ) in enumerate( self._durations ):
-                
-                so_far += duration_ms
-                
-                if so_far > timestamp_ms:
-                    
-                    result = frame_index
-                    
-                    if FrameIndexOutOfRange( result, 0, self.GetNumFrames() - 1 ):
-                        
-                        return 0
-                        
-                    else:
-                        
-                        return result
-                        
-                    
-                
-            
-            return 0
-            
-        else:
-            
-            return timestamp_ms // self._average_frame_duration
-            
-        
-    
-    def GetTimestampMS( self, frame_index ):
-        
-        if self._media.GetMime() == HC.IMAGE_GIF:
-            
-            return sum( self._durations[ : frame_index ] )
-            
-        else:
-            
-            return self._average_frame_duration * frame_index
-            
-        
-    
-    def GetTotalDuration( self ):
-        
-        if self._media.GetMime() == HC.IMAGE_GIF:
-            
-            return sum( self._durations )
-            
-        else:
-            
-            return self._average_frame_duration * self.GetNumFrames()
-            
-        
-    
-    def HasFrame( self, index ):
-        
-        with self._lock:
-            
-            return self._HasFrame( index )
-            
-        
-    
-    def CanHaveVariableFramerate( self ):
-        
-        with self._lock:
-            
-            return self._media.GetMime() == HC.IMAGE_GIF
-            
-        
-    
-    def IsInitialised( self ):
-        
-        with self._lock:
-            
-            return self._initialised
-            
-        
-    
-    def IsScaled( self ):
-        
-        return self._zoom != 1.0
-        
-    
-    def Stop( self ):
-        
-        self._stop = True
-        
-    
-class HydrusBitmap( object ):
+
+class HydrusBitmap( ClientCachesBase.CacheableObject ):
     
     def __init__( self, data, size, depth, compressed = True ):
+        
+        ClientCachesBase.CacheableObject.__init__( self )
         
         self._compressed = compressed
         
@@ -1028,14 +1109,14 @@ class HydrusBitmap( object ):
         
         ( width, height ) = self._size
         
-        return HG.client_controller.bitmap_manager.GetQtImageFromBuffer( width, height, self._depth * 8, self._GetData() )
+        return CG.client_controller.bitmap_manager.GetQtImageFromBuffer( width, height, self._depth * 8, self._GetData() )
         
     
     def GetQtPixmap( self ) -> QG.QPixmap:
         
         ( width, height ) = self._size
         
-        return HG.client_controller.bitmap_manager.GetQtPixmapFromBuffer( width, height, self._depth * 8, self._GetData() )
+        return CG.client_controller.bitmap_manager.GetQtPixmapFromBuffer( width, height, self._depth * 8, self._GetData() )
         
     
     def GetEstimatedMemoryFootprint( self ):

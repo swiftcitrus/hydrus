@@ -4,12 +4,17 @@ import unittest
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
+from hydrus.client.metadata import ClientContentUpdates
 
-def compare_content_updates( ut: unittest.TestCase, service_keys_to_content_updates, expected_service_keys_to_content_updates ):
+def compare_content_update_packages( ut: unittest.TestCase, content_update_package: ClientContentUpdates.ContentUpdatePackage, expected_content_update_package: ClientContentUpdates.ContentUpdatePackage ):
+    
+    service_keys_to_content_updates = dict( content_update_package.IterateContentUpdates() )
+    expected_service_keys_to_content_updates = dict( expected_content_update_package.IterateContentUpdates() )
     
     ut.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
     
@@ -17,8 +22,15 @@ def compare_content_updates( ut: unittest.TestCase, service_keys_to_content_upda
         
         expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
         
-        c_u_tuples = sorted( ( ( c_u.ToTuple(), c_u.GetReason() ) for c_u in content_updates ) )
-        e_c_u_tuples = sorted( ( ( e_c_u.ToTuple(), e_c_u.GetReason() ) for e_c_u in expected_content_updates ) )
+        content_updates = sorted( content_updates, key = lambda c_u: str( c_u ) )
+        expected_content_updates = sorted( expected_content_updates, key = lambda c_u: str( c_u ) )
+        
+        # TODO: go back to this when this works right, with ContentUpdateAction rewrite
+        # content_update.__hash__ isn't always reliable :(
+        #ut.assertEqual( content_updates, expected_content_updates )
+        
+        c_u_tuples = [ ( c_u.ToTuple(), c_u.GetReason() ) for c_u in content_updates ]
+        e_c_u_tuples = [ ( e_c_u.ToTuple(), e_c_u.GetReason() ) for e_c_u in expected_content_updates ]
         
         ut.assertEqual( c_u_tuples, e_c_u_tuples )
         
@@ -45,33 +57,35 @@ def GetFakeMediaResult( hash: bytes ):
     
     service_keys_to_filenames = {}
     
-    import_timestamp = random.randint( HydrusData.GetNow() - 1000000, HydrusData.GetNow() - 15 )
-    
-    current_to_timestamps = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : import_timestamp, CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : import_timestamp, CC.LOCAL_FILE_SERVICE_KEY : import_timestamp }
-    
     tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
     
-    timestamp_manager = ClientMediaManagers.TimestampManager()
+    times_manager = ClientMediaManagers.TimesManager()
     
-    file_modified_timestamp = random.randint( import_timestamp - 50000, import_timestamp - 1 )
+    import_timestamp_ms = random.randint( HydrusTime.GetNowMS() - 1000000000, HydrusTime.GetNowMS() - 15 )
     
-    timestamp_manager.SetFileModifiedTimestamp( file_modified_timestamp )
+    file_modified_timestamp_ms = random.randint( import_timestamp_ms - 50000000, import_timestamp_ms - 1 )
+    
+    times_manager.SetFileModifiedTimestampMS( file_modified_timestamp_ms )
+    
+    current_to_timestamps_ms = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : import_timestamp_ms, CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : import_timestamp_ms, CC.LOCAL_FILE_SERVICE_KEY : import_timestamp_ms }
+    
+    times_manager.SetImportedTimestampsMS( current_to_timestamps_ms )
     
     locations_manager = ClientMediaManagers.LocationsManager(
-        current_to_timestamps,
-        {},
+        set( current_to_timestamps_ms.keys() ),
         set(),
         set(),
+        set(),
+        times_manager,
         inbox = False,
         urls = set(),
-        service_keys_to_filenames = service_keys_to_filenames,
-        timestamp_manager = timestamp_manager
+        service_keys_to_filenames = service_keys_to_filenames
     )
     ratings_manager = ClientMediaManagers.RatingsManager( {} )
     notes_manager = ClientMediaManagers.NotesManager( { 'note' : 'hello', 'note2' : 'hello2' } )
-    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
     
-    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
     
     return media_result
     

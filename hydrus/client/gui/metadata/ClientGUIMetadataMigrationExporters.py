@@ -9,10 +9,13 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
+from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListBoxes
@@ -24,6 +27,7 @@ choice_tuple_label_lookup = {
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes : 'a file\'s notes',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTags : 'a file\'s tags',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs : 'a file\'s URLs',
+    ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps : 'a file\'s timestamps',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT : 'a .txt sidecar',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterJSON : 'a .json sidecar'
 }
@@ -32,6 +36,7 @@ choice_tuple_description_lookup = {
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes : 'The notes that a file has.',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTags : 'The tags that a file has on a particular service.',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs : 'The known URLs that a file has.',
+    ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps : 'A recorded timestamp the file has.',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT : 'A list of raw newline-separated texts in a .txt file.',
     ClientMetadataMigrationExporters.SingleFileMetadataExporterJSON : 'Strings somewhere in a JSON file.'
 }
@@ -75,6 +80,14 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
+        self._timestamp_data_stub_panel = ClientGUICommon.StaticBox( self, 'timestamp type' )
+        
+        self._timestamp_data_stub = ClientGUITime.TimestampDataStubCtrl( self._timestamp_data_stub_panel )
+        
+        self._timestamp_data_stub_panel.Add( self._timestamp_data_stub, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        #
+        
         self._sidecar_help_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().help, self._ShowSidecarHelp )
         
         self._nested_object_names_panel = QW.QWidget( self )
@@ -110,6 +123,7 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         
         QP.AddToLayout( vbox, self._change_type_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._service_selection_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._timestamp_data_stub_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, self._sidecar_help_button, CC.FLAGS_ON_RIGHT )
         QP.AddToLayout( vbox, self._nested_object_names_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, self._txt_separator_panel, CC.FLAGS_EXPAND_PERPENDICULAR )
@@ -141,7 +155,7 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             message = 'Sorry, you can only have this one!'
             
-            QW.QMessageBox.information( self, 'Information', message )
+            ClientGUIDialogsMessage.ShowInformation( self, message )
             
         
         try:
@@ -175,6 +189,10 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         elif isinstance( exporter, ( ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs ) ):
             
             pass
+            
+        elif isinstance( exporter, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps ):
+            
+            exporter.SetTimestampDataStub( self._timestamp_data_stub.GetValue() )
             
         elif isinstance( exporter, ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT ):
             
@@ -222,7 +240,7 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             try:
                 
-                HG.client_controller.services_manager.GetName( self._service_key )
+                CG.client_controller.services_manager.GetName( self._service_key )
                 
             except HydrusExceptions.DataMissing:
                 
@@ -234,6 +252,12 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         elif self._current_exporter_class == ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs:
             
             exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs()
+            
+        elif self._current_exporter_class == ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps:
+            
+            exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps()
+            
+            exporter.SetTimestampDataStub( self._timestamp_data_stub.GetValue() )
             
         elif self._current_exporter_class == ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes:
             
@@ -291,6 +315,7 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         self._nested_object_names_panel.setVisible( False )
         self._txt_separator_panel.setVisible( False )
         self._sidecar_panel.setVisible( False )
+        self._timestamp_data_stub_panel.setVisible( False )
         
         if isinstance( exporter, ClientMetadataMigrationExporters.SingleFileMetadataExporterSidecar ):
             
@@ -315,16 +340,22 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._service_selection_panel.setVisible( True )
             
-            if not HG.client_controller.services_manager.ServiceExists( self._service_key ):
+            if not CG.client_controller.services_manager.ServiceExists( self._service_key ):
                 
                 message = 'Hey, the tag service for your exporter does not seem to exist! Maybe it was deleted. Please select a new one that does.'
                 
-                QW.QMessageBox.warning( self, 'Warning', message )
+                ClientGUIDialogsMessage.ShowWarning( self, message )
                 
             
         elif isinstance( exporter, ( ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaNotes, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaURLs ) ):
             
             pass
+            
+        elif isinstance( exporter, ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps ):
+            
+            self._timestamp_data_stub.SetValue( exporter.GetTimestampDataStub() )
+            
+            self._timestamp_data_stub_panel.setVisible( True )
             
         elif isinstance( exporter, ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT ):
             
@@ -362,14 +393,14 @@ class EditSingleFileMetadataExporterPanel( ClientGUIScrolledPanels.EditPanel ):
         message += os.linesep * 2
         message += 'If there is no content to write, no new file will be created.'
         
-        QW.QMessageBox.information( self, 'Sidecars', message )
+        ClientGUIDialogsMessage.ShowInformation( self, message )
         
     
     def _UpdateServiceKeyButtonLabel( self ):
         
         try:
             
-            name = HG.client_controller.services_manager.GetName( self._service_key )
+            name = CG.client_controller.services_manager.GetName( self._service_key )
             
         except HydrusExceptions.DataMissing:
             

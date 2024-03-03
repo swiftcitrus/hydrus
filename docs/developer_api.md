@@ -46,7 +46,7 @@ In general, the API deals with standard UTF-8 JSON. POST requests and 200 OK res
     ```
     
 
-On 200 OK, the API returns JSON for everything except actual file/thumbnail requests. On 4XX and 5XX, assume it will return plain text, which may be a raw traceback that I'd be interested in seeing. You'll typically get 400 for a missing parameter, 401/403/419 for missing/insufficient/expired access, and 500 for a real deal serverside error.
+The API returns JSON for everything except actual file/thumbnail requests. Every JSON response includes the `version` of the Client API and `hydrus_version` of the Client hosting it (for brevity, these values are not included in the example responses in this help). For errors, you'll typically get 400 for a missing/invalid parameter, 401/403/419 for missing/insufficient/expired access, and 500 for a real deal serverside error.
 
 !!! note
     For any request sent to the API, the total size of the initial request line (this includes the URL and any parameters) and the headers must not be larger than 2 megabytes.
@@ -178,11 +178,138 @@ If you have a clever script/program that does many things, then hit up [/get\_se
 
 Also, note that all users can now copy their service keys from _review services_.
 
+## The Services Object { id="services_object" }
+
+Hydrus manages its different available domains and actions with what it calls _services_. If you are a regular user of the program, you will know about _review services_ and _manage services_. The Client API needs to refer to services, either to accept commands from you or to tell you what metadata files have and where.
+
+When it does this, it gives you this structure, typically under a `services` key right off the root node:
+
+```json title="Services Object"
+{
+  "c6f63616c2074616773" : {
+    "name" : "my tags",
+    "type": 5,
+    "type_pretty" : "local tag service"
+  },
+  "5674450950748cfb28778b511024cfbf0f9f67355cf833de632244078b5a6f8d" : {
+    "name" : "example tag repo",
+    "type" : 0,
+    "type_pretty" : "hydrus tag repository"
+  },
+  "6c6f63616c2066696c6573" : {
+    "name" : "my files",
+    "type" : 2,
+    "type_pretty" : "local file domain"
+  },
+  "7265706f7369746f72792075706461746573" : {
+    "name" : "repository updates",
+    "type" : 20,
+    "type_pretty" : "local update file domain"
+  },
+  "ae7d9a603008919612894fc360130ae3d9925b8577d075cd0473090ac38b12b6" : {
+    "name": "example file repo",
+    "type" : 1,
+    "type_pretty" : "hydrus file repository"
+  },
+  "616c6c206c6f63616c2066696c6573" : {
+    "name" : "all local files",
+    "type": 15,
+    "type_pretty" : "virtual combined local file service"
+  },
+  "616c6c206c6f63616c206d65646961" : {
+    "name" : "all my files",
+    "type" : 21,
+    "type_pretty" : "virtual combined local media service"
+  },
+  "616c6c206b6e6f776e2066696c6573" : {
+    "name" : "all known files",
+    "type" : 11,
+    "type_pretty" : "virtual combined file service"
+  },
+  "616c6c206b6e6f776e2074616773" : {
+    "name" : "all known tags",
+    "type": 10,
+    "type_pretty" : "virtual combined tag service"
+  },
+  "74d52c6238d25f846d579174c11856b1aaccdb04a185cb2c79f0d0e499284f2c" : {
+    "name" : "example local rating like service",
+    "type" : 7,
+    "type_pretty" : "local like/dislike rating service",
+    "star_shape" : "circle"
+  },
+  "90769255dae5c205c975fc4ce2efff796b8be8a421f786c1737f87f98187ffaf" : {
+    "name" : "example local rating numerical service",
+    "type" : 6,
+    "type_pretty" : "local numerical rating service",
+    "star_shape" : "fat star",
+    "min_stars" : 1,
+    "max_stars" : 5
+  },
+  "b474e0cbbab02ca1479c12ad985f1c680ea909a54eb028e3ad06750ea40d4106" : {
+    "name" : "example local rating inc/dec service",
+    "type" : 22,
+    "type_pretty" : "local inc/dec rating service"
+  },
+  "7472617368" : {
+    "name" : "trash",
+    "type" : 14,
+    "type_pretty" : "local trash file domain"
+  }
+}
+```
+
+I hope you recognise some of the information here. But what's that hex key on each section? It is the `service_key`.
+
+All services have these properties:
+
+- `name` - A mutable human-friendly name like 'my tags'. You can use this to present the service to the user--they should recognise it.
+- `type` - An integer enum saying whether the service is a local tag service or like/dislike rating service or whatever. This cannot change.
+- `service_key` - The true 'id' of the service. It is a string of hex, sometimes just twenty or so characters but in many cases 64 characters. This cannot change, and it is how we will refer to different services.
+
+This `service_key` is important. A user can rename their services, so `name` is not an excellent identifier, and definitely not something you should save to any permanent config file.
+
+If we want to search some files on a particular file and tag domain, we should expect to be saying something like `file_service_key=6c6f63616c2066696c6573` and `tag_service_key=f032e94a38bb9867521a05dc7b189941a9c65c25048911f936fc639be2064a4b` somewhere in the request.
+
+You won't see all of these, but the service `type` enum is:
+
+* 0 - tag repository
+* 1 - file repository
+* 2 - a local file domain like 'my files'
+* 5 - a local tag domain like 'my tags'
+* 6 - a 'numerical' rating service with several stars
+* 7 - a 'like/dislike' rating service with on/off status
+* 10 - all known tags -- a union of all the tag services
+* 11 - all known files -- a union of all the file services and files that appear in tag services
+* 12 - the local booru -- you can ignore this
+* 13 - IPFS
+* 14 - trash
+* 15 - all local files -- all files on hard disk ('all my files' + updates + trash) 
+* 17 - file notes
+* 18 - Client API
+* 19 - all deleted files -- you can ignore this
+* 20 - local updates -- a file domain to store repository update files in
+* 21 - all my files -- union of all local file domains
+* 22 - a 'inc/dec' rating service with positive integer rating
+* 99 - server administration
+
+`type_pretty` is something you can show users. Hydrus uses the same labels in _manage services_ and so on.
+
+Rating services now have some extra data:
+
+- like/dislike and numerical services have `star_shape`, which is one of `circle | square | fat star | pentagram star`
+- numerical services have `min_stars` (0 or 1) and `max_stars` (1 to 20)
+
+If you are displaying ratings, don't feel crazy obligated to obey the shape! Show a 4/5, select from a dropdown list, do whatever you like!
+
+If you want to know the services in a client, hit up [/get\_services](#get_services), which simply gives the above. The same structure has recently been added to [/get\_files/file\_metadata](#get_files_file_metadata) for convenience, since that refers to many different services when it is talking about file locations and ratings and so on.
+
+Note: If you need to do some quick testing, you should be able to copy the `service_key` of any service by hitting the 'copy service key' button in _review services_.
+
 ## Access Management
 
 ### **GET `/api_version`** { id="api_version" }
 
-_Gets the current API version. I will increment this every time I alter the API._
+_Gets the current API version. This increments every time I alter the API._
 
 Restricted access: NO.
     
@@ -192,7 +319,10 @@ Arguments: n/a
     
 Response:
 : Some simple JSON describing the current api version (and hydrus client version, if you are interested).
-: Note that this is mostly obselete now, since the 'Server' header of every response (and a duplicated 'Hydrus-Server' one, if you have a complicated proxy situation that overwrites 'Server') are now in the form "client api/{client_api_version} ({software_version})", e.g. "client api/32 (497)". 
+: Note that this is not very useful any more, for two reasons:
+
+: 1. The 'Server' header of every response (and a duplicated 'Hydrus-Server' one, if you have a complicated proxy situation that overwrites 'Server') are now in the form "client api/{client_api_version} ({software_version})", e.g. "client api/32 (497)".
+: 2. **Every JSON response explicitly includes this now.**
 
 ```json title="Example response"
 {
@@ -224,16 +354,21 @@ Arguments:
         *   5 - Manage Cookies and Headers
         *   6 - Manage Database
         *   7 - Edit File Notes
-        *   8 - Manage File Relationships
-
+        *   8 - Edit File Relationships
+        *   9 - Edit File Ratings
+        *   10 - Manage Popups
+        *   11 - Edit File Times
+    
     ``` title="Example request"
     /request_new_permissions?name=my%20import%20script&basic_permissions=[0,1]
     ```
-        
+    
 Response: 
 :   Some JSON with your access key, which is 64 characters of hex. This will not be valid until the user approves the request in the client ui.
 ```json title="Example response"
-{"access_key" : "73c9ab12751dcf3368f028d3abbe1d8e2a3a48d0de25e64f3a8f00f3a1424c57"}
+{
+    "access_key" : "73c9ab12751dcf3368f028d3abbe1d8e2a3a48d0de25e64f3a8f00f3a1424c57"
+}
 ```     
 
 ### **GET `/session_key`** { id="session_key" }
@@ -302,7 +437,7 @@ Example requests:
     ```
 
 Response: 
-:   Some JSON about the service. The same basic format as [/get\_services](#get_services)
+:   Some JSON about the service. A similar format as [/get\_services](#get_services) and [The Services Object](#services_object).
 ```json title="Example response"
 {
   "service" : {
@@ -320,7 +455,7 @@ It will only respond to services in the /get_services list. I will expand the av
 
 ### **GET `/get_services`** { id="get_services" }
 
-_Ask the client about its file and tag services._
+_Ask the client about its services._
 
 Restricted access: 
 :   YES. At least one of Add Files, Add Tags, Manage Pages, or Search Files permission needed.
@@ -330,127 +465,18 @@ Required Headers: n/a
 Arguments: n/a
     
 Response: 
-:   Some JSON listing the client's file and tag services by name and 'service key'.
+:   Some JSON listing the client's services.
+
 ```json title="Example response"
 {
-  "local_tags" : [
-    {
-      "name" : "my tags",
-      "service_key" : "6c6f63616c2074616773",
-      "type" : 5,
-      "type_pretty" : "local tag service"
-    },
-    {
-      "name" : "filenames",
-      "service_key" : "231a2e992b67101318c410abb6e7d98b6e32050623f138ca93bd4ad2993de31b",
-      "type" : 5,
-      "type_pretty" : "local tag service"
-    }
-  ],
-  "tag_repositories" : [
-    {
-      "name" : "PTR",
-      "service_key" : "ccb0cf2f9e92c2eb5bd40986f72a339ef9497014a5fb8ce4cea6d6c9837877d9",
-      "type" : 0,
-      "type_pretty" : "hydrus tag repository"
-    }
-  ],
-  "file_repositories" : [
-    {
-      "name" : "kamehameha central",
-      "service_key" : "89295dc26dae3ea7d395a1746a8fe2cb836b9472b97db48024bd05587f32ab0b",
-      "type" : 1,
-      "type_pretty" : "hydrus file repository"
-    }
-  ],
-  "local_files" : [
-    {
-      "name" : "my files",
-      "service_key" : "6c6f63616c2066696c6573",
-      "type" : 2,
-      "type_pretty" : "local file domain"
-    }
-  ],
-  "all_local_media" : [
-    {
-      "name" : "all my files",
-      "service_key" : "616c6c206c6f63616c206d65646961",
-      "type" : 21,
-      "type_pretty" : "virtual combined local media service"
-    }
-  ],
-  "trash" : [
-    {
-      "name" : "trash",
-      "service_key" : "7472617368",
-      "type" : 14,
-      "type_pretty" : "local trash file domain"
-    }
-  ],
-  "local_updates" : [
-    {
-      "name" : "repository updates",
-      "service_key" : "7265706f7369746f72792075706461746573",
-      "type" : 20,
-      "type_pretty" : "local update file domain"
-    }
-  ],
-  "all_local_files" : [
-    {
-      "name" : "all local files",
-      "service_key" : "616c6c206c6f63616c2066696c6573",
-      "type" : 15,
-      "type_pretty" : "virtual combined local file service"
-    }
-  ],
-  "all_known_files" : [
-    {
-      "name" : "all known files",
-      "service_key" : "616c6c206b6e6f776e2066696c6573",
-      "type" : 11,
-      "type_pretty" : "virtual combined file service"
-    }
-  ],
-  "all_known_tags" : [
-    {
-      "name" : "all known tags",
-      "service_key" : "616c6c206b6e6f776e2074616773",
-      "type" : 10,
-      "type_pretty" : "virtual combined tag service"
-    }
-  ]
+  "services" : "The Services Object"
 }
 ```  
 
-    Note that a user can rename their services, so while they will recognise `name`, it is not an excellent identifier, and definitely not something to save to any permanent config file.
-    
-    `service_key` is non-mutable and is the main service identifier. The hardcoded/initial services have shorter fixed service key strings (it is usually just 'all known files' etc.. ASCII-converted to hex), but user-created services will have random 64-character hex.
-    
-    Now that I state `type` and `type_pretty` here, I may rearrange this call, probably into a flat list. The `all_known_files` Object keys here are arbitrary.
-    
-    For service `type`, you won't see all these, and you'll only ever need some, but the enum is:
-    
-    * 0 - tag repository
-    * 1 - file repository
-    * 2 - a local file domain like 'my files'
-    * 5 - a local tag domain like 'my tags'
-    * 6 - a 'numerical' rating service with several stars
-    * 7 - a 'like/dislike' rating service with on/off status
-    * 10 - all known tags -- a union of all the tag services
-    * 11 - all known files -- a union of all the file services and files that appear in tag services
-    * 12 - the local booru -- you can ignore this
-    * 13 - IPFS
-    * 14 - trash
-    * 15 - all local files -- all files on hard disk ('all my files' + updates + trash) 
-    * 17 - file notes
-    * 18 - Client API
-    * 19 - all deleted files -- you can ignore this
-    * 20 - local updates -- a file domain to store repository update files in
-    * 21 - all my files -- union of all local file domains
-    * 22 - a 'inc/dec' rating service with positive integer rating
-    * 99 - server administration
-    
-    `type_pretty` is something you can show users if you like. Hydrus uses the same labels in _manage services_ and so on.
+This now primarily uses [The Services Object](#services_object).
+
+!!! note
+    If you do the request and look at the actual response, you will see a lot more data under different keys--this is deprecated, and will be deleted in 2024. If you use the old structure, please move over!
 
 ## Importing and Deleting Files
 
@@ -468,7 +494,9 @@ Arguments (in JSON):
 :   - `path`: (the path you want to import)
 
 ```json title="Example request body"
-{"path" : "E:\\to_import\\ayanami.jpg"}
+{
+  "path" : "E:\\to_import\\ayanami.jpg"
+}
 ```
 
 Arguments (as bytes): 
@@ -494,8 +522,8 @@ Response:
     
     A file 'veto' is caused by the file import options (which in this case is the 'quiet' set under the client's _options->importing_) stopping the file due to its resolution or minimum file size rules, etc...
     
-    'hash' is the file's SHA256 hash in hexadecimal, and 'note' is some occasional additional human-readable text appropriate to the file status that you may recognise from hydrus's normal import workflow. For an import error, it will always be the full traceback.
-    
+    'hash' is the file's SHA256 hash in hexadecimal, and 'note' is any additional human-readable text appropriate to the file status that you may recognise from hydrus's normal import workflow. For an outright import error, it will be a summary of the exception that you can present to the user, and a new field `traceback` will have the full trace for debugging purposes.
+     
 
 ### **POST `/add_files/delete_files`** { id="add_files_delete_files" }
 
@@ -515,7 +543,9 @@ Arguments (in JSON):
 *   `reason`: (optional, string, the reason attached to the delete action)
 
 ```json title="Example request body"
-{"hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"}
+{
+  "hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"
+}
 ```
     
 Response:
@@ -540,7 +570,9 @@ Arguments (in JSON):
 *   [file domain](#parameters_file_domain) (optional, defaults to 'all my files')
 
 ```json title="Example request body"
-{"hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"}
+{
+  "hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"
+}
 ```
 
 Response: 
@@ -567,7 +599,9 @@ Arguments (in JSON):
 *   [files](#parameters_files)
 
 ```json title="Example request body"
-{"hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"}
+{
+  "hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"
+}
 ```
     
 Response: 
@@ -592,7 +626,9 @@ Arguments (in JSON):
 *   [files](#parameters_files)
 
 ```json title="Example request body"
-{"hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"}
+{
+  "hash" : "78f92ba4a786225ee2a1236efa6b7dc81dd729faf4af99f96f3e20bad6d8b538"
+}
 ```
     
 Response: 
@@ -600,6 +636,46 @@ Response:
     
 This puts files back in the inbox, taking them out of the archive. It only has meaning for files currently in 'my files' or 'trash'. There is no error if any files do not currently exist or are already in the inbox.
     
+
+### **POST `/add_files/generate_hashes`** { id="add_files_generate_hashes" }
+
+_Generate hashes for an arbitrary file._
+
+Restricted access:
+:   YES. Import Files permission needed.
+    
+Required Headers:
+:   - Content-Type: `application/json` (if sending path), `application/octet-stream` (if sending file)
+
+Arguments (in JSON):
+:   - `path`: (the path you want to import)
+
+```json title="Example request body"
+{
+  "path" : "E:\\to_import\\ayanami.jpg"
+}
+```
+
+Arguments (as bytes): 
+:   You can alternately just send the file's bytes as the POST body.
+    
+Response: 
+:   Some JSON with the hashes of the file
+```json title="Example response"
+{
+  "hash": "7de421a3f9be871a7037cca8286b149a31aecb6719268a94188d76c389fa140c",
+  "perceptual_hashes": [
+    "b44dc7b24dcb381c"
+  ],
+  "pixel_hash": "c7bf20e5c4b8a524c2c3e3af2737e26975d09cba2b3b8b76341c4c69b196da4e",
+}
+```
+
+    - `hash` is the sha256 hash of the submitted file.
+    - `perceptual_hashes` is a list of perceptual hashes for the file.
+    - `pixel_hash` is the sha256 hash of the pixel data of the rendered image.
+
+`hash` will always be returned for any file, the others will only be returned for filetypes they can be generated for.
 
 ## Importing and Editing URLs
 
@@ -821,9 +897,9 @@ _Ask the client about how it will see certain tags._
 
 Restricted access: 
 :   YES. Add Tags permission needed.
-    
+
 Required Headers: n/a
-    
+
 Arguments (in percent-encoded JSON):
 :   
 *   `tags`: (a list of the tags you want cleaned)
@@ -845,12 +921,108 @@ Response:
     Mostly, hydrus simply trims excess whitespace, but the other examples are rare issues you might run into. 'system' is an invalid namespace, tags cannot be prefixed with hyphens, and any tag starting with ':' is secretly dealt with internally as "\[no namespace\]:\[colon-prefixed-subtag\]". Again, you probably won't run into these, but if you see a mismatch somewhere and want to figure it out, or just want to sort some numbered tags, you might like to try this.
     
 
+### **GET `/add_tags/get_siblings_and_parents`** { id="add_tags_get_siblings_and_parents" }
+
+_Ask the client about tags' sibling and parent relationships._
+
+Restricted access: 
+:   YES. Add Tags permission needed.
+
+Required Headers: n/a
+
+Arguments (in percent-encoded JSON):
+:   
+*   `tags`: (a list of the tags you want info on)
+
+Example request:
+:   Given tags `#!json [ "blue eyes", "samus aran" ]`:
+    ```
+    /add_tags/get_siblings_and_parents?tags=%5B%22blue%20eyes%22%2C%20%22samus%20aran%22%5D
+    ```
+
+Response: 
+:  An Object showing all the display relationships for each tag on each service. Also [The Services Object](#services_object).
+```json title="Example response"
+{
+  "services" : "The Services Object"
+  "tags" : {
+    "blue eyes" : {
+      "6c6f63616c2074616773" : {
+        "ideal_tag" : "blue eyes",
+        "siblings" : [
+          "blue eyes",
+          "blue_eyes",
+          "blue eye",
+          "blue_eye"
+        ],
+        "descendants" : [],
+        "ancestors" : []
+      },
+      "877bfcf81f56e7e3e4bc3f8d8669f92290c140ba0acfd6c7771c5e1dc7be62d7": {
+        "ideal_tag" : "blue eyes",
+        "siblings" : [
+          "blue eyes"
+        ],
+        "descendants" : [],
+        "ancestors" : []
+      }
+    },
+    "samus aran" : {
+      "6c6f63616c2074616773" : {
+        "ideal_tag" : "character:samus aran",
+        "siblings" : [
+          "samus aran",
+          "samus_aran",
+          "character:samus aran"
+        ],
+        "descendants" : [
+          "character:samus aran (zero suit)"
+          "cosplay:samus aran"
+        ],
+        "ancestors" : [
+          "series:metroid",
+          "studio:nintendo"
+        ]
+      },
+      "877bfcf81f56e7e3e4bc3f8d8669f92290c140ba0acfd6c7771c5e1dc7be62d7": {
+        "ideal_tag" : "samus aran",
+        "siblings" : [
+          "samus aran"
+        ],
+        "descendants" : [
+          "zero suit samus",
+          "samus_aran_(cosplay)"
+        ],
+        "ancestors" : []
+      }
+    }
+  }
+}
+```
+    
+    This data is essentially how mappings in the `storage` `tag_display_type` become `display`.
+    
+    The hex keys are the service keys, which you will have seen elsewhere, like [GET /get\_files/file\_metadata](#get_files_file_metadata). Note that there is no concept of 'all known tags' here. If a tag is in 'my tags', it follows the rules of 'my tags', and then all the services' display tags are merged into the 'all known tags' pool for user display.
+    
+    **Also, the siblings and parents here are not just what is in _tags->manage tag siblings/parents_, they are the final computed combination of rules as set in _tags->manage where tag siblings and parents apply_.** The data given here is not guaranteed to be useful for editing siblings and parents on a particular service. That data, which is currently pair-based, will appear in a different API request in future.
+    
+    - `ideal_tag` is how the tag appears in normal display to the user.
+    - `siblings` is every tag that will show as the `ideal_tag`, including the `ideal_tag` itself.
+    - `descendants` is every child (and recursive grandchild, great-grandchild...) that implies the `ideal_tag`.
+    - `ancestors` is every parent (and recursive grandparent, great-grandparent...) that our tag implies.
+    
+    Every descendant and ancestor is an `ideal_tag` itself that may have its own siblings.
+    
+    Most situations are simple, but remember that siblings and parents in hydrus can get complex. If you want to display this data, I recommend you plan to support simple service-specific workflows, and add hooks to recognise conflicts and other difficulty and, when that happens, abandon ship (send the user back to Hydrus proper). Also, if you show summaries of the data anywhere, make sure you add a 'and 22 more...' overflow mechanism to your menus, since if you hit up 'azur lane' or 'pokemon', you are going to get hundreds of children.
+    
+    I generally warn you off computing sibling and parent mappings or counts yourself. The data from this request is best used for sibling and parent decorators on individual tags in a 'manage tags' presentation. The code that actually computes what siblings and parents look like in the 'display' context can be a pain at times, and I've already done it. Just run /search_tags or /file_metadata again after any changes you make and you'll get updated values.
+
 ### **GET `/add_tags/search_tags`** { id="add_tags_search_tags" }
 
 _Search the client for tags._
 
 Restricted access:
-:   YES. Search for Files permission needed.
+:   YES. Search for Files and Add Tags permission needed.
 
 Required Headers: n/a
 
@@ -986,6 +1158,133 @@ Response description:
     When you delete a tag, a deletion record is made _even if the tag does not exist on the file_. This is important if you expect to add the tags again via parsing, because, in general, when hydrus adds tags through a downloader, it will not overwrite a previously 'deleted' tag record (this is to stop re-downloads overwriting the tags you hand-removed previously). Undeletes usually have to be done manually by a human.  
     
     So, _do_ be careful about how you spam delete unless it is something that doesn't matter or it is something you'll only be touching again via the API anyway.
+
+## Editing File Ratings
+
+### **POST `/edit_ratings/set_rating`** { id="edit_ratings_set_rating" }
+
+_Add or remove ratings associated with a file._
+
+Restricted access: 
+:   YES. Edit Ratings permission needed.
+    
+Required Headers:
+:       
+    *   `Content-Type`: `application/json`
+    
+Arguments (in percent-encoded JSON):
+:   
+*   [files](#parameters_files)
+*   `rating_service_key` : (hexadecimal, the rating service you want to edit)
+*   `rating` : (mixed datatype, the rating value you want to set)
+
+```json title="Example request body"
+{
+  "hash" : "3b820114f658d768550e4e3d4f1dced3ff8db77443472b5ad93700647ad2d3ba",
+  "rating_service_key" : "282303611ba853659aa60aeaa5b6312d40e05b58822c52c57ae5e320882ba26e",
+  "rating" : 2
+}
+```
+
+This is fairly simple, but there are some caveats around the different rating service types and the actual data you are setting here. It is the same as you'll see in [GET /get\_files/file\_metadata](#get_files_file_metadata). 
+
+#### Like/Dislike Ratings
+
+Send `true` for 'like', `false` for 'dislike', or `null` for 'unset'.
+
+#### Numerical Ratings
+
+Send an `int` for the number of stars to set, or `null` for 'unset'.
+
+#### Inc/Dec Ratings
+
+Send an `int` for the number to set. 0 is your minimum.
+
+As with [GET /get\_files/file\_metadata](#get_files_file_metadata), check [The Services Object](#services_object) for the min/max stars on a numerical rating service. 
+
+Response: 
+:   200 and no content.
+
+## Editing File Times
+
+### **POST `/edit_times/set_time`** { id="edit_times_set_time" }
+
+_Add or remove timestamps associated with a file._
+
+Restricted access: 
+:   YES. Edit Times permission needed.
+    
+Required Headers:
+:       
+    *   `Content-Type`: `application/json`
+    
+Arguments (in percent-encoded JSON):
+:   
+*   [files](#parameters_files)
+*   `timestamp` : (selective, float or int of the time in seconds, or `null` for deleting web domain times)
+*   `timestamp_ms` : (selective, int of the time in milliseconds, or `null` for deleting web domain times)
+*   `timestamp_type` : (int, the type of timestamp you are editing)
+*   `file_service_key` : (dependant, hexadecimal, the file service you are editing in 'imported'/'deleted'/'previously imported')
+*   `canvas_type` : (dependant, int, the canvas type you are editing in 'last viewed')
+*   `domain` : (dependant, string, the domain you are editing in 'modified (web domain)')
+
+```json title="Example request body, simple"
+{
+  "timestamp" : "1641044491",
+  "timestamp_type" : 5
+}
+```
+
+```json title="Example request body, more complicated"
+{
+  "timestamp" : "1641044491.458",
+  "timestamp_type" : 6,
+  "canvas_type" : 1
+}
+```
+
+```json title="Example request body, deleting"
+{
+  "timestamp_ms" : null,
+  "timestamp_type" : 0,
+  "domain" : "blahbooru.org"
+}
+```
+
+This is a copy of the _manage times_ dialog in the program, so if you are uncertain about something, check that out. The client records timestamps up to millisecond accuracy.
+
+You have to select some files, obviously. I'd imagine most uses will be over one file at a time, but you can spam 100 or 10,000 if you need to.
+
+Then choose whether you want to work with `timestamp` or `timestamp_ms`. `timestamp` can be an integer or a float, and in the latter case, the API will suck up the three most significant digits to be the millisecond data. `timestamp_ms` is an integer of milliseconds, simply the `timestamp` value multiplied by 1,000. It doesn't matter which you use--whichever is easiest for you.
+
+If you send `null` timestamp time, then this will instruct to delete the existing value, if possible and reasonable.
+
+`timestamp_type` is an enum as follows:
+
+*   0 - File modified time (web domain)
+*   1 - File modified time (on the hard drive)
+*   3 - File import time
+*   4 - File delete time
+*   5 - Archived time
+*   6 - Last viewed (in the media viewer)
+*   7 - File originally imported time
+
+!!! warning "Adding or Deleting"
+    You can add or delete type 0 (web domain) timestamps, but you can only edit existing instances of all the others. This is broadly how the _manage times_ dialog works, also. Stuff like 'last viewed' is tied up with other numbers like viewtime and num_views, so if that isn't already in the database, then we can't just add the timestamp on its own. Same with 'deleted time' for a file that isn't deleted! So, in general, other than web domain stuff, you can only edit times you already see in [/get\_files/file\_metadata](#get_files_file_metadata).
+
+If you select 0, you have to include a `domain`, which will usually be a web domain, but you can put anything in there.
+
+If you select 1, the client will _not_ alter the modified time on your hard disk, only the database record. This is unlike the dialog. Let's let this system breathe a bit before we try to get too clever.
+
+If you select 3, 4, or 7, you have to include a `file_service_key`. The 'previously imported' time is for deleted files only; it records when the file was originally imported so if the user hits 'undo', the database knows what import time to give back to it.
+
+If you select 6, you have to include a `canvas_type`, which is:
+
+*   0 - Media viewer
+*   1 - Preview viewer
+
+Response: 
+:   200 and no content.
 
 ## Editing File Notes
 
@@ -1194,6 +1493,11 @@ Wildcards and namespace searches are supported, so if you search for 'character:
     *   system:has note with name note name
     *   system:no note with name note name
     *   system:does not have note with name note name
+    *   system:has a rating for `service_name`
+    *   system:does not have a rating for `service_name`
+    *   system:rating for `service_name` > 3/5 (numerical services)
+    *   system:rating for `service_name` is like (like/dislike services)
+    *   system:rating for `service_name` = 13 (inc/dec services)
 
 Please test out the system predicates you want to send. If you are in _help-&gt;advanced mode_, you can test this parser in the advanced text input dialog when you click the OR\* button on a tag autocomplete dropdown. More system predicate types and input formats will be available in future. Reverse engineering system predicate data from text is obviously tricky. If a system predicate does not parse, you'll get 400.
 
@@ -1308,7 +1612,10 @@ Arguments (in percent-encoded JSON):
     *   `only_return_identifiers`: true or false (optional, defaulting to false)
     *   `only_return_basic_information`: true or false (optional, defaulting to false)
     *   `detailed_url_information`: true or false (optional, defaulting to false)
+    *   `include_blurhash`: true or false (optional, defaulting to false. Only applies when `only_return_basic_information` is true)
+    *   `include_milliseconds`: true or false (optional, defaulting to false)
     *   `include_notes`: true or false (optional, defaulting to false)
+    *   `include_services_object`: true or false (optional, defaulting to true)
     *   `hide_service_keys_tags`: **Deprecated, will be deleted soon!** true or false (optional, defaulting to true)
 
 If your access key is restricted by tag, **the files you search for must have been in the most recent search result**.
@@ -1328,15 +1635,20 @@ If your access key is restricted by tag, **the files you search for must have be
 This request string can obviously get pretty ridiculously long. It also takes a bit of time to fetch metadata from the database. In its normal searches, the client usually fetches file metadata in batches of 256.
 
 Response:
-:   A list of JSON Objects that store a variety of file metadata.
+:   A list of JSON Objects that store a variety of file metadata. Also [The Services Object](#services_object) for service reference.
+
 ```json title="Example response"
 {
+  "services" : "The Services Object",
   "metadata" : [
     {
       "file_id" : 123,
       "hash" : "4c77267f93415de0bc33b7725b8c331a809a924084bee03ab2f5fae1c6019eb2",
       "size" : 63405,
       "mime" : "image/jpeg",
+      "filetype_forced" : false,
+      "filetype_human" : "jpeg",
+      "filetype_enum" : 1,
       "ext" : ".jpg",
       "width" : 640,
       "height" : 480,
@@ -1351,6 +1663,8 @@ Response:
       },
       "ipfs_multihashes" : {},
       "has_audio" : false,
+      "blurhash" : "U6PZfSi_.AyE_3t7t7R**0o#DgR4_3R*D%xt",
+      "pixel_hash" : "2519e40f8105599fcb26187d39656b1b46f651786d0e32fff2dc5a9bc277b5bb",
       "num_frames" : null,
       "num_words" : null,
       "is_inbox" : false,
@@ -1360,26 +1674,23 @@ Response:
       "has_exif" : true,
       "has_human_readable_embedded_metadata" : true,
       "has_icc_profile" : true,
+      "has_transparency" : false,
       "known_urls" : [],
+      "ratings" : {
+        "74d52c6238d25f846d579174c11856b1aaccdb04a185cb2c79f0d0e499284f2c" : null,
+        "90769255dae5c205c975fc4ce2efff796b8be8a421f786c1737f87f98187ffaf" : null,
+        "b474e0cbbab02ca1479c12ad985f1c680ea909a54eb028e3ad06750ea40d4106" : 0
+      },
       "tags" : {
         "6c6f63616c2074616773" : {
-          "name" : "local tags",
-          "type" : 5,
-          "type_pretty" : "local tag service",
           "storage_tags" : {},
           "display_tags" : {}
         },
         "37e3849bda234f53b0e9792a036d14d4f3a9a136d1cb939705dbcd5287941db4" : {
-          "name" : "public tag repo",
-          "type" : 1,
-          "type_pretty" : "hydrus tag repository",
           "storage_tags" : {},
           "display_tags" : {}
         },
         "616c6c206b6e6f776e2074616773" : {
-          "name" : "all known tags",
-          "type" : 10,
-          "type_pretty" : "virtual combined tag service",
           "storage_tags" : {},
           "display_tags" : {}
         }
@@ -1390,6 +1701,9 @@ Response:
       "hash" : "3e7cb9044fe81bda0d7a84b5cb781cba4e255e4871cba6ae8ecd8207850d5b82",
       "size" : 199713,
       "mime" : "video/webm",
+      "filetype_forced" : false,
+      "filetype_human" : "webm",
+      "filetype_enum" : 21,
       "ext" : ".webm",
       "width" : 1920,
       "height" : 1080,
@@ -1404,29 +1718,17 @@ Response:
       "file_services" : {
         "current" : {
           "616c6c206c6f63616c2066696c6573" : {
-            "name" : "all local files",
-            "type" : 15,
-            "type_pretty" : "virtual combined local file service",
             "time_imported" : 1641044491
           },
-          "616c6c206c6f63616c2066696c6573" : {
-            "name" : "all my files",
-            "type" : 21,
-            "type_pretty" : "virtual combined local media service",
+          "616c6c206c6f63616c206d65646961" : {
             "time_imported" : 1641044491
           },
           "cb072cffbd0340b67aec39e1953c074e7430c2ac831f8e78fb5dfbda6ec8dcbd" : {
-            "name" : "cool space babes",
-            "type" : 2,
-            "type_pretty" : "local file domain",
             "time_imported" : 1641204220
           }
         },
         "deleted" : {
           "6c6f63616c2066696c6573" : {
-            "name" : "my files",
-            "type" : 2,
-            "type_pretty" : "local file domain",
             "time_deleted" : 1641204274,
             "time_imported" : 1641044491
           }
@@ -1436,6 +1738,8 @@ Response:
         "55af93e0deabd08ce15ffb2b164b06d1254daab5a18d145e56fa98f71ddb6f11" : "QmReHtaET3dsgh7ho5NVyHb5U13UgJoGipSWbZsnuuM8tb"
       },
       "has_audio" : true,
+      "blurhash" : "UHF5?xYk^6#M@-5b,1J5@[or[k6.};FxngOZ",
+      "pixel_hash" : "1dd9625ce589eee05c22798a9a201602288a1667c59e5cd1fb2251a6261fbd68",
       "num_frames" : 102,
       "num_words" : null,
       "is_inbox" : false,
@@ -1445,16 +1749,19 @@ Response:
       "has_exif" : false,
       "has_human_readable_embedded_metadata" : false,
       "has_icc_profile" : false,
+      "has_transparency" : false,
       "known_urls" : [
         "https://gelbooru.com/index.php?page=post&s=view&id=4841557",
         "https://img2.gelbooru.com//images/80/c8/80c8646b4a49395fb36c805f316c49a9.jpg",
         "http://origin-orig.deviantart.net/ed31/f/2019/210/7/8/beachqueen_samus_by_dandonfuga-ddcu1xg.jpg"
       ],
+      "ratings" : {
+        "74d52c6238d25f846d579174c11856b1aaccdb04a185cb2c79f0d0e499284f2c" : true,
+        "90769255dae5c205c975fc4ce2efff796b8be8a421f786c1737f87f98187ffaf" : 3,
+        "b474e0cbbab02ca1479c12ad985f1c680ea909a54eb028e3ad06750ea40d4106" : 11
+      },
       "tags" : {
         "6c6f63616c2074616773" : {
-          "name" : "local tags",
-          "type" : 5,
-          "type_pretty" : "local tag service",
           "storage_tags" : {
             "0" : ["samus favourites"],
             "2" : ["process this later"]
@@ -1465,9 +1772,6 @@ Response:
           }
         },
         "37e3849bda234f53b0e9792a036d14d4f3a9a136d1cb939705dbcd5287941db4" : {
-          "name" : "public tag repo",
-          "type" : 1,
-          "type_pretty" : "hydrus tag repository",
           "storage_tags" : {
             "0" : ["blonde_hair", "blue_eyes", "looking_at_viewer"],
             "1" : ["bodysuit"]
@@ -1478,9 +1782,6 @@ Response:
           }
         },
         "616c6c206b6e6f776e2074616773" : {
-          "name" : "all known tags",
-          "type" : 10,
-          "type_pretty" : "virtual combined tag service",
           "storage_tags" : {
             "0" : ["samus favourites", "blonde_hair", "blue_eyes", "looking_at_viewer"],
             "1" : ["bodysuit"]
@@ -1497,6 +1798,7 @@ Response:
 ```
 ```json title="And one where only_return_identifiers is true"
 {
+  "services" : "The Services Object",
   "metadata" : [
     {
       "file_id" : 123,
@@ -1511,32 +1813,39 @@ Response:
 ```
 ```json title="And where only_return_basic_information is true"
 {
+  "services" : "The Services Object",
   "metadata" : [
     {
       "file_id" : 123,
       "hash" : "4c77267f93415de0bc33b7725b8c331a809a924084bee03ab2f5fae1c6019eb2",
       "size" : 63405,
       "mime" : "image/jpeg",
+      "filetype_forced" : false,
+      "filetype_human" : "jpeg",
+      "filetype_enum" : 1,
       "ext" : ".jpg",
       "width" : 640,
       "height" : 480,
       "duration" : null,
       "has_audio" : false,
       "num_frames" : null,
-      "num_words" : null,
+      "num_words" : null
     },
     {
       "file_id" : 4567,
       "hash" : "3e7cb9044fe81bda0d7a84b5cb781cba4e255e4871cba6ae8ecd8207850d5b82",
       "size" : 199713,
       "mime" : "video/webm",
+      "filetype_forced" : false,
+      "filetype_human" : "webm",
+      "filetype_enum" : 21,
       "ext" : ".webm",
       "width" : 1920,
       "height" : 1080,
       "duration" : 4040,
       "has_audio" : true,
       "num_frames" : 102,
-      "num_words" : null,
+      "num_words" : null
     }
   ]
 }
@@ -1554,13 +1863,17 @@ Size is in bytes. Duration is in milliseconds, and may be an int or a float.
 
 The `thumbnail_width` and `thumbnail_height` are a generally reliable prediction but aren't a promise. The actual thumbnail you get from [/get\_files/thumbnail](#get_files_thumbnail) will be different if the user hasn't looked at it since changing their thumbnail options. You only get these rows for files that hydrus actually generates an actual thumbnail for. Things like pdf won't have it. You can use your own thumb, or ask the api and it'll give you a fixed fallback; those are mostly 200x200, but you can and should size them to whatever you want.
 
+`include_notes` will decide whether to show a file's notes, in a simple names->texts Object.
+
+`include_milliseconds` will determine if timestamps are integers (`1641044491`), which is the default, or floats with three significant figures (`1641044491.485`). As of v559, all file timestamps across the program are internally tracked with milliseconds.
+
+If the file has a thumbnail, `blurhash` gives a base 83 encoded string of its [blurhash](https://blurha.sh/). `pixel_hash` is an SHA256 of the image's pixel data and should exactly match for pixel-identical files (it is used in the duplicate system for 'must be pixel duplicates').
+
+If the file's filetype is forced by the user, `filetype_forced` becomes `true` and a second mime string, `original_mime` is added.
+
 #### tags
 
-The 'tags' structures are undergoing transition. Previously, this was a mess of different Objects in different domains, all `service_xxx_to_xxx_tags`, but they are being transitioned to the combined `tags` Object.
-
-`hide_service_keys_tags` is deprecated and will be deleted soon. When set to `false`, it shows the old `service_keys_to_statuses_to_tags` and `service_keys_to_statuses_to_display_tags` Objects.
-
-The `tags` structures are similar to the [/add\_tags/add\_tags](#add_tags_add_tags) scheme, excepting that the status numbers are:
+The `tags` structure is similar to the [/add\_tags/add\_tags](#add_tags_add_tags) scheme, excepting that the status numbers are:
 
 *   0 - current
 *   1 - pending
@@ -1570,11 +1883,30 @@ The `tags` structures are similar to the [/add\_tags/add\_tags](#add_tags_add_ta
 !!! note
     Since JSON Object keys must be strings, these status numbers are strings, not ints.
 
-To learn more about service names and keys on a client, use the [/get\_services](#get_services) call.
-
 While the 'storage_tags' represent the actual tags stored on the database for a file, 'display_tags' reflect how tags appear in the UI, after siblings are collapsed and parents are added. If you want to edit a file's tags, refer to the storage tags. If you want to render to the user, use the display tags. The display tag calculation logic is very complicated; if the storage tags change, do not try to guess the new display tags yourself--just ask the API again. 
 
+#### ratings
+
+The `ratings` structure is simple, but it holds different data types. For each service:
+
+- For a like/dislike service, 'no rating' is null. 'like' is true, 'dislike' is false.
+- For a numerical service, 'no rating' is null. Otherwise it will be an integer, for the number of stars.
+- For an inc/dec service, it is always an integer. The default value is 0 for all files.
+
+Check [The Services Object](#services_object) to see the shape of a rating star, and min/max number of stars in a numerical service. 
+
+#### services
+
+The `tags`, `ratings`, and `file_services` structures use the hexadecimal `service_key` extensively. If you need to look up the respective service name or type, check [The Services Object](#services_object) under the top level `services` key.
+
+!!! note
+    If you look, those file structures actually include the service name and type already, but this bloated data is deprecated and will be deleted in 2024, so please transition over.
+
+If you don't want the services object (it is generally superfluous on the 'simple' responses), then add `include_services_object=false`.
+
 #### parameters
+
+The `metadata` list _should_ come back in the same sort order you asked, whether that is in `file_ids` or `hashes`!
 
 If you ask with hashes rather than file_ids, hydrus will, by default, only return results when it has seen those hashes before. This is to stop the client making thousands of new file_id records in its database if you perform a scanning operation. If you ask about a hash the client has never encountered before--for which there is no file_id--you will get this style of result:
 
@@ -1591,9 +1923,9 @@ If you ask with hashes rather than file_ids, hydrus will, by default, only retur
 
 You can change this behaviour with `create_new_file_ids=true`, but bear in mind you will get a fairly 'empty' metadata result with lots of 'null' lines, so this is only useful for gathering the numerical ids for later Client API work.
 
-If you ask about any file_ids that do not exist, you'll get 404.
+If you ask about file_ids that do not exist, you'll get 404.
 
-If you set `only_return_basic_information=true`, this will be much faster for first-time requests than the full metadata result, but it will be slower for repeat requests. The full metadata object is cached after first fetch, the limited file info object is not.
+If you set `only_return_basic_information=true`, this will be much faster for first-time requests than the full metadata result, but it will be slower for repeat requests. The full metadata object is cached after first fetch, the limited file info object is not. You can optionally set `include_blurhash` when using this option to fetch blurhash strings for the files.
 
 If you add `detailed_url_information=true`, a new entry, `detailed_known_urls`, will be added for each file, with a list of the same structure as /`add_urls/get_url_info`. This may be an expensive request if you are querying thousands of files at once.
 
@@ -1630,21 +1962,23 @@ Required Headers: n/a
     
 Arguments :
 :   
-    *   `file_id`: (numerical file id for the file)
-    *   `hash`: (a hexadecimal SHA256 hash for the file)
+    *   `file_id`: (selective, numerical file id for the file)
+    *   `hash`: (selective, a hexadecimal SHA256 hash for the file)
+    *   `download`: (optional, boolean, default `false`)
 
-    Only use one. As with metadata fetching, you may only use the hash argument if you have access to all files. If you are tag-restricted, you will have to use a file_id in the last search you ran.
+    Only use one of file_id or hash. As with metadata fetching, you may only use the hash argument if you have access to all files. If you are tag-restricted, you will have to use a file_id in the last search you ran.
 
-    ``` title="Example request"
-    /get_files/file?file_id=452158
-    ```
-    ``` title="Example request"
-    /get_files/file?hash=7f30c113810985b69014957c93bc25e8eb4cf3355dae36d8b9d011d8b0cf623a
-    ```
+``` title="Example request"
+/get_files/file?file_id=452158
+```
+``` title="Example request"
+/get_files/file?hash=7f30c113810985b69014957c93bc25e8eb4cf3355dae36d8b9d011d8b0cf623a&download=true
+```
    
 Response:
 :   The file itself. You should get the correct mime type as the Content-Type header.
 
+By default, this will set the `Content-Disposition` header to `inline`, which causes a web browser to show the file. If you set `download=true`, it will set it to `attachment`, which triggers the browser to automatically download it (or open the 'save as' dialog) instead.
 
 ### **GET `/get_files/thumbnail`** { id="get_files_thumbnail" }
 
@@ -1657,8 +1991,8 @@ Required Headers: n/a
     
 Arguments:
 :   
-    *   `file_id`: (numerical file id for the file)
-    *   `hash`: (a hexadecimal SHA256 hash for the file)
+    *   `file_id`: (selective, numerical file id for the file)
+    *   `hash`: (selective, a hexadecimal SHA256 hash for the file)
 
     Only use one. As with metadata fetching, you may only use the hash argument if you have access to all files. If you are tag-restricted, you will have to use a file_id in the last search you ran.
 
@@ -1674,10 +2008,44 @@ Response:
 
     If hydrus keeps no thumbnail for the filetype, for instance with pdfs, then you will get the same default 'pdf' icon you see in the client. If the file does not exist in the client, or the thumbnail was expected but is missing from storage, you will get the fallback 'hydrus' icon, again just as you would in the client itself. This request should never give a 404.
 
-!!! note
-    If you get a 'default' filetype thumbnail like the pdf or hydrus one, you will be pulling the defaults straight from the hydrus/static folder. They will most likely be 200x200 pixels. 
-
+!!! note "Size of Normal Thumbs"
+    Thumbnails are not guaranteed to be the correct size! If a thumbnail has not been loaded in the client in years, it could well have been fitted for older thumbnail settings. Also, even 'clean' thumbnails will not always fit inside the settings' bounding box; they may be boosted due to a high-DPI setting or spill over due to a 'fill' vs 'fit' preference. You cannot easily predict what resolution a thumbnail will or should have!
     
+    In general, thumbnails *are* the correct ratio. If you are drawing thumbs, you should embed them to fit or fill, but don't fix them at 100% true size: make sure they can scale to the size you want!
+
+!!! note "Size of Defaults"
+    If you get a 'default' filetype thumbnail like the pdf or hydrus one, you will be pulling the pngs straight from the hydrus/static folder. They will most likely be 200x200 pixels. 
+
+### **GET `/get_files/render`** { id="get_files_render" }
+
+_Get an image file as rendered by Hydrus._
+
+Restricted access: 
+:   YES. Search for Files permission needed. Additional search permission limits may apply.
+    
+Required Headers: n/a
+    
+Arguments :
+:   
+    *   `file_id`: (selective, numerical file id for the file)
+    *   `hash`: (selective, a hexadecimal SHA256 hash for the file)
+    *   `download`: (optional, boolean, default `false`)
+
+    Only use one of file_id or hash. As with metadata fetching, you may only use the hash argument if you have access to all files. If you are tag-restricted, you will have to use a file_id in the last search you ran.
+
+The file you request must be a still image file that Hydrus can render (this includes PSD files). This request uses the client image cache.
+
+``` title="Example request"
+/get_files/render?file_id=452158
+```
+``` title="Example request"
+/get_files/render?hash=7f30c113810985b69014957c93bc25e8eb4cf3355dae36d8b9d011d8b0cf623a&download=true
+```
+   
+Response:
+:   A PNG file of the image as would be rendered in the client. It will be converted to sRGB color if the file had a color profile but the rendered PNG will not have any color profile.
+
+By default, this will set the `Content-Disposition` header to `inline`, which causes a web browser to show the file. If you set `download=true`, it will set it to `attachment`, which triggers the browser to automatically download it (or open the 'save as' dialog) instead.
 
 ## Managing File Relationships
 
@@ -2306,7 +2674,7 @@ Response:
     `page_key` is a unique identifier for the page. It will stay the same for a particular page throughout the session, but new ones are generated on a session reload.
     
     `page_type` is as follows:
-
+    
     *   1 - Gallery downloader
     *   2 - Simple downloader
     *   3 - Hard drive import
@@ -2511,6 +2879,403 @@ Response:
 
 Poll the `page_state` in [/manage\_pages/get\_pages](#manage_pages_get_pages) or [/manage\_pages/get\_page\_info](#manage_pages_get_page_info) to see when the search is complete.
 
+
+## Managing Popups
+
+!!! warning "Under Construction"
+    This is under construction. The popup managment APIs and data structures may change in future versions.
+
+### Job Status Objects { id="job_status_objects" }
+
+Job statuses represent shared information about a job in hydrus. In the API they are currently only used for popups.
+
+Job statuses have these fields:
+
+- `key`: the generated hex key identifying the job status
+- `creation_time`: the UNIX timestamp when the job status was created, as a floating point number in seconds.
+- `status_title`: the title for the job status
+- `status_text_1` and `status_text_2`: Two fields for body text
+- `had_error`: a boolean indiciating if the job status has an error.
+- `traceback`: if the job status has an error this will contain the traceback text.
+- `is_cancellable`: a boolean indicating the job can be canceled.
+- `is_cancelled`: a boolean indicating the job has been cancelled. 
+- `is_deleted`: a boolean indicating the job status has been dismissed but not removed yet.
+- `is_pausable`: a boolean indicating the job can be paused
+- `is_paused`: a boolean indicating the job is paused.
+- `is_working`: a boolean indicating whether the job is currently working.
+- `nice_string`: a string representing the job status. This is generated using the `status_title`, `status_text_1`, `status_text_2`, and `traceback` if present.
+- `attached_files_mergable`: a boolean indicating whether the files in the job status can be merged with the files of another submitted job status with the same label.
+- `popup_gauge_1` and `popup_gauge_2`: each of these is a 2 item array of numbers representing a progress bar shown in the client. The first number is the current value and the second is the maximum of the range. The minimum is always 0. When using these in combination with the `status_text` fields they are shown in this order: `status_text_1`, `popup_gauge_1`, `status_text_2`, `popup_gauge_2`.
+- `api_data`: an arbitrary object for use by API clients.
+- `files`: an object representing the files attached to this job status, shown as a button in the client that opens a search page for the given hashes. It has these fields:
+    - `hashes`: an array of sha256 hashes.
+    - `label`: the label for the show files button.
+- `user_callable_label`: if the job status has a user callable function this will be the label for the button that triggers it.
+- `network_job`: An object represneting the current network job. It has these fields:
+    - `url`: the url being downloaded.
+    - `waiting_on_connection_error`: boolean
+    - `domain_ok`: boolean
+    - `waiting_on_serverside_bandwidth`: boolean
+    - `no_engine_yet`: boolean
+    - `has_error`: boolean
+    - `total_data_used`: integer number of bytes
+    - `is_done`: boolean
+    - `status_text`: string
+    - `current_speed`: integer number of bytes per second
+    - `bytes_read`: integer number of bytes
+    - `bytes_to_read`: integer number of bytes
+
+All fields other than `key` and `creation_time` are optional and will only be returned if they're set.
+
+
+### **GET `/manage_popups/get_popups`** { id="manage_popups_get_popups" }
+_Get a list of popups from the client._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers: n/a
+    
+Arguments:
+:   
+    *   `only_in_view`: whether to show only the popups currently in view in the client, true or false (optional, defaulting to false)
+    
+
+Response: 
+:   A JSON Object containing `job_statuses` which is a list of [job status objects](#job_status_objects)
+
+```json title="Example response"
+{
+  "job_statuses": [
+    {
+      "key": "e57d42d53f957559ecaae3054417d28bfef3cd84bbced352be75dedbefb9a40e",
+      "creation_time": 1700348905.7647762,
+      "status_text_1": "This is a test popup message",
+      "had_error": false,
+      "is_cancellable": false,
+      "is_cancelled": false,
+      "is_done": true,
+      "is_pausable": false,
+      "is_paused": false,
+      "is_working": true,
+      "nice_string": "This is a test popup message"
+    },
+    {
+      "key": "0d9e134fe0b30b05f39062b48bd60c35cb3bf3459c967d4cf95dde4d01bbc801",
+      "creation_time": 1700348905.7667763,
+      "status_title": "sub gap downloader test",
+      "had_error": false,
+      "is_cancellable": false,
+      "is_cancelled": false,
+      "is_done": true,
+      "is_pausable": false,
+      "is_paused": false,
+      "is_working": true,
+      "nice_string": "sub gap downloader test",
+      "user_callable_label": "start a new downloader for this to fill in the gap!"
+    },
+    {
+      "key": "d59173b59c96b841ab82a08a05556f04323f8446abbc294d5a35851fa01035e6",
+      "creation_time": 1700689162.6635988,
+      "status_text_1": "downloading files for \"elf\" (1/1)",
+      "status_text_2": "file 4/27: downloading file",
+      "status_title": "subscriptions - safebooru",
+      "had_error": false,
+      "is_cancellable": true,
+      "is_cancelled": false,
+      "is_done": false,
+      "is_pausable": false,
+      "is_paused": false,
+      "is_working": true,
+      "nice_string": "subscriptions - safebooru\r\ndownloading files for \"elf\" (1/1)\r\nfile 4/27: downloading file",
+      "popup_gauge_2": [
+        3,
+        27
+      ],
+      "files": {
+        "hashes": [
+          "9b5485f83948bf369892dc1234c0a6eef31a6293df3566f3ee6034f2289fe984",
+          "cd6ebafb8b39b3455fe382cba0daeefea87848950a6af7b3f000b05b43f2d4f2",
+          "422cebabc95fabcc6d9a9488060ea88fd2f454e6eb799de8cafa9acd83595d0d"
+        ],
+        "label": "safebooru: elf"
+      },
+      "network_job": {
+        "url": "https://safebooru.org//images/4425/17492ccf2fe97591e14531d4b070e922c70384c9.jpg",
+        "waiting_on_connection_error": false,
+        "domain_ok": true,
+        "waiting_on_serverside_bandwidth": false,
+        "no_engine_yet": false,
+        "has_error": false,
+        "total_data_used": 2031616,
+        "is_done": false,
+        "status_text": "downloading…",
+        "current_speed": 2031616,
+        "bytes_read": 2031616,
+        "bytes_to_read": 3807369
+      }
+    }
+  ]
+}
+```
+
+
+### **POST `/manage_popups/add_popup`** { id="manage_popups_add_popuip" }
+
+_Add a popup._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   it accepts these fields of a [job status object](#job_status_objects):
+        *   `is_cancellable`
+        *   `is_pausable`
+        *   `attached_files_mergable`
+        *   `status_title`
+        *   `status_text_1` and `status_text_2`
+        *   `popup_gauge_1` and `popup_gauge_2`
+        *   `api_data`
+        *   `files_label`: the label for the files attached to the job status. It will be returned as `label` in the `files` object in the [job status object](#job_status_objects).
+        *   [files](#parameters_files) that will be added to the job status. They will be returned as `hashes` in the `files` object in the [job status object](#job_status_objects). `files_label` is required to add files.
+
+A new job status will be created and submitted as a popup. Set a `status_title` on bigger ongoing jobs that will take a while and receive many updates--and leave it alone, even when the job is done. For simple notes, just set `status_text_1`.
+
+!!! danger "Finishing Jobs"
+    The pausable, cancellable, and files-mergable status of a job is only settable at creation. A pausable or cancellable popup represents an ongoing and unfinished job. The popup will exist indefinitely and will not be user-dismissable unless the user can first cancel it.
+    
+    **You, as the creator, _must_ plan to call Finish once your work is done. Yes, even if there is an error!**
+
+!!! note "Pausing and Cancelling"
+    If the user pauses a job, you should recognise that and pause your work. Resume when they do.
+    
+    If the user cancels a job, you should recognise that and stop work. Either call `finish` with an appropriate status update, or `finish_and_dismiss` if you have nothing more to say.
+    
+    If your long-term job has a main loop, place this at the top of the loop, along with your status update calls.
+
+```json title="Example request body"
+{
+  "status_text_1": "Note to user"
+}
+```
+
+```json title="Example request body"
+{
+  "status_title": "Example Popup",
+  "popup_gauge_1": [35, 120],
+  "popup_gauge_2": [9, 10],
+  "status_text_1": "Doing things",
+  "status_text_2": "Doing other things",
+  "is_cancellable": true,
+  "api_data": {
+    "whatever": "stuff"
+  },
+  "files_label": "test files",
+  "hashes": [
+    "ad6d3599a6c489a575eb19c026face97a9cd6579e74728b0ce94a601d232f3c3",
+    "4b15a4a10ac1d6f3d143ba5a87f7353b90bb5567d65065a8ea5b211c217f77c6"
+  ]
+}
+```
+
+Response:
+:   A JSON Object containing `job_status`, the [job status object](#job_status_objects) that was added.
+
+
+### **POST `/manage_popups/call_user_callable`** { id="manage_popups_call_user_callable" }
+
+_Call the user callable function of a popup._
+
+Restricted access: 
+:   YES. Manage Pages permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The job status key to call the user callable of
+
+The job status must have a user callable (the `user_callable_label` in the [job status object](#job_status_objects) indicates this) to call it.
+
+```json title="Example request body"
+{
+  "job_status_key" : "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86"
+}
+```
+
+Response:
+:   200 with no content.
+
+
+### **POST `/manage_popups/cancel_popup`** { id="manage_popups_cancel_popup" }
+
+_Try to cancel a popup._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The job status key to cancel 
+
+The job status must be cancellable to be cancelled. If it isn't, this is nullipotent.
+
+```json title="Example request body"
+{
+  "job_status_key" : "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86"
+}
+```
+
+Response:
+:   200 with no content.
+
+
+### **POST `/manage_popups/dismiss_popup`** { id="manage_popups_dismiss_popup" }
+
+_Try to dismiss a popup._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The job status key to dismiss 
+
+This is a call an 'observer' (i.e. not the job creator) makes. In the client UI, it would be a user right-clicking a popup to dismiss it. If the job is dismissable (i.e. it `is_done`), the popup disappears, but if it is pausable/cancellable--an ongoing job--then this action is nullipotent.
+
+You should call this on jobs you did not create yourself.
+
+```json title="Example request body"
+{
+  "job_status_key": "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86"
+}
+```
+
+Response:
+:   200 with no content.
+
+
+### **POST `/manage_popups/finish_popup`** { id="manage_popups_finish_popup" }
+
+_Mark a popup as done._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The job status key to finish 
+
+!!! danger "Important"
+    **You may only call this on jobs you created yourself.**
+
+You only need to call it on jobs that you created pausable or cancellable. It clears those statuses, sets `is_done`, and allows the user to dismiss the job with a right-click.
+
+Once called, the popup will remain indefinitely. You should marry this call with an `update` that clears the texts and gauges you were using and leaves a "Done, processed x files with y errors!" or similar statement to let the user know how the job went. 
+
+```json title="Example request body"
+{
+  "job_status_key" : "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86"
+}
+```
+
+Response:
+:   200 with no content.
+
+
+### **POST `/manage_popups/finish_and_dismiss_popup`** { id="manage_popups_finish_and_dismiss_popup" }
+
+_Finish and dismiss a popup._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The job status key to dismiss
+    *   `seconds`: (optional) an integer number of seconds to wait before dismissing the job status, defaults to happening immediately 
+
+!!! danger "Important"
+    **You may only call this on jobs you created yourself.**
+
+This will call `finish` immediately and flag the message for auto-dismissal (i.e. removing it from the popup toaster) either immediately or after the given number of seconds.
+
+You would want this instead of just `finish` for when you either do not need to leave a 'Done!' summary, or if the summary is not so important, and is only needed if the user happens to glance that way. If you did boring work for ten minutes, you might like to set a simple 'Done!' and auto-dismiss after thirty seconds or so. 
+
+```json title="Example request body"
+{
+  "job_status_key": "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86",
+  "seconds": 5
+}
+```
+
+Response:
+:   200 with no content.
+
+
+### **POST `/manage_popups/update_popup`** { id="manage_popups_update_popuip" }
+
+_Update a popup._
+
+Restricted access: 
+:   YES. Manage Popups permission needed.
+    
+Required Headers:
+:   
+    *   `Content-Type`: application/json
+
+Arguments (in JSON):
+:   
+    *   `job_status_key`: The hex key of the job status to update.
+    *   It accepts these fields of a [job status object](#job_status_objects):
+        *   `status_title`
+        *   `status_text_1` and `status_text_2`
+        *   `popup_gauge_1` and `popup_gauge_2`
+        *   `api_data`
+        *   `files_label`: the label for the files attached to the job status. It will be returned as `label` in the `files` object in the [job status object](#job_status_objects).
+        *   [files](#parameters_files) that will be added to the job status. They will be returned as `hashes` in the `files` object in the [job status object](#job_status_objects). `files_label` is required to add files.
+
+The specified job status will be updated with the new values submitted. Any field without a value will be left alone and any field set to `null` will be removed from the job status.
+
+```json title="Example request body"
+{
+  "job_status_key": "abee8b37d47dba8abf82638d4afb1d11586b9ef7be634aeb8ae3bcb8162b2c86",
+  "status_title": "Example Popup",
+  "status_text_1": null,
+  "popup_gauge_1": [12, 120],
+  "api_data": {
+    "whatever": "other stuff"
+  }
+}
+```
+
+Response:
+:   A JSON Object containing `job_status`, the [job status object](#job_status_objects) that was updated.
+
+
 ## Managing the Database
 
 ### **POST `/manage_database/lock_on`** { id="manage_database_lock_on" }
@@ -2546,7 +3311,16 @@ _Get the data from help->how boned am I?. This is a simple Object of numbers jus
 Restricted access:
 :   YES. Manage Database permission needed.
 
-Arguments: None
+Arguments (in percent-encoded JSON):
+:   
+    *   `tags`: (optional, a list of tags you wish to search for)
+    *   [file domain](#parameters_file_domain) (optional, defaults to 'all my files')
+    *   `tag_service_key`: (optional, hexadecimal, the tag domain on which to search, defaults to 'all my files')
+    
+    ``` title="Example requests"
+    /manage_database/mr_bones
+    /manage_database/mr_bones?tags=%5B%22blonde_hair%22%2C%20%22blue_eyes%22%5D
+    ```
 
 ```json title="Example response"
 {
@@ -2565,3 +3339,23 @@ Arguments: None
   }
 }
 ```
+
+The arguments here are the same as for [GET /get\_files/search\_files](#get_files_search_files). You can set any or none of them to set a search domain like in the dialog.
+
+### **GET `/manage_database/get_client_options`** { id="manage_database_get_client_options" }
+
+!!! warning "Unstable Response"
+    The response for this path is unstable and subject to change without warning. No examples are given.
+    
+
+_Gets the current options from the client._
+
+Restricted access:
+:   YES. Manage Database permission needed.
+    
+Required Headers: n/a
+    
+Arguments: n/a
+    
+Response:
+: A JSON dump of nearly all options set in the client. The format of this is based on internal hydrus structures and is subject to change without warning with new hydrus versions. Do not rely on anything you find here to continue to exist and don't rely on the structure to be the same.

@@ -2,7 +2,6 @@ import collections
 import cv2
 import numpy
 import os
-import shutil
 import struct
 
 from qtpy import QtCore as QC
@@ -12,14 +11,14 @@ from qtpy import QtWidgets as QW
 from hydrus.core import HydrusCompression
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTemp
+from hydrus.core.files.images import HydrusImageHandling
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIFunctions
-from hydrus.client.gui import QtPorting as QP
 
 # ok, the serialised png format is:
 
@@ -41,7 +40,7 @@ else:
 
 def CreateTopImage( width, title, payload_description, text ):
     
-    text_extent_qt_image = HG.client_controller.bitmap_manager.GetQtImage( 20, 20, 24 )
+    text_extent_qt_image = CG.client_controller.bitmap_manager.GetQtImage( 20, 20, 24 )
     
     painter = QG.QPainter( text_extent_qt_image )
     
@@ -94,7 +93,7 @@ def CreateTopImage( width, title, payload_description, text ):
     
     #
     
-    top_qt_image = HG.client_controller.bitmap_manager.GetQtImage( width, top_height, 24 )
+    top_qt_image = CG.client_controller.bitmap_manager.GetQtImage( width, top_height, 24 )
     
     painter = QG.QPainter( top_qt_image )
     
@@ -174,7 +173,7 @@ def DumpToPNG( width, payload_bytes, title, payload_description, text, path ):
         
         HydrusData.ShowException( e )
         
-        raise Exception( 'Could not save the png!' )
+        raise Exception( 'Could not save the png!' ) from e
         
     finally:
         
@@ -240,13 +239,11 @@ def GetPayloadDescriptionAndBytes( payload_obj ):
     
 def LoadFromQtImage( qt_image: QG.QImage ):
     
-    # assume this for now
-    depth = 3
-    
     numpy_image = ClientGUIFunctions.ConvertQtImageToNumPy( qt_image )
     
     return LoadFromNumPyImage( numpy_image )
     
+
 def LoadFromPNG( path ):
     
     # this is to deal with unicode paths, which cv2 can't handle
@@ -270,9 +267,11 @@ def LoadFromPNG( path ):
             
             try:
                 
-                # dequantize = False because we don't want to convert to RGB
+                # dequantize = False because we don't want to convert our greyscale bytes to RGB
                 
                 pil_image = HydrusImageHandling.GeneratePILImage( temp_path, dequantize = False )
+                
+                # leave strip_useless_alpha = True in here just to catch the very odd LA situation
                 
                 numpy_image = HydrusImageHandling.GenerateNumPyImageFromPILImage( pil_image )
                 
@@ -280,7 +279,7 @@ def LoadFromPNG( path ):
                 
                 HydrusData.ShowException( e )
                 
-                raise Exception( '"{}" did not appear to be a valid image!'.format( path ) )
+                raise Exception( '"{}" did not appear to be a valid image!'.format( path ) ) from e
                 
             
         
@@ -291,6 +290,7 @@ def LoadFromPNG( path ):
     
     return LoadFromNumPyImage( numpy_image )
     
+
 def LoadFromNumPyImage( numpy_image: numpy.array ):
     
     try:
@@ -340,7 +340,7 @@ def LoadFromNumPyImage( numpy_image: numpy.array ):
         
         HydrusData.PrintException( e )
         
-        message = 'The image loaded, but it did not seem to be a hydrus serialised png! The error was: {}'.format( str( e ) )
+        message = 'The image loaded, but it did not seem to be a hydrus serialised png! The error was: {}'.format( repr( e ) )
         message += os.linesep * 2
         message += 'If you believe this is a legit non-resized, non-converted hydrus serialised png, please send it to hydrus_dev.'
         

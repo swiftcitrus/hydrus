@@ -6,11 +6,14 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusThreading
 
+from hydrus.client.metadata import ClientContentUpdates
+
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 
 def DAEMONCheckExportFolders():
     
-    controller = HG.client_controller
+    controller = CG.client_controller
     
     if not controller.new_options.GetBoolean( 'pause_export_folders_sync' ):
         
@@ -40,7 +43,7 @@ def DAEMONCheckExportFolders():
     
 def DAEMONCheckImportFolders():
     
-    controller = HG.client_controller
+    controller = CG.client_controller
     
     if not controller.new_options.GetBoolean( 'pause_import_folders_sync' ):
         
@@ -70,7 +73,10 @@ def DAEMONCheckImportFolders():
     
 def DAEMONMaintainTrash():
     
-    controller = HG.client_controller
+    # TODO: Looking at it, this whole thing is whack
+    # rewrite it to be a database command that returns 'more work to do' and then just spam it until done
+    
+    controller = CG.client_controller
     
     if HC.options[ 'trash_max_size' ] is not None:
         
@@ -80,25 +86,35 @@ def DAEMONMaintainTrash():
         
         while service_info[ HC.SERVICE_INFO_TOTAL_SIZE ] > max_size:
             
-            if HydrusThreading.IsThreadShuttingDown():
-                
-                return
-                
-            
-            hashes = controller.Read( 'trash_hashes', limit = 10 )
+            hashes = controller.Read( 'trash_hashes', limit = 256 )
             
             if len( hashes ) == 0:
                 
                 return
                 
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes )
-            
-            service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
-            
-            controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
-            
-            service_info = controller.Read( 'service_info', CC.TRASH_SERVICE_KEY )
+            for group_of_hashes in HydrusData.SplitIteratorIntoChunks( hashes, 8 ):
+                
+                if HydrusThreading.IsThreadShuttingDown():
+                    
+                    return
+                    
+                
+                content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, group_of_hashes )
+                
+                content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
+                
+                controller.WriteSynchronous( 'content_updates', content_update_package )
+                
+                time.sleep( 0.01 )
+                
+                service_info = controller.Read( 'service_info', CC.TRASH_SERVICE_KEY )
+                
+                if service_info[ HC.SERVICE_INFO_TOTAL_SIZE ] <= max_size:
+                    
+                    break
+                    
+                
             
             time.sleep( 2 )
             
@@ -108,22 +124,27 @@ def DAEMONMaintainTrash():
         
         max_age = HC.options[ 'trash_max_age' ] * 3600
         
-        hashes = controller.Read( 'trash_hashes', limit = 10, minimum_age = max_age )
+        hashes = controller.Read( 'trash_hashes', limit = 256, minimum_age = max_age )
         
         while len( hashes ) > 0:
             
-            if HydrusThreading.IsThreadShuttingDown():
+            for group_of_hashes in HydrusData.SplitIteratorIntoChunks( hashes, 8 ):
                 
-                return
+                if HydrusThreading.IsThreadShuttingDown():
+                    
+                    return
+                    
+                
+                content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, group_of_hashes )
+                
+                content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
+                
+                controller.WriteSynchronous( 'content_updates', content_update_package )
+                
+                time.sleep( 0.01 )
                 
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes )
-            
-            service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
-            
-            controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
-            
-            hashes = controller.Read( 'trash_hashes', limit = 10, minimum_age = max_age )
+            hashes = controller.Read( 'trash_hashes', limit = 256, minimum_age = max_age )
             
             time.sleep( 2 )
             

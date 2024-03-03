@@ -57,6 +57,19 @@ class HydrusServiceClientAPI( HydrusClientService ):
         add_files.putChild( b'undelete_files', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddFilesUndeleteFiles( self._service, self._client_requests_domain ) )
         add_files.putChild( b'archive_files', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddFilesArchiveFiles( self._service, self._client_requests_domain ) )
         add_files.putChild( b'unarchive_files', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddFilesUnarchiveFiles( self._service, self._client_requests_domain ) )
+        add_files.putChild( b'generate_hashes', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddFilesGenerateHashes( self._service, self._client_requests_domain ) )
+        
+        edit_ratings = NoResource()
+        
+        root.putChild( b'edit_ratings', edit_ratings )
+        
+        edit_ratings.putChild( b'set_rating', ClientLocalServerResources.HydrusResourceClientAPIRestrictedEditRatingsSetRating( self._service, self._client_requests_domain ) )
+        
+        edit_times = NoResource()
+        
+        root.putChild( b'edit_times', edit_times )
+        
+        edit_times.putChild( b'set_time', ClientLocalServerResources.HydrusResourceClientAPIRestrictedEditTimesSetTime( self._service, self._client_requests_domain ) )
         
         add_tags = NoResource()
         
@@ -65,7 +78,8 @@ class HydrusServiceClientAPI( HydrusClientService ):
         add_tags.putChild( b'add_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsAddTags( self._service, self._client_requests_domain ) )
         add_tags.putChild( b'clean_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsCleanTags( self._service, self._client_requests_domain ) )
         add_tags.putChild( b'search_tags', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsSearchTags( self._service, self._client_requests_domain ) )
-        
+        add_tags.putChild( b'get_siblings_and_parents', ClientLocalServerResources.HydrusResourceClientAPIRestrictedAddTagsGetTagSiblingsParents( self._service, self._client_requests_domain ) )
+
         add_urls = NoResource()
         
         root.putChild( b'add_urls', add_urls )
@@ -84,6 +98,7 @@ class HydrusServiceClientAPI( HydrusClientService ):
         get_files.putChild( b'file_hashes', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesFileHashes( self._service, self._client_requests_domain ) )
         get_files.putChild( b'file', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesGetFile( self._service, self._client_requests_domain ) )
         get_files.putChild( b'thumbnail', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( self._service, self._client_requests_domain ) )
+        get_files.putChild( b'render', ClientLocalServerResources.HydrusResourceClientAPIRestrictedGetFilesGetRenderedFile( self._service, self._client_requests_domain) )
         
         add_notes = NoResource()
         
@@ -106,6 +121,7 @@ class HydrusServiceClientAPI( HydrusClientService ):
         manage_database.putChild( b'mr_bones', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManageDatabaseMrBones( self._service, self._client_requests_domain ) )
         manage_database.putChild( b'lock_on', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManageDatabaseLockOn( self._service, self._client_requests_domain ) )
         manage_database.putChild( b'lock_off', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManageDatabaseLockOff( self._service, self._client_requests_domain ) )
+        manage_database.putChild( b'get_client_options', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManageDatabaseGetClientOptions( self._service, self._client_requests_domain ) )
         
         manage_file_relationships = NoResource()
         
@@ -135,6 +151,19 @@ class HydrusServiceClientAPI( HydrusClientService ):
         manage_pages.putChild( b'get_pages', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePagesGetPages( self._service, self._client_requests_domain ) )
         manage_pages.putChild( b'get_page_info', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePagesGetPageInfo( self._service, self._client_requests_domain ) )
         manage_pages.putChild( b'refresh_page', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePagesRefreshPage( self._service, self._client_requests_domain ) )
+        
+        manage_popups = NoResource()
+        
+        root.putChild( b'manage_popups', manage_popups )
+        
+        manage_popups.putChild( b'get_popups', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsGetPopups( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'cancel_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsCancelPopup( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'dismiss_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsDismissPopup( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'finish_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsFinishPopup( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'finish_and_dismiss_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsFinishAndDismissPopup( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'call_user_callable', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsCallUserCallable( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'add_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsAddPopup( self._service, self._client_requests_domain ) )
+        manage_popups.putChild( b'update_popup', ClientLocalServerResources.HydrusResourceClientAPIRestrictedManagePopupsUpdatePopup( self._service, self._client_requests_domain ) )
         
         return root
         

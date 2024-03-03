@@ -1,25 +1,38 @@
 import collections
 import os
-import queue
 import random
 import threading
 import time
+import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
+from hydrus.core import HydrusLists
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusThreading
+from hydrus.core import HydrusTime
+from hydrus.core.files import HydrusFileHandling
+from hydrus.core.files import HydrusPSDHandling
+from hydrus.core.files import HydrusVideoHandling
+from hydrus.core.files.images import HydrusBlurhash
+from hydrus.core.files.images import HydrusImageColours
+from hydrus.core.files.images import HydrusImageHandling
+from hydrus.core.files.images import HydrusImageMetadata
+from hydrus.core.files.images import HydrusImageOpening
 from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientFilesPhysical
 from hydrus.client import ClientImageHandling
 from hydrus.client import ClientPaths
+from hydrus.client import ClientSVGHandling # important to keep this in, despite not being used, since there's initialisation stuff in here
+from hydrus.client import ClientPDFHandling # important to keep this in, despite not being used, since there's initialisation stuff in here
 from hydrus.client import ClientThreading
-from hydrus.client.gui import QtPorting as QP
+from hydrus.client import ClientVideoHandling
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTags
 
 REGENERATE_FILE_DATA_JOB_FILE_METADATA = 0
@@ -44,6 +57,8 @@ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY = 18
 REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA = 19
 REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF = 20
 REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD = 21
+REGENERATE_FILE_DATA_JOB_BLURHASH = 22
+REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY = 23
 
 regen_file_enum_to_str_lookup = {
     REGENERATE_FILE_DATA_JOB_FILE_METADATA : 'regenerate file metadata',
@@ -62,12 +77,14 @@ regen_file_enum_to_str_lookup = {
     REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE : 'if file is incorrect, move file out',
     REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS : 'fix file read/write permissions',
     REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP : 'check for membership in the similar files search system',
-    REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA : 'regenerate similar files metadata',
-    REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP : 'regenerate file modified date',
+    REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA : 'regenerate perceptual hashes',
+    REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP : 'regenerate file modified time',
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY: 'determine if the file has transparency',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF : 'determine if the file has EXIF metadata',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA : 'determine if the file has non-EXIF human-readable embedded metadata',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE : 'determine if the file has an icc profile',
-    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 'regenerate pixel duplicate data'
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 'regenerate pixel hashes',
+    REGENERATE_FILE_DATA_JOB_BLURHASH: 'regenerate blurhash'
 }
 
 regen_file_enum_to_description_lookup = {
@@ -121,10 +138,12 @@ All missing/Incorrect files will also have their hashes, tags, and URLs exported
     REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP : 'This checks to see if files should be in the similar files system, and if they are falsely in or falsely out, it will remove their record or queue them up for a search as appropriate. It is useful to repair database damage.',
     REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA : 'This forces a regeneration of the file\'s similar-files \'phashes\'. It is not useful unless you know there is missing data to repair.',
     REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP : 'This rechecks the file\'s modified timestamp and saves it to the database.',
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY : 'This loads the file to see if it has an alpha channel with useful data (completely opaque/transparency alpha channels are discarded). Only works for images and animated gif.',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF : 'This loads the file to see if it has EXIF metadata, which can be shown in the media viewer and searched with "system:image has exif".',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA : 'This loads the file to see if it has non-EXIF human-readable metadata, which can be shown in the media viewer and searched with "system:image has human-readable embedded metadata".',
     REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE : 'This loads the file to see if it has an ICC profile, which is used in "system:has icc profile" search.',
-    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 'This generates a fast unique identifier for the pixels in a still image, which is used in duplicate pixel searches.'
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 'This generates a fast unique identifier for the pixels in a still image, which is used in duplicate pixel searches.',
+    REGENERATE_FILE_DATA_JOB_BLURHASH: 'This generates a very small version of the file\'s thumbnail that can be used as a placeholder while the thumbnail loads.'
 }
 
 NORMALISED_BIG_JOB_WEIGHT = 100
@@ -145,13 +164,15 @@ regen_file_enum_to_job_weight_lookup = {
     REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD : 100,
     REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE : 100,
     REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS : 25,
-    REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP : 20,
+    REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP : 1,
     REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA : 100,
     REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP : 10,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY : 25,
     REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF : 25,
     REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA : 25,
     REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE : 25,
-    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 100
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : 100,
+    REGENERATE_FILE_DATA_JOB_BLURHASH: 15
 }
 
 regen_file_enum_to_overruled_jobs = {
@@ -173,19 +194,71 @@ regen_file_enum_to_overruled_jobs = {
     REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP : [],
     REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA : [ REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP ],
     REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP : [],
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY : [],
     REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF : [],
     REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA : [],
     REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE : [],
-    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : []
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH : [],
+    REGENERATE_FILE_DATA_JOB_BLURHASH: []
 }
 
-ALL_REGEN_JOBS_IN_PREFERRED_ORDER = [ REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL_ELSE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY, REGENERATE_FILE_DATA_JOB_FILE_METADATA, REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL, REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL, REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA, REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP, REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS, REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP, REGENERATE_FILE_DATA_JOB_OTHER_HASHES, REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF, REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA, REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE, REGENERATE_FILE_DATA_JOB_PIXEL_HASH, REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES ]
+ALL_REGEN_JOBS_IN_RUN_ORDER = [
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL_ELSE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY,
+    REGENERATE_FILE_DATA_JOB_FILE_METADATA,
+    REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL,
+    REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL,
+    REGENERATE_FILE_DATA_JOB_BLURHASH,
+    REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA,
+    REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP,
+    REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS,
+    REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP,
+    REGENERATE_FILE_DATA_JOB_OTHER_HASHES,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE,
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH,
+    REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES
+]
+
+ALL_REGEN_JOBS_IN_HUMAN_ORDER = [
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL_ELSE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE,
+    REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY,
+    REGENERATE_FILE_DATA_JOB_FILE_METADATA,
+    REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL,
+    REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL,
+    REGENERATE_FILE_DATA_JOB_BLURHASH,
+    REGENERATE_FILE_DATA_JOB_PIXEL_HASH,
+    REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA,
+    REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP,
+    REGENERATE_FILE_DATA_JOB_OTHER_HASHES,
+    REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA,
+    REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE,
+    REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS,
+    REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES
+]
 
 def GetAllFilePaths( raw_paths, do_human_sort = True, clear_out_sidecars = True ):
     
     file_paths = []
-    
-    num_sidecars = 0
     
     paths_to_process = list( raw_paths )
     
@@ -276,79 +349,30 @@ def GetAllFilePaths( raw_paths, do_human_sort = True, clear_out_sidecars = True 
     
     return ( file_paths, num_sidecars )
     
+
 class ClientFilesManager( object ):
     
     def __init__( self, controller ):
         
         self._controller = controller
         
-        self._rwlock = ClientThreading.FileRWLock()
+        self._file_storage_rwlock = ClientThreading.FileRWLock()
         
-        self._prefixes_to_locations = {}
+        self._prefixes_to_client_files_subfolders = collections.defaultdict( list )
+        self._smallest_prefix = 2
+        self._largest_prefix = 2
         
         self._physical_file_delete_wait = threading.Event()
         
         self._locations_to_free_space = {}
         
         self._bad_error_occurred = False
-        self._missing_locations = set()
+        self._missing_subfolders = set()
         
         self._Reinit()
         
+        self._controller.sub( self, 'Reinit', 'new_ideal_client_files_locations' )
         self._controller.sub( self, 'shutdown', 'shutdown' )
-        
-    
-    def _GetFileStorageFreeSpace( self, hash: bytes ) -> int:
-        
-        hash_encoded = hash.hex()
-        
-        prefix = 'f' + hash_encoded[:2]
-        
-        location = self._prefixes_to_locations[ prefix ]
-        
-        if location in self._locations_to_free_space:
-            
-            ( free_space, time_fetched ) = self._locations_to_free_space[ location ]
-            
-            if free_space > 100 * ( 1024 ** 3 ):
-                
-                check_period = 3600
-                
-            elif free_space > 15 * ( 1024 ** 3 ):
-                
-                check_period = 600
-                
-            else:
-                
-                check_period = 60
-                
-            
-            if HydrusData.TimeHasPassed( time_fetched + check_period ):
-                
-                free_space = HydrusPaths.GetFreeSpace( location )
-                
-                self._locations_to_free_space[ location ] = ( free_space, HydrusData.GetNow() )
-                
-            
-        else:
-            
-            free_space = HydrusPaths.GetFreeSpace( location )
-            
-            self._locations_to_free_space[ location ] = ( free_space, HydrusData.GetNow() )
-            
-        
-        return free_space
-        
-    
-    def _HandleCriticalDriveError( self ):
-        
-        self._controller.new_options.SetBoolean( 'pause_import_folders_sync', True )
-        self._controller.new_options.SetBoolean( 'pause_subs_sync', True )
-        self._controller.new_options.SetBoolean( 'pause_all_file_queues', True )
-        
-        HydrusData.ShowText( 'All paged file import queues, subscriptions, and import folders have been paused. Resume them after restart under the file and network menus!' )
-        
-        self._controller.pub( 'notify_refresh_network_menu' )
         
     
     def _AddFile( self, hash, mime, source_path ):
@@ -375,17 +399,19 @@ class ClientFilesManager( object ):
             raise Exception( message )
             
         
-        successful = HydrusPaths.MirrorFile( source_path, dest_path )
-        
-        if not successful:
+        try:
             
-            message = 'Copying the file from "{}" to "{}" failed! Details should be shown and other import queues should be paused. You should shut the client down now and fix this!'.format( source_path, dest_path )
+            HydrusPaths.MirrorFile( source_path, dest_path )
+            
+        except Exception as e:
+            
+            message = f'Copying the file from "{source_path}" to "{dest_path}" failed! Details should be shown and other import queues should be paused. You should shut the client down now and fix this!'
             
             HydrusData.ShowText( message )
             
             self._HandleCriticalDriveError()
             
-            raise Exception( 'There was a problem copying the file from ' + source_path + ' to ' + dest_path + '!' )
+            raise Exception( message ) from e
             
         
     
@@ -409,17 +435,11 @@ class ClientFilesManager( object ):
             
         except Exception as e:
             
-            hash_encoded = hash.hex()
+            subfolder = self._GetSubfolderForFile( hash, 't' )
             
-            prefix = 't' + hash_encoded[:2]
-            
-            location = self._prefixes_to_locations[ prefix ]    
-            
-            thumb_dir = os.path.join( location, prefix )
-            
-            if not os.path.exists( thumb_dir ):
+            if not subfolder.PathExists():
                 
-                raise HydrusExceptions.DirectoryMissingException( 'The directory {} was not found! Reconnect the missing location or shut down the client immediately!'.format( thumb_dir ) )
+                raise HydrusExceptions.DirectoryMissingException( f'The directory {subfolder} was not found! Reconnect the missing location or shut down the client immediately!' )
                 
             
             raise HydrusExceptions.FileMissingException( 'The thumbnail for file "{}" failed to write to path "{}". This event suggests that hydrus does not have permission to write to its thumbnail folder. Please check everything is ok.'.format( hash.hex(), dest_path ) )
@@ -441,45 +461,48 @@ class ClientFilesManager( object ):
         
         fixes_counter = collections.Counter()
         
-        known_locations = set()
+        known_base_locations = self._GetCurrentSubfolderBaseLocations()
         
-        known_locations.update( self._prefixes_to_locations.values() )
+        ( media_base_locations, thumbnail_override_base_location ) = self._controller.Read( 'ideal_client_files_locations' )
         
-        ( locations_to_ideal_weights, thumbnail_override ) = self._controller.Read( 'ideal_client_files_locations' )
+        known_base_locations.update( media_base_locations )
         
-        known_locations.update( locations_to_ideal_weights.keys() )
-        
-        if thumbnail_override is not None:
+        if thumbnail_override_base_location is not None:
             
-            known_locations.add( thumbnail_override )
+            known_base_locations.add( thumbnail_override_base_location )
             
         
-        for ( missing_location, prefix ) in self._missing_locations:
+        for missing_subfolder in self._missing_subfolders:
             
-            potential_correct_locations = []
+            missing_base_location = missing_subfolder.base_location
+            prefix = missing_subfolder.prefix
             
-            for known_location in known_locations:
+            potential_correct_base_locations = []
+            
+            for known_base_location in known_base_locations:
                 
-                if known_location == missing_location:
+                if known_base_location == missing_base_location:
                     
                     continue
                     
                 
-                dir_path = os.path.join( known_location, prefix )
+                potential_location_subfolder = ClientFilesPhysical.FilesStorageSubfolder( prefix, known_base_location )
                 
-                if os.path.exists( dir_path ) and os.path.isdir( dir_path ):
+                if potential_location_subfolder.PathExists():
                     
-                    potential_correct_locations.append( known_location )
+                    potential_correct_base_locations.append( known_base_location )
                     
                 
             
-            if len( potential_correct_locations ) == 1:
+            if len( potential_correct_base_locations ) == 1:
                 
-                correct_location = potential_correct_locations[0]
+                correct_base_location = potential_correct_base_locations[0]
                 
-                correct_rows.append( ( prefix, correct_location ) )
+                correct_subfolder = ClientFilesPhysical.FilesStorageSubfolder( prefix, correct_base_location )
                 
-                fixes_counter[ ( missing_location, correct_location ) ] += 1
+                correct_rows.append( ( missing_subfolder, correct_subfolder ) )
+                
+                fixes_counter[ ( missing_base_location, correct_base_location ) ] += 1
                 
             else:
                 
@@ -491,24 +514,24 @@ class ClientFilesManager( object ):
             
             message = 'Hydrus found multiple missing locations in your file storage. Some of these locations seemed to be fixable, others did not. The client will now inform you about both problems.'
             
-            self._controller.SafeShowCriticalMessage( 'Multiple file location problems.', message )
+            self._controller.BlockingSafeShowCriticalMessage( 'Multiple file location problems.', message )
             
         
         if len( correct_rows ) > 0:
             
-            summaries = sorted( ( '{} moved from {} to {}'.format( HydrusData.ToHumanInt( count ), missing_location, correct_location ) for ( ( missing_location, correct_location ), count ) in fixes_counter.items() ) )
+            summaries = sorted( ( '{} folders seem to have moved from {} to {}'.format( HydrusData.ToHumanInt( count ), missing_base_location, correct_base_location ) for ( ( missing_base_location, correct_base_location ), count ) in fixes_counter.items() ) )
             
-            summary_message = 'Some client file folders were missing, but they seem to be in other known locations! The folders are:'
+            summary_message = 'Some client file folders were missing, but they appear to be in other known locations! The folders are:'
             summary_message += os.linesep * 2
             summary_message += os.linesep.join( summaries )
             summary_message += os.linesep * 2
-            summary_message += 'Assuming you did this on purpose, Hydrus is ready to update its internal knowledge to reflect these new mappings as soon as this dialog closes. If you know these proposed fixes are incorrect, terminate the program now.'
+            summary_message += 'Assuming you did this on purpose, or hydrus recently inserted stub values after database corruption, Hydrus is ready to update its internal knowledge to reflect these new mappings as soon as this dialog closes. If you know these proposed fixes are incorrect, terminate the program now.'
             
             HydrusData.Print( summary_message )
             
-            self._controller.SafeShowCriticalMessage( 'About to auto-heal client file folders.', summary_message )
+            self._controller.BlockingSafeShowCriticalMessage( 'About to auto-heal client file folders.', summary_message )
             
-            HG.client_controller.WriteSynchronous( 'repair_client_files', correct_rows )
+            CG.client_controller.WriteSynchronous( 'repair_client_files', correct_rows )
             
         
     
@@ -558,30 +581,22 @@ class ClientFilesManager( object ):
         
         self._WaitOnWakeup()
         
+        subfolder = self._GetSubfolderForFile( hash, 'f' )
+        
         hash_encoded = hash.hex()
         
-        prefix = 'f' + hash_encoded[:2]
-        
-        location = self._prefixes_to_locations[ prefix ]
-        
-        path = os.path.join( location, prefix, hash_encoded + HC.mime_ext_lookup[ mime ] )
-        
-        return path
+        return subfolder.GetFilePath( f'{hash_encoded}{HC.mime_ext_lookup[ mime ]}' )
         
     
     def _GenerateExpectedThumbnailPath( self, hash ):
         
         self._WaitOnWakeup()
         
+        subfolder = self._GetSubfolderForFile( hash, 't' )
+        
         hash_encoded = hash.hex()
         
-        prefix = 't' + hash_encoded[:2]
-        
-        location = self._prefixes_to_locations[ prefix ]
-        
-        path = os.path.join( location, prefix, hash_encoded ) + '.thumbnail'
-        
-        return path
+        return subfolder.GetFilePath( f'{hash_encoded}.thumbnail' )
         
     
     def _GenerateThumbnailBytes( self, file_path, media ):
@@ -594,15 +609,15 @@ class ClientFilesManager( object ):
         
         bounding_dimensions = self._controller.options[ 'thumbnail_dimensions' ]
         thumbnail_scale_type = self._controller.new_options.GetInteger( 'thumbnail_scale_type' )
-        thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+        thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
         
-        ( clip_rect, target_resolution ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
+        target_resolution = HydrusImageHandling.GetThumbnailResolution( ( width, height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
         
         percentage_in = self._controller.new_options.GetInteger( 'video_thumbnail_percentage_in' )
         
         try:
             
-            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( file_path, target_resolution, mime, duration, num_frames, clip_rect = clip_rect, percentage_in = percentage_in )
+            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( file_path, target_resolution, mime, duration, num_frames, percentage_in = percentage_in )
             
         except Exception as e:
             
@@ -612,144 +627,325 @@ class ClientFilesManager( object ):
         return thumbnail_bytes
         
     
-    def _GetRecoverTuple( self ):
+    def _GetCurrentSubfolderBaseLocations( self, only_files = False ):
         
-        all_locations = { location for location in self._prefixes_to_locations.values() }
+        known_base_locations = set()
         
-        all_prefixes = list(self._prefixes_to_locations.keys())
-        
-        for possible_location in all_locations:
+        for ( prefix, subfolders ) in self._prefixes_to_client_files_subfolders.items():
             
-            if not os.path.exists( possible_location ):
+            if only_files and not prefix.startswith( 'f' ):
                 
                 continue
                 
             
-            for prefix in all_prefixes:
+            for subfolder in subfolders:
                 
-                correct_location = self._prefixes_to_locations[ prefix ]
-                
-                if correct_location == possible_location:
-                    
-                    continue
-                    
-                
-                if os.path.exists( os.path.join( possible_location, prefix ) ):
-                    
-                    if not os.path.exists( correct_location ):
-                        
-                        continue
-                        
-                    
-                    if os.path.samefile( possible_location, correct_location ):
-                        
-                        continue
-                        
-                    
-                    recoverable_location = possible_location
-                    
-                    return ( prefix, recoverable_location, correct_location )
-                    
+                known_base_locations.add( subfolder.base_location )
                 
             
         
-        return None
+        return known_base_locations
+        
+    
+    def _GetFileStorageFreeSpace( self, hash: bytes ) -> int:
+        
+        subfolder = self._GetSubfolderForFile( hash, 'f' )
+        
+        base_location = subfolder.base_location
+        
+        if base_location in self._locations_to_free_space:
+            
+            ( free_space, time_fetched ) = self._locations_to_free_space[ base_location ]
+            
+            if free_space > 100 * ( 1024 ** 3 ):
+                
+                check_period = 3600
+                
+            elif free_space > 15 * ( 1024 ** 3 ):
+                
+                check_period = 600
+                
+            else:
+                
+                check_period = 60
+                
+            
+            if HydrusTime.TimeHasPassed( time_fetched + check_period ):
+                
+                free_space = HydrusPaths.GetFreeSpace( base_location.path )
+                
+                self._locations_to_free_space[ base_location ] = ( free_space, HydrusTime.GetNow() )
+                
+            
+        else:
+            
+            free_space = HydrusPaths.GetFreeSpace( base_location.path )
+            
+            self._locations_to_free_space[ base_location ] = ( free_space, HydrusTime.GetNow() )
+            
+        
+        return free_space
+        
+    
+    def _GetPossibleSubfoldersForFile( self, hash: bytes, prefix_type: str ) -> typing.List[ ClientFilesPhysical.FilesStorageSubfolder ]:
+        
+        hash_encoded = hash.hex()
+        
+        result = []
+        
+        for i in range( self._smallest_prefix, self._largest_prefix + 1 ):
+            
+            prefix = prefix_type + hash_encoded[ : i ]
+            
+            if prefix in self._prefixes_to_client_files_subfolders:
+                
+                result.extend( self._prefixes_to_client_files_subfolders[ prefix ] )
+                
+            
+        
+        return result
+        
+    
+    def _GetAllSubfolders( self ) -> typing.List[ ClientFilesPhysical.FilesStorageSubfolder ]:
+        
+        result = []
+        
+        for ( prefix, subfolders ) in self._prefixes_to_client_files_subfolders.items():
+            
+            result.extend( subfolders )
+            
+        
+        return result
         
     
     def _GetRebalanceTuple( self ):
         
-        ( locations_to_ideal_weights, thumbnail_override ) = self._controller.Read( 'ideal_client_files_locations' )
+        # TODO: obviously this will change radically when we move to multiple folders for real and background migration. hacks for now
+        # In general, I think this thing is going to determine the next migration destination and purge flag
+        # the background file migrator will work on current purge flags and not talk to this guy until the current flags are clear 
         
-        total_weight = sum( locations_to_ideal_weights.values() )
+        ( ideal_media_base_locations, ideal_thumbnail_override_base_location ) = self._controller.Read( 'ideal_client_files_locations' )
         
-        ideal_locations_to_normalised_weights = { location : weight / total_weight for ( location, weight ) in list(locations_to_ideal_weights.items()) }
+        service_info = CG.client_controller.Read( 'service_info', CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
         
-        current_locations_to_normalised_weights = collections.defaultdict( lambda: 0 )
+        all_local_files_total_size = service_info[ HC.SERVICE_INFO_TOTAL_SIZE ]
         
-        file_prefixes = [ prefix for prefix in self._prefixes_to_locations if prefix.startswith( 'f' ) ]
+        total_ideal_weight = sum( ( base_location.ideal_weight for base_location in ideal_media_base_locations ) )
+        
+        smallest_subfolder_normalised_weight = 1
+        largest_subfolder_normalised_weight = 0
+        
+        current_base_locations_to_normalised_weights = collections.Counter()
+        current_base_locations_to_size_estimate = collections.Counter()
+        
+        file_prefixes = [ prefix for prefix in self._prefixes_to_client_files_subfolders.keys() if prefix.startswith( 'f' ) ]
+        
+        all_media_base_locations = set( ideal_media_base_locations )
         
         for file_prefix in file_prefixes:
             
-            location = self._prefixes_to_locations[ file_prefix ]
+            subfolders = self._prefixes_to_client_files_subfolders[ file_prefix ]
             
-            current_locations_to_normalised_weights[ location ] += 1.0 / 256
+            subfolder = subfolders[0]
+            
+            base_location = subfolder.base_location
+            
+            all_media_base_locations.add( base_location )
+            
+            normalised_weight = subfolder.GetNormalisedWeight()
+            
+            current_base_locations_to_normalised_weights[ base_location ] += normalised_weight
+            current_base_locations_to_size_estimate[ base_location ] += normalised_weight * all_local_files_total_size
+            
+            if normalised_weight < smallest_subfolder_normalised_weight:
+                
+                smallest_subfolder_normalised_weight = normalised_weight
+                
+            
+            if normalised_weight > largest_subfolder_normalised_weight:
+                
+                largest_subfolder_normalised_weight = normalised_weight
+                
             
         
-        for location in list(current_locations_to_normalised_weights.keys()):
-            
-            if location not in ideal_locations_to_normalised_weights:
-                
-                ideal_locations_to_normalised_weights[ location ] = 0.0
-                
-            
+        smallest_subfolder_num_bytes = smallest_subfolder_normalised_weight * all_local_files_total_size
         
         #
         
-        overweight_locations = []
-        underweight_locations = []
+        # ok so the problem here is that when a location blocks new subfolders because of max num bytes rules, the other guys have to take the slack and end up overweight
+        # we want these overweight guys to nonetheless distribute their stuff according to relative weights
+        # so, what we'll do is we'll play a game with a split-pot, where bust players can't get dosh from later rounds
         
-        for ( location, ideal_weight ) in list(ideal_locations_to_normalised_weights.items()):
+        second_round_base_locations = []
+        
+        desperately_overweight_locations = []
+        overweight_locations = []
+        available_locations = []
+        starving_locations = []
+        
+        # first round, we need to sort out who is bust
+        
+        total_normalised_weight_lost_in_first_round = 0
+        
+        for base_location in all_media_base_locations:
             
-            if location in current_locations_to_normalised_weights:
+            current_num_bytes = current_base_locations_to_size_estimate[ base_location ]
+            
+            if not base_location.AbleToAcceptSubfolders( current_num_bytes, smallest_subfolder_num_bytes ):
                 
-                current_weight = current_locations_to_normalised_weights[ location ]
+                if base_location.max_num_bytes is None:
+                    
+                    total_normalised_weight_lost_in_first_round = base_location.ideal_weight / total_ideal_weight
+                    
+                else:
+                    
+                    total_normalised_weight_lost_in_first_round += base_location.max_num_bytes / all_local_files_total_size
+                    
                 
-                if current_weight < ideal_weight:
+                if base_location.NeedsToRemoveSubfolders( current_num_bytes ):
                     
-                    underweight_locations.append( location )
-                    
-                elif current_weight >= ideal_weight + 1.0 / 256:
-                    
-                    overweight_locations.append( location )
+                    desperately_overweight_locations.append( base_location )
                     
                 
             else:
                 
-                underweight_locations.append( location )
+                second_round_base_locations.append( base_location )
+                
+            
+        
+        random.shuffle( second_round_base_locations )
+        
+        # second round, let's distribute the remainder
+        # I fixed some logic and it seems like everything here is now AbleToAccept, so maybe we want another quick pass on this
+        # or just wait until I do the slow migration and we'll figure something out with the staticmethod on BaseLocation that just gets ideal weights
+        # I also added this jank regarding / ( 1 - first_round_weight ), which makes sure we are distributing the remaining weight correctly
+        
+        second_round_total_ideal_weight = sum( ( base_location.ideal_weight for base_location in second_round_base_locations ) )
+        
+        for base_location in second_round_base_locations:
+            
+            current_normalised_weight = current_base_locations_to_normalised_weights[ base_location ]
+            current_num_bytes = current_base_locations_to_size_estimate[ base_location ]
+            
+            # can be both overweight and able to eat more
+            
+            if base_location.WouldLikeToRemoveSubfolders( current_normalised_weight / ( 1 - total_normalised_weight_lost_in_first_round ), second_round_total_ideal_weight, largest_subfolder_normalised_weight ):
+                
+                overweight_locations.append( base_location )
+                
+            
+            if base_location.EagerToAcceptSubfolders( current_normalised_weight / ( 1 - total_normalised_weight_lost_in_first_round ), second_round_total_ideal_weight, smallest_subfolder_normalised_weight, current_num_bytes, smallest_subfolder_num_bytes ):
+                
+                starving_locations.insert( 0, base_location )
+                
+            elif base_location.AbleToAcceptSubfolders( current_num_bytes, smallest_subfolder_num_bytes ):
+                
+                available_locations.append( base_location )
                 
             
         
         #
         
-        if len( underweight_locations ) > 0 and len( overweight_locations ) > 0:
+        if len( desperately_overweight_locations ) > 0:
             
-            overweight_location = overweight_locations.pop( 0 )
-            underweight_location = underweight_locations.pop( 0 )
+            potential_sources = desperately_overweight_locations
+            potential_destinations = starving_locations + available_locations
+            
+        elif len( overweight_locations ) > 0:
+            
+            potential_sources = overweight_locations
+            potential_destinations = starving_locations
+            
+        else:
+            
+            potential_sources = []
+            potential_destinations = []
+            
+        
+        if len( potential_sources ) > 0 and len( potential_destinations ) > 0:
+            
+            source_base_location = potential_sources.pop( 0 )
+            destination_base_location = potential_destinations.pop( 0 )
             
             random.shuffle( file_prefixes )
             
             for file_prefix in file_prefixes:
                 
-                location = self._prefixes_to_locations[ file_prefix ]
+                subfolders = self._prefixes_to_client_files_subfolders[ file_prefix ]
                 
-                if location == overweight_location:
+                subfolder = subfolders[0]
+                
+                base_location = subfolder.base_location
+                
+                if base_location == source_base_location:
                     
-                    return ( file_prefix, overweight_location, underweight_location )
+                    overweight_subfolder = ClientFilesPhysical.FilesStorageSubfolder( file_prefix, source_base_location )
+                    underweight_subfolder = ClientFilesPhysical.FilesStorageSubfolder( file_prefix, destination_base_location )
+                    
+                    return ( overweight_subfolder, underweight_subfolder )
                     
                 
             
         else:
             
-            for hex_prefix in HydrusData.IterateHexPrefixes():
+            thumbnail_prefixes = [ prefix for prefix in self._prefixes_to_client_files_subfolders.keys() if prefix.startswith( 't' ) ]
+            
+            for thumbnail_prefix in thumbnail_prefixes:
                 
-                thumbnail_prefix = 't' + hex_prefix
-                
-                if thumbnail_override is None:
+                if ideal_thumbnail_override_base_location is None:
                     
-                    file_prefix = 'f' + hex_prefix
+                    file_prefix = 'f' + thumbnail_prefix[1:]
                     
-                    correct_location = self._prefixes_to_locations[ file_prefix ]
+                    subfolders = None
+                    
+                    if file_prefix in self._prefixes_to_client_files_subfolders:
+                        
+                        subfolders = self._prefixes_to_client_files_subfolders[ file_prefix ]
+                        
+                    else:
+                        
+                        # TODO: Consider better that thumbs might not be split but files would.
+                        # We need to better deal with t43 trying to find its place in f431, and t431 to f43, which means triggering splits or whatever (when we get to that code)
+                        
+                        for ( possible_file_prefix, possible_subfolders ) in self._prefixes_to_client_files_subfolders.items():
+                            
+                            if possible_file_prefix.startswith( file_prefix ) or file_prefix.startswith( possible_file_prefix ):
+                                
+                                subfolders = possible_subfolders
+                                
+                                break
+                                
+                            
+                        
+                    
+                    if subfolders is None:
+                        
+                        # this shouldn't ever fire, and by the time I expect to split subfolders, all this code will work different anyway
+                        # no way it could possibly go wrong
+                        raise Exception( 'Had a problem trying to find a thumnail migration location due to split subfolders! Let hydev know!' )
+                        
+                    
+                    subfolder = subfolders[0]
+                    
+                    correct_base_location = subfolder.base_location
                     
                 else:
                     
-                    correct_location = thumbnail_override
+                    correct_base_location = ideal_thumbnail_override_base_location
                     
                 
-                current_thumbnails_location = self._prefixes_to_locations[ thumbnail_prefix ]
+                subfolders = self._prefixes_to_client_files_subfolders[ thumbnail_prefix ]
                 
-                if current_thumbnails_location != correct_location:
+                subfolder = subfolders[0]
+                
+                current_thumbnails_base_location = subfolder.base_location
+                
+                if current_thumbnails_base_location != correct_base_location:
                     
-                    return ( thumbnail_prefix, current_thumbnails_location, correct_location )
+                    current_subfolder = ClientFilesPhysical.FilesStorageSubfolder( thumbnail_prefix, current_thumbnails_base_location )
+                    correct_subfolder = ClientFilesPhysical.FilesStorageSubfolder( thumbnail_prefix, correct_base_location )
+                    
+                    return ( current_subfolder, correct_subfolder )
                     
                 
             
@@ -757,19 +953,48 @@ class ClientFilesManager( object ):
         return None
         
     
+    def _GetSubfolderForFile( self, hash: bytes, prefix_type: str ) -> ClientFilesPhysical.FilesStorageSubfolder:
+        
+        # TODO: So this will be a crux of the more complicated system
+        # might even want a media result eventually, for various 'ah, because it is archived, it should go here'
+        # for now it is a patch to navigate multiples into our currently mutually exclusive storage dataset
+        
+        # we probably need to break this guy into variants of 'getpossiblepaths' vs 'getidealpath' for different callers
+        # getideal would be testing purge states and client files locations max num bytes stuff
+        # there should, in all circumstances, be a place to put a file, so there should always be at least one non-num_bytes'd location with weight to handle 100% coverage of the spillover
+        # if we are over the limit on the place the directory is supposed to be, I think we are creating a stub subfolder in the spillover place and writing there, but that'll mean saving a new subfolder, so be careful
+        # maybe the spillover should always have 100% coverage no matter what, and num_bytes'd locations should always just have extensions. something to think about
+        
+        return self._GetPossibleSubfoldersForFile( hash, prefix_type )[0]
+        
+    
+    def _HandleCriticalDriveError( self ):
+        
+        self._controller.new_options.SetBoolean( 'pause_import_folders_sync', True )
+        self._controller.new_options.SetBoolean( 'pause_subs_sync', True )
+        self._controller.new_options.SetBoolean( 'pause_all_file_queues', True )
+        
+        HydrusData.ShowText( 'A critical drive error has occurred. All importers--subscriptions, import folders, and paged file import queues--have been paused. Once the issue is clear, restart the client and resume your imports after restart under the file and network menus!' )
+        
+        self._controller.pub( 'notify_refresh_network_menu' )
+        
+    
     def _IterateAllFilePaths( self ):
         
-        for ( prefix, location ) in list(self._prefixes_to_locations.items()):
+        for ( prefix, subfolders ) in self._prefixes_to_client_files_subfolders.items():
             
             if prefix.startswith( 'f' ):
                 
-                dir = os.path.join( location, prefix )
-                
-                filenames = list( os.listdir( dir ) )
-                
-                for filename in filenames:
+                for subfolder in subfolders:
                     
-                    yield os.path.join( dir, filename )
+                    files_dir = subfolder.path
+                    
+                    filenames = list( os.listdir( files_dir ) )
+                    
+                    for filename in filenames:
+                        
+                        yield os.path.join( files_dir, filename )
+                        
                     
                 
             
@@ -777,17 +1002,20 @@ class ClientFilesManager( object ):
     
     def _IterateAllThumbnailPaths( self ):
         
-        for ( prefix, location ) in list(self._prefixes_to_locations.items()):
+        for ( prefix, subfolders ) in self._prefixes_to_client_files_subfolders.items():
             
             if prefix.startswith( 't' ):
                 
-                dir = os.path.join( location, prefix )
-                
-                filenames = list( os.listdir( dir ) )
-                
-                for filename in filenames:
+                for subfolder in subfolders:
                     
-                    yield os.path.join( dir, filename )
+                    files_dir = subfolder.path
+                    
+                    filenames = list( os.listdir( files_dir ) )
+                    
+                    for filename in filenames:
+                        
+                        yield os.path.join( files_dir, filename )
+                        
                     
                 
             
@@ -805,17 +1033,14 @@ class ClientFilesManager( object ):
                 
             
         
-        hash_encoded = hash.hex()
+        subfolders = self._GetPossibleSubfoldersForFile( hash, 'f' )
         
-        prefix = 'f' + hash_encoded[:2]
-        
-        location = self._prefixes_to_locations[ prefix ]
-        
-        subdir = os.path.join( location, prefix )
-        
-        if not os.path.exists( subdir ):
+        for subfolder in subfolders:
             
-            raise HydrusExceptions.DirectoryMissingException( 'The directory {} was not found! Reconnect the missing location or shut down the client immediately!'.format( subdir ) )
+            if not subfolder.PathExists():
+                
+                raise HydrusExceptions.DirectoryMissingException( f'The directory {subfolder.path} was not found! Reconnect the missing location or shut down the client immediately!' )
+                
             
         
         raise HydrusExceptions.FileMissingException( 'File for ' + hash.hex() + ' not found!' )
@@ -823,26 +1048,41 @@ class ClientFilesManager( object ):
     
     def _Reinit( self ):
         
-        self._prefixes_to_locations = self._controller.Read( 'client_files_locations' )
+        self._ReinitSubfolders()
         
-        if HG.client_controller.IsFirstStart():
+        if CG.client_controller.IsFirstStart():
             
             try:
                 
-                for ( prefix, location ) in list( self._prefixes_to_locations.items() ):
+                dirs_to_test = set()
+                
+                for subfolder in self._GetAllSubfolders():
                     
-                    HydrusPaths.MakeSureDirectoryExists( location )
+                    dirs_to_test.add( subfolder.base_location.path )
+                    dirs_to_test.add( subfolder.path )
                     
-                    subdir = os.path.join( location, prefix )
+                
+                for dir_to_test in dirs_to_test:
                     
-                    HydrusPaths.MakeSureDirectoryExists( subdir )
+                    try:
+                        
+                        HydrusPaths.MakeSureDirectoryExists( dir_to_test )
+                        
+                    except:
+                        
+                        text = 'Attempting to create the database\'s client_files folder structure in {} failed!'.format( dir_to_test )
+                        
+                        self._controller.BlockingSafeShowCriticalMessage( 'unable to create file structure', text )
+                        
+                        raise
+                        
                     
                 
             except:
                 
-                text = 'Attempting to create the database\'s client_files folder structure in {} failed!'.format( location )
+                text = 'Attempting to create the database\'s client_files folder structure failed!'
                 
-                self._controller.SafeShowCriticalMessage( 'unable to create file structure', text )
+                self._controller.BlockingSafeShowCriticalMessage( 'unable to create file structure', text )
                 
                 raise
                 
@@ -851,48 +1091,48 @@ class ClientFilesManager( object ):
             
             self._ReinitMissingLocations()
             
-            if len( self._missing_locations ) > 0:
+            if len( self._missing_subfolders ) > 0:
                 
                 self._AttemptToHealMissingLocations()
                 
-                self._prefixes_to_locations = self._controller.Read( 'client_files_locations' )
+                self._ReinitSubfolders()
                 
                 self._ReinitMissingLocations()
                 
             
-            if len( self._missing_locations ) > 0:
+            if len( self._missing_subfolders ) > 0:
                 
                 self._bad_error_occurred = True
                 
                 #
                 
-                missing_dict = HydrusData.BuildKeyToListDict( self._missing_locations )
+                missing_dict = HydrusData.BuildKeyToListDict( [ ( subfolder.base_location, subfolder.prefix ) for subfolder in self._missing_subfolders ] )
                 
-                missing_locations = sorted( missing_dict.keys() )
+                missing_base_locations = sorted( missing_dict.keys(), key = lambda b_l: b_l.path )
                 
                 missing_string = ''
                 
-                for missing_location in missing_locations:
+                for missing_base_location in missing_base_locations:
                     
-                    missing_prefixes = sorted( missing_dict[ missing_location ] )
+                    missing_prefixes = sorted( missing_dict[ missing_base_location ] )
                     
-                    missing_prefixes_string = '    ' + os.linesep.join( ( ', '.join( block ) for block in HydrusData.SplitListIntoChunks( missing_prefixes, 32 ) ) )
+                    missing_prefixes_string = '    ' + os.linesep.join( ( ', '.join( block ) for block in HydrusLists.SplitListIntoChunks( missing_prefixes, 32 ) ) )
                     
                     missing_string += os.linesep
-                    missing_string += missing_location
+                    missing_string += str( missing_base_location )
                     missing_string += os.linesep
                     missing_string += missing_prefixes_string
                     
                 
                 #
                 
-                if len( self._missing_locations ) > 4:
+                if len( self._missing_subfolders ) > 4:
                     
                     text = 'When initialising the client files manager, some file locations did not exist! They have all been written to the log!'
                     text += os.linesep * 2
                     text += 'If this is happening on client boot, you should now be presented with a dialog to correct this manually!'
                     
-                    self._controller.SafeShowCriticalMessage( 'missing locations', text )
+                    self._controller.BlockingSafeShowCriticalMessage( 'missing locations', text )
                     
                     HydrusData.DebugPrint( 'Missing locations follow:' )
                     HydrusData.DebugPrint( missing_string )
@@ -905,35 +1145,48 @@ class ClientFilesManager( object ):
                     text += os.linesep * 2
                     text += 'If this is happening on client boot, you should now be presented with a dialog to correct this manually!'
                     
-                    self._controller.SafeShowCriticalMessage( 'missing locations', text )
+                    self._controller.BlockingSafeShowCriticalMessage( 'missing locations', text )
                     
                 
             
         
     
+    def _ReinitSubfolders( self ):
+        
+        subfolders = self._controller.Read( 'client_files_subfolders' )
+        
+        self._prefixes_to_client_files_subfolders = collections.defaultdict( list )
+        
+        for subfolder in subfolders:
+            
+            self._prefixes_to_client_files_subfolders[ subfolder.prefix ].append( subfolder )
+            
+        
+        self._smallest_prefix = min( ( len( prefix ) for prefix in self._prefixes_to_client_files_subfolders.keys() ) ) - 1
+        self._largest_prefix = max( ( len( prefix ) for prefix in self._prefixes_to_client_files_subfolders.keys() ) ) - 1
+        
+    
     def _ReinitMissingLocations( self ):
         
-        self._missing_locations = set()
+        self._missing_subfolders = set()
         
-        for ( prefix, location ) in self._prefixes_to_locations.items():
+        for ( prefix, subfolders ) in self._prefixes_to_client_files_subfolders.items():
             
-            if os.path.exists( location ):
+            for subfolder in subfolders:
                 
-                if os.path.exists( os.path.join( location, prefix ) ):
+                if not subfolder.PathExists():
                     
-                    continue
+                    self._missing_subfolders.add( subfolder )
                     
                 
-            
-            self._missing_locations.add( ( location, prefix ) )
             
         
     
     def _WaitOnWakeup( self ):
         
-        if HG.client_controller.new_options.GetBoolean( 'file_system_waits_on_wakeup' ):
+        if CG.client_controller.new_options.GetBoolean( 'file_system_waits_on_wakeup' ):
             
-            while HG.client_controller.JustWokeFromSleep():
+            while CG.client_controller.JustWokeFromSleep():
                 
                 HydrusThreading.CheckIfThreadShuttingDown()
                 
@@ -944,15 +1197,15 @@ class ClientFilesManager( object ):
     
     def AllLocationsAreDefault( self ):
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
             db_dir = self._controller.GetDBDir()
             
             client_files_default = os.path.join( db_dir, 'client_files' )
             
-            all_locations = set( self._prefixes_to_locations.values() )
+            all_base_locations = self._GetCurrentSubfolderBaseLocations()
             
-            return False not in ( location.startswith( client_files_default ) for location in all_locations )
+            return False not in ( location.path.startswith( client_files_default ) for location in all_base_locations )
             
         
     
@@ -975,7 +1228,7 @@ class ClientFilesManager( object ):
     
     def AddFile( self, hash, mime, source_path, thumbnail_bytes = None ):
         
-        with self._rwlock.write:
+        with self._file_storage_rwlock.write:
             
             self._AddFile( hash, mime, source_path )
             
@@ -988,7 +1241,7 @@ class ClientFilesManager( object ):
     
     def AddThumbnailFromBytes( self, hash, thumbnail_bytes, silent = False ):
         
-        with self._rwlock.write:
+        with self._file_storage_rwlock.write:
             
             self._AddThumbnailFromBytes( hash, thumbnail_bytes, silent = silent )
             
@@ -996,7 +1249,12 @@ class ClientFilesManager( object ):
     
     def ChangeFileExt( self, hash, old_mime, mime ):
         
-        with self._rwlock.write:
+        if old_mime == mime:
+            
+            return False
+            
+        
+        with self._file_storage_rwlock.write:
             
             return self._ChangeFileExt( hash, old_mime, mime )
             
@@ -1004,21 +1262,21 @@ class ClientFilesManager( object ):
     
     def ClearOrphans( self, move_location = None ):
         
-        with self._rwlock.write:
+        with self._file_storage_rwlock.write:
             
-            job_key = ClientThreading.JobKey( cancellable = True )
+            job_status = ClientThreading.JobStatus( cancellable = True )
             
-            job_key.SetStatusTitle( 'clearing orphans' )
-            job_key.SetStatusText( 'preparing' )
+            job_status.SetStatusTitle( 'clearing orphans' )
+            job_status.SetStatusText( 'preparing' )
             
-            self._controller.pub( 'message', job_key )
+            self._controller.pub( 'message', job_status )
             
             orphan_paths = []
             orphan_thumbnails = []
             
             for ( i, path ) in enumerate( self._IterateAllFilePaths() ):
                 
-                ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                 
                 if should_quit:
                     
@@ -1029,12 +1287,10 @@ class ClientFilesManager( object ):
                     
                     status = 'reviewed ' + HydrusData.ToHumanInt( i ) + ' files, found ' + HydrusData.ToHumanInt( len( orphan_paths ) ) + ' orphans'
                     
-                    job_key.SetStatusText( status )
+                    job_status.SetStatusText( status )
                     
                 
                 try:
-                    
-                    is_an_orphan = False
                     
                     ( directory, filename ) = os.path.split( path )
                     
@@ -1042,7 +1298,7 @@ class ClientFilesManager( object ):
                     
                     hash = bytes.fromhex( should_be_a_hex_hash )
                     
-                    is_an_orphan = HG.client_controller.Read( 'is_an_orphan', 'file', hash )
+                    is_an_orphan = CG.client_controller.Read( 'is_an_orphan', 'file', hash )
                     
                 except:
                     
@@ -1061,7 +1317,20 @@ class ClientFilesManager( object ):
                         
                         HydrusData.Print( 'Moving the orphan ' + path + ' to ' + dest )
                         
-                        HydrusPaths.MergeFile( path, dest )
+                        try:
+                            
+                            HydrusPaths.MergeFile( path, dest )
+                            
+                        except Exception as e:
+                            
+                            HydrusData.ShowText( f'Had trouble moving orphan from {path} to {dest}! Abandoning job!' )
+                            
+                            HydrusData.ShowException( e, do_wait = False )
+                            
+                            job_status.Cancel()
+                            
+                            return
+                            
                         
                     
                     orphan_paths.append( path )
@@ -1072,7 +1341,7 @@ class ClientFilesManager( object ):
             
             for ( i, path ) in enumerate( self._IterateAllThumbnailPaths() ):
                 
-                ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                 
                 if should_quit:
                     
@@ -1083,7 +1352,7 @@ class ClientFilesManager( object ):
                     
                     status = 'reviewed ' + HydrusData.ToHumanInt( i ) + ' thumbnails, found ' + HydrusData.ToHumanInt( len( orphan_thumbnails ) ) + ' orphans'
                     
-                    job_key.SetStatusText( status )
+                    job_status.SetStatusText( status )
                     
                 
                 try:
@@ -1096,7 +1365,7 @@ class ClientFilesManager( object ):
                     
                     hash = bytes.fromhex( should_be_a_hex_hash )
                     
-                    is_an_orphan = HG.client_controller.Read( 'is_an_orphan', 'thumbnail', hash )
+                    is_an_orphan = CG.client_controller.Read( 'is_an_orphan', 'thumbnail', hash )
                     
                 except:
                     
@@ -1115,13 +1384,13 @@ class ClientFilesManager( object ):
                 
                 status = 'found ' + HydrusData.ToHumanInt( len( orphan_paths ) ) + ' orphans, now deleting'
                 
-                job_key.SetStatusText( status )
+                job_status.SetStatusText( status )
                 
                 time.sleep( 5 )
                 
                 for ( i, path ) in enumerate( orphan_paths ):
                     
-                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                     
                     if should_quit:
                         
@@ -1132,7 +1401,7 @@ class ClientFilesManager( object ):
                     
                     status = 'deleting orphan files: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( orphan_paths ) )
                     
-                    job_key.SetStatusText( status )
+                    job_status.SetStatusText( status )
                     
                     ClientPaths.DeletePath( path )
                     
@@ -1142,13 +1411,13 @@ class ClientFilesManager( object ):
                 
                 status = 'found ' + HydrusData.ToHumanInt( len( orphan_thumbnails ) ) + ' orphan thumbnails, now deleting'
                 
-                job_key.SetStatusText( status )
+                job_status.SetStatusText( status )
                 
                 time.sleep( 5 )
                 
                 for ( i, path ) in enumerate( orphan_thumbnails ):
                     
-                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                     
                     if should_quit:
                         
@@ -1157,7 +1426,7 @@ class ClientFilesManager( object ):
                     
                     status = 'deleting orphan thumbnails: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( orphan_thumbnails ) )
                     
-                    job_key.SetStatusText( status )
+                    job_status.SetStatusText( status )
                     
                     HydrusData.Print( 'Deleting the orphan ' + path )
                     
@@ -1174,17 +1443,17 @@ class ClientFilesManager( object ):
                 final_text = HydrusData.ToHumanInt( len( orphan_paths ) ) + ' orphan files and ' + HydrusData.ToHumanInt( len( orphan_thumbnails ) ) + ' orphan thumbnails cleared!'
                 
             
-            job_key.SetStatusText( final_text )
+            job_status.SetStatusText( final_text )
             
-            HydrusData.Print( job_key.ToString() )
+            HydrusData.Print( job_status.ToString() )
             
-            job_key.Finish()
+            job_status.Finish()
             
         
     
     def DeleteNeighbourDupes( self, hash, true_mime ):
         
-        with self._rwlock.write:
+        with self._file_storage_rwlock.write:
             
             correct_path = self._GenerateExpectedFilePath( hash, true_mime )
             
@@ -1211,7 +1480,12 @@ class ClientFilesManager( object ):
                 
                 if os.path.exists( incorrect_path ):
                     
-                    HydrusPaths.DeletePath( incorrect_path )
+                    delete_ok = HydrusPaths.DeletePath( incorrect_path )
+                    
+                    if not delete_ok and random.randint( 1, 52 ) != 52:
+                        
+                        self._controller.WriteSynchronous( 'file_maintenance_add_jobs_hashes', { hash }, REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES, HydrusTime.GetNow() + ( 7 * 86400 ) )
+                        
                     
                 
             
@@ -1226,7 +1500,7 @@ class ClientFilesManager( object ):
         
         while not HG.started_shutdown:
             
-            with self._rwlock.write:
+            with self._file_storage_rwlock.write:
                 
                 ( file_hash, thumbnail_hash ) = self._controller.Read( 'deferred_physical_delete' )
                 
@@ -1256,7 +1530,7 @@ class ClientFilesManager( object ):
                         
                     except HydrusExceptions.FileMissingException:
                         
-                        HydrusData.Print( 'Wanted to physically delete the "{}" file, with expected mime "{}", but it was not found!'.format( file_hash.hex(), expected_mime ) )
+                        HydrusData.Print( 'Wanted to physically delete the "{}" file, with expected mime "{}", but it was not found!'.format( file_hash.hex(), HC.mime_string_lookup[ expected_mime ] ) )
                         
                     
                 
@@ -1269,10 +1543,6 @@ class ClientFilesManager( object ):
                         ClientPaths.DeletePath( path, always_delete_fully = True )
                         
                         num_thumbnails_deleted += 1
-                        
-                    else:
-                        
-                        HydrusData.Print( 'Wanted to physically delete the "{}" thumbnail, but it was not found!'.format( file_hash.hex() ) )
                         
                     
                 
@@ -1297,27 +1567,17 @@ class ClientFilesManager( object ):
             
         
     
-    def GetCurrentFileLocations( self ):
+    def GetCurrentFileBaseLocations( self ):
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
-            locations = set()
-            
-            for ( prefix, location ) in self._prefixes_to_locations.items():
-                
-                if prefix.startswith( 'f' ):
-                    
-                    locations.add( location )
-                    
-                
-            
-            return locations
+            return self._GetCurrentSubfolderBaseLocations( only_files = True )
             
         
     
     def GetFilePath( self, hash, mime = None, check_file_exists = True ):
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
             if HG.file_report_mode:
                 
@@ -1355,9 +1615,9 @@ class ClientFilesManager( object ):
             
         
     
-    def GetMissing( self ):
+    def GetMissingSubfolders( self ):
         
-        return self._missing_locations
+        return self._missing_subfolders
         
     
     def GetThumbnailPath( self, media ):
@@ -1370,7 +1630,7 @@ class ClientFilesManager( object ):
             HydrusData.ShowText( 'Thumbnail path request: ' + str( ( hash, mime ) ) )
             
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
             path = self._GenerateExpectedThumbnailPath( hash )
             
@@ -1385,6 +1645,18 @@ class ClientFilesManager( object ):
         return path
         
     
+    def LocklessHasFile( self, hash, mime ):
+        
+        path = self._GenerateExpectedFilePath( hash, mime )
+        
+        if HG.file_report_mode:
+            
+            HydrusData.ShowText( 'File path test: ' + path )
+            
+        
+        return os.path.exists( path )
+        
+    
     def LocklessHasThumbnail( self, hash ):
         
         path = self._GenerateExpectedThumbnailPath( hash )
@@ -1397,7 +1669,7 @@ class ClientFilesManager( object ):
         return os.path.exists( path )
         
     
-    def Rebalance( self, job_key ):
+    def Rebalance( self, job_status ):
         
         try:
             
@@ -1408,27 +1680,27 @@ class ClientFilesManager( object ):
                 return
                 
             
-            with self._rwlock.write:
+            with self._file_storage_rwlock.write:
                 
                 rebalance_tuple = self._GetRebalanceTuple()
                 
                 while rebalance_tuple is not None:
                     
-                    if job_key.IsCancelled():
+                    if job_status.IsCancelled():
                         
                         break
                         
                     
-                    ( prefix, overweight_location, underweight_location ) = rebalance_tuple
+                    ( source_subfolder, dest_subfolder ) = rebalance_tuple
                     
-                    text = 'Moving \'' + prefix + '\' from ' + overweight_location + ' to ' + underweight_location
+                    text = f'Moving "{source_subfolder}" to "{dest_subfolder}".'
                     
                     HydrusData.Print( text )
                     
-                    job_key.SetStatusText( text )
+                    job_status.SetStatusText( text )
                     
                     # these two lines can cause a deadlock because the db sometimes calls stuff in here.
-                    self._controller.WriteSynchronous( 'relocate_client_files', prefix, overweight_location, underweight_location )
+                    self._controller.WriteSynchronous( 'relocate_client_files', source_subfolder, dest_subfolder )
                     
                     self._Reinit()
                     
@@ -1437,47 +1709,18 @@ class ClientFilesManager( object ):
                     time.sleep( 0.01 )
                     
                 
-                recover_tuple = self._GetRecoverTuple()
-                
-                while recover_tuple is not None:
-                    
-                    if job_key.IsCancelled():
-                        
-                        break
-                        
-                    
-                    ( prefix, recoverable_location, correct_location ) = recover_tuple
-                    
-                    text = 'Recovering \'' + prefix + '\' from ' + recoverable_location + ' to ' + correct_location
-                    
-                    HydrusData.Print( text )
-                    
-                    job_key.SetStatusText( text )
-                    
-                    recoverable_path = os.path.join( recoverable_location, prefix )
-                    correct_path = os.path.join( correct_location, prefix )
-                    
-                    HydrusPaths.MergeTree( recoverable_path, correct_path )
-                    
-                    recover_tuple = self._GetRecoverTuple()
-                    
-                    time.sleep( 0.01 )
-                    
-                
             
         finally:
             
-            job_key.SetStatusText( 'done!' )
+            job_status.SetStatusText( 'done!' )
             
-            job_key.Finish()
-            
-            job_key.Delete()
+            job_status.FinishAndDismiss()
             
         
     
     def RebalanceWorkToDo( self ):
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
             return self._GetRebalanceTuple() is not None
             
@@ -1493,7 +1736,7 @@ class ClientFilesManager( object ):
             return
             
         
-        with self._rwlock.read:
+        with self._file_storage_rwlock.read:
             
             file_path = self._GenerateExpectedFilePath( hash, mime )
             
@@ -1505,11 +1748,12 @@ class ClientFilesManager( object ):
             thumbnail_bytes = self._GenerateThumbnailBytes( file_path, media )
             
         
-        with self._rwlock.write:
+        with self._file_storage_rwlock.write:
             
             self._AddThumbnailFromBytes( hash, thumbnail_bytes )
             
-        
+        return True
+    
     
     def RegenerateThumbnailIfWrongSize( self, media ):
         
@@ -1529,15 +1773,22 @@ class ClientFilesManager( object ):
             
             path = self._GenerateExpectedThumbnailPath( hash )
             
-            numpy_image = ClientImageHandling.GenerateNumPyImage( path, mime )
+            if not os.path.exists( path ):
+                
+                raise Exception()
+                
+            
+            thumbnail_mime = HydrusFileHandling.GetThumbnailMime( path )
+            
+            numpy_image = ClientImageHandling.GenerateNumPyImage( path, thumbnail_mime )
             
             ( current_width, current_height ) = HydrusImageHandling.GetResolutionNumPy( numpy_image )
             
             bounding_dimensions = self._controller.options[ 'thumbnail_dimensions' ]
             thumbnail_scale_type = self._controller.new_options.GetInteger( 'thumbnail_scale_type' )
-            thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+            thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
             
-            ( clip_rect, ( expected_width, expected_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( media_width, media_height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
+            ( expected_width, expected_height ) = HydrusImageHandling.GetThumbnailResolution( (media_width, media_height), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
             
             if current_width != expected_width or current_height != expected_height:
                 
@@ -1557,11 +1808,167 @@ class ClientFilesManager( object ):
         return do_it
         
     
+    def Reinit( self ):
+        
+        # this is still useful to hit on ideals changing, since subfolders bring the weight and stuff of those settings. we'd rather it was generally synced
+        self._Reinit()
+        
+    
+    def UpdateFileModifiedTimestampMS( self, media, modified_timestamp_ms: int ):
+        
+        hash = media.GetHash()
+        mime = media.GetMime()
+        
+        path = self._GenerateExpectedFilePath( hash, mime )
+        
+        with self._file_storage_rwlock.write:
+            
+            if os.path.exists( path ):
+                
+                existing_access_time = os.path.getatime( path )
+                existing_modified_time = os.path.getmtime( path )
+                
+                # floats are ok here!
+                modified_timestamp = modified_timestamp_ms / 1000
+                
+                try:
+                    
+                    os.utime( path, ( existing_access_time, modified_timestamp ) )
+                    
+                    HydrusData.Print( 'Successfully changed modified time of "{}" from {} to {}.'.format( path, HydrusTime.TimestampToPrettyTime( existing_modified_time ), HydrusTime.TimestampToPrettyTime( modified_timestamp ) ))
+                    
+                except PermissionError:
+                    
+                    HydrusData.Print( 'Tried to set modified time of {} to file "{}", but did not have permission!'.format( HydrusTime.TimestampToPrettyTime( modified_timestamp ), path ) )
+                    
+                
+            
+        
+    
     def shutdown( self ):
         
         self._physical_file_delete_wait.set()
         
     
+
+def HasHumanReadableEmbeddedMetadata( path, mime ):
+    
+    if mime not in HC.FILES_THAT_CAN_HAVE_HUMAN_READABLE_EMBEDDED_METADATA:
+        
+        return False
+        
+    
+    if mime == HC.APPLICATION_PDF:
+        
+        has_human_readable_embedded_metadata = ClientPDFHandling.HasHumanReadableEmbeddedMetadata( path )
+        
+    else:
+        
+        try:
+            
+            pil_image = HydrusImageOpening.RawOpenPILImage( path )
+            
+        except:
+            
+            return False
+            
+        
+        has_human_readable_embedded_metadata = HydrusImageMetadata.HasHumanReadableEmbeddedMetadata( pil_image )
+        
+    
+    return has_human_readable_embedded_metadata
+    
+
+def HasTransparency( path, mime, duration = None, num_frames = None, resolution = None ):
+    
+    if mime not in HC.MIMES_THAT_WE_CAN_CHECK_FOR_TRANSPARENCY:
+        
+        return False
+        
+    
+    try:
+        
+        if mime in HC.IMAGES:
+            
+            numpy_image = HydrusImageHandling.GenerateNumPyImage( path, mime )
+            
+            return HydrusImageColours.NumPyImageHasUsefulAlphaChannel( numpy_image )
+            
+        elif mime in ( HC.ANIMATION_GIF, HC.ANIMATION_APNG ):
+            
+            if num_frames is None or resolution is None:
+                
+                return False # something crazy going on, so let's bail out
+                
+            
+            we_checked_alpha_channel = False
+            
+            if mime == HC.ANIMATION_GIF:
+                
+                renderer = ClientVideoHandling.GIFRenderer( path, num_frames, resolution )
+                
+            else: # HC.ANIMATION_APNG
+                
+                renderer = HydrusVideoHandling.VideoRendererFFMPEG( path, mime, duration, num_frames, resolution )
+                
+            
+            for i in range( num_frames ):
+                
+                numpy_image = renderer.read_frame()
+                
+                if not we_checked_alpha_channel:
+                    
+                    if not HydrusImageColours.NumPyImageHasAlphaChannel( numpy_image ):
+                        
+                        return False
+                        
+                    
+                    we_checked_alpha_channel = True
+                    
+                
+                if HydrusImageColours.NumPyImageHasUsefulAlphaChannel( numpy_image ):
+                    
+                    return True
+                    
+                
+            
+        
+    except HydrusExceptions.DamagedOrUnusualFileException as e:
+        
+        HydrusData.Print( 'Problem determining transparency for "{}":'.format( path ) )
+        HydrusData.PrintException( e )
+        
+        return False
+        
+    
+    return False
+    
+
+def add_extra_comments_to_job_status( job_status: ClientThreading.JobStatus ):
+    
+    extra_comments = []
+    
+    num_thumb_refits = job_status.GetIfHasVariable( 'num_thumb_refits' )
+    num_bad_files = job_status.GetIfHasVariable( 'num_bad_files' )
+    
+    if num_thumb_refits is not None:
+        
+        extra_comments.append( 'thumbs needing regen: {}'.format( HydrusData.ToHumanInt( num_thumb_refits ) ) )
+        
+    
+    if num_bad_files is not None:
+        
+        extra_comments.append( 'missing or invalid files: {}'.format( HydrusData.ToHumanInt( num_bad_files ) ) )
+        
+    
+    sub_status_message = '\n'.join( extra_comments )
+    
+    if len( sub_status_message ) > 0:
+        
+        job_status.SetStatusText( sub_status_message, 2 )
+        
+    
+
 class FilesMaintenanceManager( object ):
     
     def __init__( self, controller ):
@@ -1588,14 +1995,15 @@ class FilesMaintenanceManager( object ):
         self._shutdown = False
         
         self._controller.sub( self, 'NotifyNewOptions', 'notify_new_options' )
+        self._controller.sub( self, 'Wake', 'checkbox_manager_inverted' )
         self._controller.sub( self, 'Shutdown', 'shutdown' )
         
     
     def _AbleToDoBackgroundMaintenance( self ):
         
-        HG.client_controller.WaitUntilViewFree()
+        CG.client_controller.WaitUntilViewFree()
         
-        if HG.client_controller.CurrentlyIdle():
+        if CG.client_controller.CurrentlyIdle():
             
             if not self._controller.new_options.GetBoolean( 'file_maintenance_during_idle' ):
                 
@@ -1650,6 +2058,8 @@ class FilesMaintenanceManager( object ):
         file_is_missing = False
         file_is_invalid = False
         
+        path = ''
+        
         try:
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
@@ -1681,7 +2091,7 @@ class FilesMaintenanceManager( object ):
             
             HydrusPaths.MakeSureDirectoryExists( error_dir )
             
-            pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( self._controller.GetBootTime() ) )
+            pretty_timestamp = time.strftime( '%Y-%m-%d %H-%M-%S', time.localtime( HydrusTime.SecondiseMS( self._controller.GetBootTimestampMS() ) ) )
             
             missing_hashes_filename = '{} missing hashes.txt'.format( pretty_timestamp )
             
@@ -1753,7 +2163,7 @@ class FilesMaintenanceManager( object ):
                 
                 try:
                     
-                    url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url )
+                    url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url )
                     
                 except HydrusExceptions.URLClassException:
                     
@@ -1802,7 +2212,14 @@ class FilesMaintenanceManager( object ):
                 
                 dest_path = os.path.join( error_dir, os.path.basename( path ) )
                 
-                HydrusPaths.MergeFile( path, dest_path )
+                try:
+                    
+                    HydrusPaths.MergeFile( path, dest_path )
+                    
+                except Exception as e:
+                    
+                    raise Exception( f'Could not move the damaged file "{path}" to "{dest_path}"!' ) from e
+                    
                 
                 if not self._pubbed_message_about_invalid_file_export:
                     
@@ -1820,15 +2237,12 @@ class FilesMaintenanceManager( object ):
                 
                 def qt_add_url( url ):
                     
-                    if QP.isValid( HG.client_controller.gui ):
-                        
-                        HG.client_controller.gui.ImportURL( url, 'missing files redownloader' )
-                        
+                    CG.client_controller.gui.ImportURL( url, 'missing files redownloader' )
                     
                 
                 for url in useful_urls:
                     
-                    QP.CallAfter( qt_add_url, url )
+                    CG.client_controller.CallBlockingToQt( CG.client_controller.gui, qt_add_url, url )
                     
                 
             
@@ -1836,19 +2250,19 @@ class FilesMaintenanceManager( object ):
                 
                 leave_deletion_record = job_type == REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD
                 
-                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'Record deleted during File Integrity check.' )
+                content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'Record deleted during File Integrity check.' )
                 
-                service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+                content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
                 
-                self._controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+                self._controller.WriteSynchronous( 'content_updates', content_update_package )
                 
                 if not leave_deletion_record:
                     
-                    content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, ( hash, ) )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, ( hash, ) )
                     
-                    service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+                    content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
                     
-                    self._controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+                    self._controller.WriteSynchronous( 'content_updates', content_update_package )
                     
                 
                 if not self._pubbed_message_about_bad_file_record_delete:
@@ -1932,7 +2346,16 @@ class FilesMaintenanceManager( object ):
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
             
-            has_exif = HydrusImageHandling.HasEXIF( path )
+            try:
+                
+                raw_pil_image = HydrusImageOpening.RawOpenPILImage( path )
+                
+                has_exif = HydrusImageMetadata.HasEXIF( path )
+                
+            except:
+                
+                has_exif = False
+                
             
             additional_data = has_exif
             
@@ -1958,7 +2381,7 @@ class FilesMaintenanceManager( object ):
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
             
-            has_human_readable_embedded_metadata = HydrusImageHandling.HasHumanReadableEmbeddedMetadata( path )
+            has_human_readable_embedded_metadata = HasHumanReadableEmbeddedMetadata( path, mime )
             
             additional_data = has_human_readable_embedded_metadata
             
@@ -1984,18 +2407,57 @@ class FilesMaintenanceManager( object ):
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
             
-            try:
-                
-                pil_image = HydrusImageHandling.RawOpenPILImage( path )
-                
-            except:
-                
-                return None
-                
+            if mime == HC.APPLICATION_PSD:
             
-            has_icc_profile = HydrusImageHandling.HasICCProfile( pil_image )
+                try:
+                    
+                    has_icc_profile = HydrusPSDHandling.PSDHasICCProfile( path )
+                    
+                except:
+                    
+                    return None
+                    
+            else:
+                
+                try:
+                    
+                    raw_pil_image = HydrusImageOpening.RawOpenPILImage( path )
+                    
+                except:
+                    
+                    return None
+                    
+                
+                has_icc_profile = HydrusImageMetadata.HasICCProfile( raw_pil_image )
+                
             
             additional_data = has_icc_profile
+            
+            return additional_data
+            
+        except HydrusExceptions.FileMissingException:
+            
+            return None
+            
+        
+    
+    def _HasTransparency( self, media_result ):
+        
+        hash = media_result.GetHash()
+        mime = media_result.GetMime()
+        
+        if mime not in HC.MIMES_THAT_WE_CAN_CHECK_FOR_TRANSPARENCY:
+            
+            return False
+            
+        
+        try:
+            
+            path = self._controller.client_files_manager.GetFilePath( hash, mime )
+            
+            has_transparency = HasTransparency( path, mime, duration = media_result.GetDurationMS(), num_frames = media_result.GetNumFrames(), resolution = media_result.GetResolution() )
+            
+            additional_data = has_transparency
             
             return additional_data
             
@@ -2018,13 +2480,18 @@ class FilesMaintenanceManager( object ):
             
             additional_data = ( size, mime, width, height, duration, num_frames, has_audio, num_words )
             
-            if mime != original_mime:
+            if mime != original_mime and not media_result.GetFileInfoManager().FiletypeIsForced():
+                
+                if not HydrusPaths.PathIsFree( path ):
+                    
+                    time.sleep( 0.5 )
+                    
                 
                 needed_to_dupe_the_file = self._controller.client_files_manager.ChangeFileExt( hash, original_mime, mime )
                 
                 if needed_to_dupe_the_file:
                     
-                    self._controller.WriteSynchronous( 'file_maintenance_add_jobs_hashes', { hash }, REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES, HydrusData.GetNow() + ( 7 * 86400 ) )
+                    self._controller.WriteSynchronous( 'file_maintenance_add_jobs_hashes', { hash }, REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES, HydrusTime.GetNow() + 3600 )
                     
                 
             
@@ -2042,7 +2509,7 @@ class FilesMaintenanceManager( object ):
             
         
     
-    def _RegenFileModifiedTimestamp( self, media_result ):
+    def _RegenFileModifiedTimestampMS( self, media_result ):
         
         hash = media_result.GetHash()
         mime = media_result.GetMime()
@@ -2056,9 +2523,9 @@ class FilesMaintenanceManager( object ):
             
             path = self._controller.client_files_manager.GetFilePath( hash, mime )
             
-            file_modified_timestamp = HydrusFileHandling.GetFileModifiedTimestamp( path )
+            file_modified_timestamp_ms = HydrusFileHandling.GetFileModifiedTimestampMS( path )
             
-            additional_data = file_modified_timestamp
+            additional_data = file_modified_timestamp_ms
             
             return additional_data
             
@@ -2105,7 +2572,7 @@ class FilesMaintenanceManager( object ):
         
         try:
             
-            self._controller.client_files_manager.RegenerateThumbnail( media_result )
+            return self._controller.client_files_manager.RegenerateThumbnail( media_result )
             
         except HydrusExceptions.FileMissingException:
             
@@ -2119,7 +2586,7 @@ class FilesMaintenanceManager( object ):
         
         if not good_to_go:
             
-            return
+            return False
             
         
         try:
@@ -2130,7 +2597,7 @@ class FilesMaintenanceManager( object ):
             
         except HydrusExceptions.FileMissingException:
             
-            pass
+            return False
             
         
     
@@ -2173,6 +2640,36 @@ class FilesMaintenanceManager( object ):
             return None
             
         
+    def _RegenBlurhash( self, media ):
+        
+        if media.GetMime() not in HC.MIMES_WITH_THUMBNAILS:
+            
+            return None
+            
+        
+        try:
+            
+            thumbnail_path = self._controller.client_files_manager.GetThumbnailPath( media )
+            
+        except HydrusExceptions.FileMissingException as e:
+            
+            return None
+            
+        
+        try:
+            
+            thumbnail_mime = HydrusFileHandling.GetThumbnailMime( thumbnail_path )
+            
+            numpy_image = ClientImageHandling.GenerateNumPyImage( thumbnail_path, thumbnail_mime )
+            
+            return HydrusBlurhash.GetBlurhashFromNumPy( numpy_image )
+            
+        except:
+            
+            return None
+            
+        
+    
     
     def _RegenSimilarFilesMetadata( self, media_result ):
         
@@ -2217,186 +2714,219 @@ class FilesMaintenanceManager( object ):
         self._active_work_rules.AddRule( HC.BANDWIDTH_TYPE_REQUESTS, file_maintenance_active_throttle_time_delta, file_maintenance_active_throttle_files * NORMALISED_BIG_JOB_WEIGHT )
         
     
-    def _RunJob( self, media_results, job_type, job_key, job_done_hook = None ):
+    def _RunJob( self, media_results_to_job_types, job_status, job_done_hook = None ):
         
         if self._serious_error_encountered:
             
             return
             
         
-        next_gc_collect = HydrusData.GetNow() + 10
+        cleared_jobs = []
         
         try:
             
-            big_pauser = HydrusData.BigJobPauser( wait_time = 0.8 )
+            big_pauser = HydrusThreading.BigJobPauser( wait_time = 0.8 )
             
-            last_time_jobs_were_cleared = HydrusData.GetNow()
-            cleared_jobs = []
+            last_time_jobs_were_cleared = HydrusTime.GetNow()
             
-            num_to_do = len( media_results )
-            
-            if HG.file_report_mode:
-                
-                HydrusData.ShowText( 'file maintenance: {} for {} files'.format( regen_file_enum_to_str_lookup[ job_type ], HydrusData.ToHumanInt( num_to_do ) ) )
-                
-            
-            for ( i, media_result ) in enumerate( media_results ):
+            for ( media_result, job_types ) in media_results_to_job_types.items():
                 
                 big_pauser.Pause()
                 
                 hash = media_result.GetHash()
                 
-                if job_key.IsCancelled() or self._shutdown:
+                if job_status.IsCancelled() or self._shutdown:
                     
                     return
                     
                 
-                if job_done_hook is not None:
+                for job_type in job_types:
                     
-                    job_done_hook( job_type )
+                    if HG.file_report_mode:
+                        
+                        HydrusData.ShowText( 'file maintenance: {} for {}'.format( regen_file_enum_to_str_lookup[ job_type ], hash.hex() ) )
+                        
+                    
+                    if job_done_hook is not None:
+                        
+                        job_done_hook()
+                        
+                    
+                    clear_job = True
+                    
+                    additional_data = None
+                    
+                    try:
+                        
+                        if job_type == REGENERATE_FILE_DATA_JOB_FILE_METADATA:
+                            
+                            additional_data = self._RegenFileMetadata( media_result )
+                            
+                            # media_result has just changed
+                            break
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP:
+                            
+                            additional_data = self._RegenFileModifiedTimestampMS( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_OTHER_HASHES:
+                            
+                            additional_data = self._RegenFileOtherHashes( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY:
+                            
+                            additional_data = self._HasTransparency( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF:
+                            
+                            additional_data = self._HasEXIF( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA:
+                            
+                            additional_data = self._HasHumanReadableEmbeddedMetadata( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE:
+                            
+                            additional_data = self._HasICCProfile( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_PIXEL_HASH:
+                            
+                            additional_data = self._RegenPixelHash( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL:
+                            
+                            additional_data = self._RegenFileThumbnailForce( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL:
+                            
+                            was_regenerated = self._RegenFileThumbnailRefit( media_result )
+                            
+                            additional_data = was_regenerated
+                            
+                            if was_regenerated:
+                                
+                                num_thumb_refits = job_status.GetIfHasVariable( 'num_thumb_refits' )
+                                
+                                if num_thumb_refits is None:
+                                    
+                                    num_thumb_refits = 0
+                                    
+                                
+                                num_thumb_refits += 1
+                                
+                                job_status.SetVariable( 'num_thumb_refits', num_thumb_refits )
+                                
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES:
+                            
+                            self._DeleteNeighbourDupes( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP:
+                            
+                            additional_data = self._CheckSimilarFilesMembership( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA:
+                            
+                            additional_data = self._RegenSimilarFilesMetadata( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS:
+                            
+                            self._FixFilePermissions( media_result )
+                            
+                        elif job_type == REGENERATE_FILE_DATA_JOB_BLURHASH:
+                            
+                            additional_data = self._RegenBlurhash( media_result )
+                            
+                        elif job_type in (
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL_ELSE_REMOVE_RECORD,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE,
+                            REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY
+                        ):
+                            
+                            file_was_bad = self._CheckFileIntegrity( media_result, job_type )
+                            
+                            if file_was_bad:
+                                
+                                num_bad_files = job_status.GetIfHasVariable( 'num_bad_files' )
+                                
+                                if num_bad_files is None:
+                                    
+                                    num_bad_files = 0
+                                    
+                                
+                                num_bad_files += 1
+                                
+                                job_status.SetVariable( 'num_bad_files', num_bad_files + 1 )
+                                
+                            
+                        
+                    except HydrusExceptions.ShutdownException:
+                        
+                        # no worries
+                        
+                        clear_job = False
+                        
+                        return
+                        
+                    except IOError as e:
+                        
+                        HydrusData.PrintException( e )
+                        
+                        job_status = ClientThreading.JobStatus()
+                        
+                        message = 'Hey, while performing file maintenance task "{}" on file {}, the client ran into an I/O Error! This could be just some media library moaning about a weird (probably truncated) file, but it could also be a significant hard drive problem. Look at the error yourself. If it looks serious, you should shut the client down and check your hard drive health immediately. Just to be safe, no more file maintenance jobs will be run this boot, and a full traceback has been written to the log.'.format( regen_file_enum_to_str_lookup[ job_type ], hash.hex() )
+                        message += os.linesep * 2
+                        message += str( e )
+                        
+                        job_status.SetStatusText( message )
+                        
+                        job_status.SetFiles( [ hash ], 'I/O error file' )
+                        
+                        CG.client_controller.pub( 'message', job_status )
+                        
+                        self._serious_error_encountered = True
+                        self._shutdown = True
+                        
+                        return
+                        
+                    except Exception as e:
+                        
+                        HydrusData.PrintException( e )
+                        
+                        job_status = ClientThreading.JobStatus()
+                        
+                        message = 'There was an unexpected problem performing maintenance task "{}" on file {}! The job will not be reattempted. A full traceback of this error should be written to the log.'.format( regen_file_enum_to_str_lookup[ job_type ], hash.hex() )
+                        message += os.linesep * 2
+                        message += str( e )
+                        
+                        job_status.SetStatusText( message )
+                        
+                        job_status.SetFiles( [ hash ], 'failed file' )
+                        
+                        CG.client_controller.pub( 'message', job_status )
+                        
+                    finally:
+                        
+                        self._work_tracker.ReportRequestUsed( num_requests = regen_file_enum_to_job_weight_lookup[ job_type ] )
+                        
+                        if clear_job:
+                            
+                            cleared_jobs.append( ( hash, job_type, additional_data ) )
+                            
+                        
                     
                 
-                clear_job = True
-                
-                additional_data = None
-                
-                try:
-                    
-                    if job_type == REGENERATE_FILE_DATA_JOB_FILE_METADATA:
-                        
-                        additional_data = self._RegenFileMetadata( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP:
-                        
-                        additional_data = self._RegenFileModifiedTimestamp( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_OTHER_HASHES:
-                        
-                        additional_data = self._RegenFileOtherHashes( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF:
-                        
-                        additional_data = self._HasEXIF( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA:
-                        
-                        additional_data = self._HasHumanReadableEmbeddedMetadata( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE:
-                        
-                        additional_data = self._HasICCProfile( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_PIXEL_HASH:
-                        
-                        additional_data = self._RegenPixelHash( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL:
-                        
-                        self._RegenFileThumbnailForce( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL:
-                        
-                        if not job_key.HasVariable( 'num_thumb_refits' ):
-                            
-                            job_key.SetVariable( 'num_thumb_refits', 0 ) 
-                            
-                        
-                        num_thumb_refits = job_key.GetIfHasVariable( 'num_thumb_refits' )
-                        
-                        was_regenerated = self._RegenFileThumbnailRefit( media_result )
-                        
-                        if was_regenerated:
-                            
-                            num_thumb_refits += 1
-                            
-                            job_key.SetVariable( 'num_thumb_refits', num_thumb_refits )
-                            
-                        
-                        job_key.SetStatusText( 'thumbs needing regen: {}'.format( HydrusData.ToHumanInt( num_thumb_refits ) ), 2 )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_DELETE_NEIGHBOUR_DUPES:
-                        
-                        self._DeleteNeighbourDupes( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_CHECK_SIMILAR_FILES_MEMBERSHIP:
-                        
-                        additional_data = self._CheckSimilarFilesMembership( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA:
-                        
-                        additional_data = self._RegenSimilarFilesMetadata( media_result )
-                        
-                    elif job_type == REGENERATE_FILE_DATA_JOB_FIX_PERMISSIONS:
-                        
-                        self._FixFilePermissions( media_result )
-                        
-                    elif job_type in ( REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_DELETE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_TRY_URL_ELSE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_TRY_URL_ELSE_REMOVE_RECORD, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_SILENT_DELETE, REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_LOG_ONLY ):
-                        
-                        if not job_key.HasVariable( 'num_bad_files' ):
-                            
-                            job_key.SetVariable( 'num_bad_files', 0 ) 
-                            
-                        
-                        num_bad_files = job_key.GetIfHasVariable( 'num_bad_files' )
-                        
-                        file_was_bad = self._CheckFileIntegrity( media_result, job_type )
-                        
-                        if file_was_bad:
-                            
-                            num_bad_files += 1
-                            
-                            job_key.SetVariable( 'num_bad_files', num_bad_files ) 
-                            
-                        
-                        job_key.SetStatusText( 'missing or invalid files: {}'.format( HydrusData.ToHumanInt( num_bad_files ) ), 2 )
-                        
-                    
-                except HydrusExceptions.ShutdownException:
-                    
-                    # no worries
-                    
-                    clear_job = False
-                    
-                    return
-                    
-                except IOError as e:
-                    
-                    HydrusData.PrintException( e )
-                    
-                    message = 'Hey, while performing file maintenance task "{}" on file {}, the client ran into a serious I/O Error! This is a significant hard drive problem, and as such you should shut the client down and check your hard drive health immediately. No more file maintenance jobs will be run this boot, and a full traceback has been written to the log.'.format( regen_file_enum_to_str_lookup[ job_type ], hash.hex() )
-                    message += os.linesep * 2
-                    message += str( e )
-                    
-                    HydrusData.ShowText( message )
-                    
-                    self._serious_error_encountered = True
-                    self._shutdown = True
-                    
-                    return
-                    
-                except Exception as e:
-                    
-                    HydrusData.PrintException( e )
-                    
-                    message = 'There was an unexpected problem performing maintenance task "{}" on file {}! The job will not be reattempted. A full traceback of this error should be written to the log.'.format( regen_file_enum_to_str_lookup[ job_type ], hash.hex() )
-                    message += os.linesep * 2
-                    message += str( e )
-                    
-                    HydrusData.ShowText( message )
-                    
-                finally:
-                    
-                    self._work_tracker.ReportRequestUsed( num_requests = regen_file_enum_to_job_weight_lookup[ job_type ] )
-                    
-                    if clear_job:
-                        
-                        cleared_jobs.append( ( hash, job_type, additional_data ) )
-                        
-                    
-                
-                if HydrusData.TimeHasPassed( last_time_jobs_were_cleared + 10 ) or len( cleared_jobs ) > 256:
+                if HydrusTime.TimeHasPassed( last_time_jobs_were_cleared + 10 ) or len( cleared_jobs ) > 256:
                     
                     self._controller.WriteSynchronous( 'file_maintenance_clear_jobs', cleared_jobs )
+                    
+                    last_time_jobs_were_cleared = HydrusTime.GetNow()
                     
                     cleared_jobs = []
                     
@@ -2438,35 +2968,39 @@ class FilesMaintenanceManager( object ):
             return
             
         
-        job_key = ClientThreading.JobKey( cancellable = True )
+        job_status = ClientThreading.JobStatus( cancellable = True )
         
-        job_types_to_counts = HG.client_controller.Read( 'file_maintenance_get_job_counts' )
+        job_types_to_counts = CG.client_controller.Read( 'file_maintenance_get_job_counts' )
         
         # in a dict so the hook has scope to alter it
         vr_status = {}
         
         vr_status[ 'num_jobs_done' ] = 0
-        total_num_jobs_to_do = sum( ( value for ( key, value ) in job_types_to_counts.items() if mandated_job_types is None or key in mandated_job_types ) )
         
-        def job_done_hook( job_type ):
+        total_num_jobs_to_do = sum( ( count_due for ( key, ( count_due, count_not_due ) ) in job_types_to_counts.items() if mandated_job_types is None or key in mandated_job_types ) )
+        
+        def job_done_hook():
             
             vr_status[ 'num_jobs_done' ] += 1
             
             num_jobs_done = vr_status[ 'num_jobs_done' ]
             
-            status_text = '{} - {}'.format( HydrusData.ConvertValueRangeToPrettyString( num_jobs_done, total_num_jobs_to_do ), regen_file_enum_to_str_lookup[ job_type ] )
+            status_text = '{}'.format( HydrusData.ConvertValueRangeToPrettyString( num_jobs_done, total_num_jobs_to_do ) )
             
-            job_key.SetStatusText( status_text )
+            job_status.SetStatusText( status_text )
             
-            job_key.SetVariable( 'popup_gauge_1', ( num_jobs_done, total_num_jobs_to_do ) )
+            job_status.SetVariable( 'popup_gauge_1', ( num_jobs_done, total_num_jobs_to_do ) )
+            
+            add_extra_comments_to_job_status( job_status )
             
         
-        self._reset_background_event.set()
-        
-        job_key.SetStatusTitle( 'regenerating file data' )
+        job_status.SetStatusTitle( 'file maintenance' )
         
         message_pubbed = False
         work_done = False
+        
+        # tell mainloop to step out a sec
+        self._reset_background_event.set()
         
         with self._maintenance_lock:
             
@@ -2474,9 +3008,9 @@ class FilesMaintenanceManager( object ):
                 
                 while True:
                     
-                    job = self._controller.Read( 'file_maintenance_get_job', mandated_job_types )
+                    hashes_to_job_types = self._controller.Read( 'file_maintenance_get_jobs', mandated_job_types )
                     
-                    if job is None:
+                    if len( hashes_to_job_types ) == 0:
                         
                         break
                         
@@ -2485,29 +3019,27 @@ class FilesMaintenanceManager( object ):
                     
                     if not message_pubbed:
                         
-                        self._controller.pub( 'message', job_key )
+                        self._controller.pub( 'message', job_status )
                         
                         message_pubbed = True
                         
                     
-                    if job_key.IsCancelled():
+                    if job_status.IsCancelled():
                         
                         return
                         
                     
-                    ( hashes, job_type ) = job
+                    hashes = set( hashes_to_job_types.keys() )
                     
                     media_results = self._controller.Read( 'media_results', hashes )
                     
                     hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
                     
-                    missing_hashes = [ hash for hash in hashes if hash not in hashes_to_media_results ]
-                    
-                    self._ClearJobs( missing_hashes, job_type )
+                    media_results_to_job_types = { hashes_to_media_results[ hash ] : job_types for ( hash, job_types ) in hashes_to_job_types.items() }
                     
                     with self._lock:
                         
-                        self._RunJob( media_results, job_type, job_key, job_done_hook = job_done_hook )
+                        self._RunJob( media_results_to_job_types, job_status, job_done_hook = job_done_hook )
                         
                     
                     time.sleep( 0.0001 )
@@ -2515,13 +3047,11 @@ class FilesMaintenanceManager( object ):
                 
             finally:
                 
-                job_key.SetStatusText( 'done!' )
+                job_status.SetStatusText( 'done!' )
                 
-                job_key.DeleteVariable( 'popup_gauge_1' )
+                job_status.DeleteVariable( 'popup_gauge_1' )
                 
-                job_key.Finish()
-                
-                job_key.Delete( 5 )
+                job_status.FinishAndDismiss( 5 )
                 
                 if not work_done:
                     
@@ -2574,9 +3104,9 @@ class FilesMaintenanceManager( object ):
         
         try:
             
-            time_to_start = HydrusData.GetNow() + 15
+            time_to_start = HydrusTime.GetNow() + 15
             
-            while not HydrusData.TimeHasPassed( time_to_start ):
+            while not HydrusTime.TimeHasPassed( time_to_start ):
                 
                 check_shutdown()
                 
@@ -2591,32 +3121,27 @@ class FilesMaintenanceManager( object ):
                 
                 with self._maintenance_lock:
                     
-                    job = self._controller.Read( 'file_maintenance_get_job' )
+                    hashes_to_job_types = self._controller.Read( 'file_maintenance_get_jobs' )
                     
-                    if job is not None:
+                    if len( hashes_to_job_types ) > 0:
                         
                         did_work = True
                         
-                        job_key = ClientThreading.JobKey()
+                        job_status = ClientThreading.JobStatus()
                         
                         i = 0
                         
                         try:
                             
-                            ( hashes, job_type ) = job
+                            hashes = set( hashes_to_job_types.keys() )
                             
                             media_results = self._controller.Read( 'media_results', hashes )
                             
                             hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
                             
-                            missing_hashes = [ hash for hash in hashes if hash not in hashes_to_media_results ]
+                            media_results_to_job_types = { hashes_to_media_results[ hash ] : job_types for ( hash, job_types ) in hashes_to_job_types.items() }
                             
-                            if len( missing_hashes ) > 0:
-                                
-                                self._ClearJobs( missing_hashes, job_type )
-                                
-                            
-                            for media_result in media_results:
+                            for ( media_result, job_types ) in media_results_to_job_types.items():
                                 
                                 wait_on_maintenance()
                                 
@@ -2627,20 +3152,20 @@ class FilesMaintenanceManager( object ):
                                 
                                 with self._lock:
                                     
-                                    self._RunJob( ( media_result, ), job_type, job_key )
+                                    self._RunJob( { media_result : job_types }, job_status )
                                     
                                 
-                                time.sleep( 0.0001 )
+                            
+                            time.sleep( 0.0001 )
+                            
+                            i += 1
+                            
+                            if i % 100 == 0:
                                 
-                                i += 1
+                                self._controller.pub( 'notify_files_maintenance_done' )
                                 
-                                if i % 100 == 0:
-                                    
-                                    self._controller.pub( 'notify_files_maintenance_done' )
-                                    
-                                
-                                check_shutdown()
-                                
+                            
+                            check_shutdown()
                             
                         finally:
                             
@@ -2656,7 +3181,8 @@ class FilesMaintenanceManager( object ):
                     self._wake_background_event.clear()
                     
                 
-                time.sleep( 2 )
+                # a small delay here is helpful for the forcemaintenance guy to have a chance to step in on reset
+                time.sleep( 1 )
                 
             
         except HydrusExceptions.ShutdownException:
@@ -2673,16 +3199,16 @@ class FilesMaintenanceManager( object ):
             
         
     
-    def RunJobImmediately( self, media_results, job_type, pub_job_key = True ):
+    def RunJobImmediately( self, media_results, job_type, pub_job_status = True ):
         
-        if self._serious_error_encountered and pub_job_key:
+        if self._serious_error_encountered and pub_job_status:
             
             HydrusData.ShowText( 'Sorry, the file maintenance system has encountered a serious error and will perform no more jobs this boot. Please shut down and check your hard drive health immediately.' )
             
             return
             
         
-        job_key = ClientThreading.JobKey( cancellable = True )
+        job_status = ClientThreading.JobStatus( cancellable = True )
         
         total_num_jobs_to_do = len( media_results )
         
@@ -2691,7 +3217,7 @@ class FilesMaintenanceManager( object ):
         
         vr_status[ 'num_jobs_done' ] = 0
         
-        def job_done_hook( job_type ):
+        def job_done_hook():
             
             vr_status[ 'num_jobs_done' ] += 1
             
@@ -2699,38 +3225,40 @@ class FilesMaintenanceManager( object ):
             
             status_text = '{} - {}'.format( HydrusData.ConvertValueRangeToPrettyString( num_jobs_done, total_num_jobs_to_do ), regen_file_enum_to_str_lookup[ job_type ] )
             
-            job_key.SetStatusText( status_text )
+            job_status.SetStatusText( status_text )
             
-            job_key.SetVariable( 'popup_gauge_1', ( num_jobs_done, total_num_jobs_to_do ) )
+            job_status.SetVariable( 'popup_gauge_1', ( num_jobs_done, total_num_jobs_to_do ) )
+            
+            add_extra_comments_to_job_status( job_status )
             
         
-        job_key.SetStatusTitle( 'regenerating file data' )
+        job_status.SetStatusTitle( 'regenerating file data' )
         
-        if pub_job_key:
+        if pub_job_status:
             
-            self._controller.pub( 'message', job_key )
+            self._controller.pub( 'message', job_status )
             
         
         self._reset_background_event.set()
         
-        with self._lock:
+        try:
             
-            try:
+            media_results_to_job_types = { media_result : ( job_type, ) for media_result in media_results }
+            
+            with self._lock:
                 
-                self._RunJob( media_results, job_type, job_key, job_done_hook = job_done_hook )
+                self._RunJob( media_results_to_job_types, job_status, job_done_hook = job_done_hook )
                 
-            finally:
-                
-                job_key.SetStatusText( 'done!' )
-                
-                job_key.DeleteVariable( 'popup_gauge_1' )
-                
-                job_key.Finish()
-                
-                job_key.Delete( 5 )
-                
-                self._controller.pub( 'notify_files_maintenance_done' )
-                
+            
+        finally:
+            
+            job_status.SetStatusText( 'done!' )
+            
+            job_status.DeleteVariable( 'popup_gauge_1' )
+            
+            job_status.FinishAndDismiss( 5 )
+            
+            self._controller.pub( 'notify_files_maintenance_done' )
             
         
     
@@ -2764,5 +3292,10 @@ class FilesMaintenanceManager( object ):
     def Start( self ):
         
         self._controller.CallToThreadLongRunning( self.MainLoopBackgroundWork )
+        
+    
+    def Wake( self ):
+        
+        self._wake_background_event.set()
         
     

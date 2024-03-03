@@ -12,11 +12,46 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client.importing import ClientImporting
 from hydrus.client.metadata import ClientTags
+
+def ConvertAllParseResultsToSubGallerySeeds( all_parse_results, can_generate_more_pages ):
+    
+    sub_gallery_seeds = []
+    
+    seen_urls = set()
+    
+    for parse_results in all_parse_results:
+        
+        parsed_request_headers = ClientParsing.GetHTTPHeadersFromParseResults( parse_results )
+        
+        parsed_urls = ClientParsing.GetURLsFromParseResults( parse_results, ( HC.URL_TYPE_SUB_GALLERY, ), only_get_top_priority = True )
+        
+        parsed_urls = HydrusData.DedupeList( parsed_urls )
+        
+        parsed_urls = [ url for url in parsed_urls if url not in seen_urls ]
+        
+        seen_urls.update( parsed_urls )
+        
+        for url in parsed_urls:
+            
+            gallery_seed = GallerySeed( url = url, can_generate_more_pages = can_generate_more_pages )
+            
+            gallery_seed.AddRequestHeaders( parsed_request_headers )
+            
+            gallery_seed.AddParseResults( parse_results )
+            
+            sub_gallery_seeds.append( gallery_seed )
+            
+        
+    
+    return sub_gallery_seeds
+    
 
 def GenerateGallerySeedLogStatus( statuses_to_counts ):
     
@@ -66,6 +101,7 @@ def GenerateGallerySeedLogStatus( statuses_to_counts ):
     
     return ( status, ( total_processed, total ) )
     
+
 class GallerySeed( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_GALLERY_SEED
@@ -82,7 +118,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
             
             try:
                 
-                url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+                url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
                 
             except HydrusExceptions.URLClassException:
                 
@@ -98,7 +134,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
         self._external_filterable_tags = set()
         self._external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags()
         
-        self.created = HydrusData.GetNow()
+        self.created = HydrusTime.GetNow()
         self.modified = self.created
         self.status = CC.STATUS_UNKNOWN
         self.note = ''
@@ -171,7 +207,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
     
     def _UpdateModified( self ):
         
-        self.modified = HydrusData.GetNow()
+        self.modified = HydrusTime.GetNow()
         
     
     def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
@@ -225,6 +261,30 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
             
         
     
+    def AddExternalAdditionalServiceKeysToTags( self, service_keys_to_tags ):
+        
+        self._external_additional_service_keys_to_tags.update( service_keys_to_tags )
+        
+    
+    def AddExternalFilterableTags( self, tags ):
+        
+        self._external_filterable_tags.update( tags )
+        
+    
+    def AddParseResults( self, parse_results ):
+        
+        tags = ClientParsing.GetTagsFromParseResults( parse_results )
+        
+        self._external_filterable_tags.update( tags )
+        
+        self._UpdateModified()
+        
+    
+    def AddRequestHeaders( self, request_headers: dict ):
+        
+        self._request_headers.update( request_headers )
+        
+    
     def ForceNextPageURLGeneration( self ):
         
         self._force_next_page_url_generation = True
@@ -259,7 +319,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
         
         try:
             
-            ( url_to_check, parser ) = HG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( self.url )
+            ( url_to_check, parser ) = CG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( self.url )
             
         except HydrusExceptions.URLClassException:
             
@@ -271,24 +331,9 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
         return network_job
         
     
-    def SetExternalAdditionalServiceKeysToTags( self, service_keys_to_tags ):
-        
-        self._external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags( service_keys_to_tags )
-        
-    
-    def SetExternalFilterableTags( self, tags ):
-        
-        self._external_filterable_tags = set( tags )
-        
-    
     def SetReferralURL( self, referral_url ):
         
         self._referral_url = referral_url
-        
-    
-    def SetRequestHeaders( self, request_headers: dict ):
-        
-        self._request_headers = dict( request_headers )
         
     
     def SetRunToken( self, run_token: bytes ):
@@ -300,9 +345,9 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
         
         if exception is not None:
             
-            first_line = str( exception ).split( os.linesep )[0]
+            first_line = repr( exception ).splitlines()[0]
             
-            note = first_line + '\u2026 (Copy note to see full error)'
+            note = f'{first_line}{HC.UNICODE_ELLIPSIS} (Copy note to see full error)'
             note += os.linesep
             note += traceback.format_exc()
             
@@ -318,7 +363,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
     
     def WorksInNewSystem( self ):
         
-        ( url_type, match_name, can_parse, cannot_parse_reason ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( self.url )
+        ( url_type, match_name, can_parse, cannot_parse_reason ) = CG.client_controller.network_engine.domain_manager.GetURLParseCapability( self.url )
         
         if url_type == HC.URL_TYPE_GALLERY and can_parse:
             
@@ -354,7 +399,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
             
             url_for_child_referral = gallery_url
             
-            ( url_type, match_name, can_parse, cannot_parse_reason ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( gallery_url )
+            ( url_type, match_name, can_parse, cannot_parse_reason ) = CG.client_controller.network_engine.domain_manager.GetURLParseCapability( gallery_url )
             
             if url_type not in ( HC.URL_TYPE_GALLERY, HC.URL_TYPE_WATCHABLE ):
                 
@@ -366,7 +411,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                 raise HydrusExceptions.VetoException( 'Cannot parse {}: {}'.format( match_name, cannot_parse_reason) )
                 
             
-            ( url_to_check, parser ) = HG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( gallery_url )
+            ( url_to_check, parser ) = CG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( gallery_url )
             
             status_hook( 'downloading gallery page' )
             
@@ -394,7 +439,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
             
             network_job.OverrideBandwidth( 30 )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             with network_job_presentation_context_factory( network_job ) as njpc:
                 
@@ -409,7 +454,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
             
             if actual_fetched_url != url_to_check:
                 
-                ( url_type, match_name, can_parse, cannot_parse_reason ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( actual_fetched_url )
+                ( url_type, match_name, can_parse, cannot_parse_reason ) = CG.client_controller.network_engine.domain_manager.GetURLParseCapability( actual_fetched_url )
                 
                 if url_type == HC.URL_TYPE_GALLERY:
                     
@@ -419,7 +464,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                         
                         url_for_child_referral = gallery_url
                         
-                        ( url_to_check, parser ) = HG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( gallery_url )
+                        ( url_to_check, parser ) = CG.client_controller.network_engine.domain_manager.GetURLToFetchAndParser( gallery_url )
                         
                     else:
                         
@@ -440,7 +485,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                     
                     file_seed.SetReferralURL( url_for_child_referral )
 
-                    file_seed.SetRequestHeaders( self._request_headers )
+                    file_seed.AddRequestHeaders( self._request_headers )
                     
                     file_seeds_callable( ( file_seed, ) )
                     
@@ -476,8 +521,8 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                 
                 for file_seed in file_seeds:
                     
-                    file_seed.SetExternalFilterableTags( self._external_filterable_tags )
-                    file_seed.SetExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
+                    file_seed.AddExternalFilterableTags( self._external_filterable_tags )
+                    file_seed.AddExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
                     
                 
                 num_urls_total = len( file_seeds )
@@ -514,32 +559,27 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                 
                 self._request_headers.update( parsed_request_headers )
                 
-                sub_gallery_urls = ClientParsing.GetURLsFromParseResults( flattened_results, ( HC.URL_TYPE_SUB_GALLERY, ), only_get_top_priority = True )
+                sub_gallery_seeds = ConvertAllParseResultsToSubGallerySeeds( all_parse_results, can_generate_more_pages = self._can_generate_more_pages )
                 
-                sub_gallery_urls = HydrusData.DedupeList( sub_gallery_urls )
+                new_sub_gallery_seeds = [ sub_gallery_seed for sub_gallery_seed in sub_gallery_seeds if sub_gallery_seed.url not in gallery_urls_seen_before ]
                 
-                new_sub_gallery_urls = [ sub_gallery_url for sub_gallery_url in sub_gallery_urls if sub_gallery_url not in gallery_urls_seen_before ]
-                
-                num_new_sub_gallery_urls = len( new_sub_gallery_urls )
-                
-                if num_new_sub_gallery_urls > 0:
-                    
-                    sub_gallery_seeds = [ GallerySeed( sub_gallery_url ) for sub_gallery_url in new_sub_gallery_urls ]
+                if len( new_sub_gallery_seeds ) > 0:
                     
                     for sub_gallery_seed in sub_gallery_seeds:
                         
                         sub_gallery_seed.SetRunToken( self._run_token )
-                        sub_gallery_seed.SetExternalFilterableTags( self._external_filterable_tags )
-                        sub_gallery_seed.SetExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
+                        sub_gallery_seed.SetReferralURL( url_for_child_referral )
+                        sub_gallery_seed.AddExternalFilterableTags( self._external_filterable_tags )
+                        sub_gallery_seed.AddExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
+                        
+                        gallery_urls_seen_before.add( sub_gallery_seed.url )
                         
                     
                     gallery_seed_log.AddGallerySeeds( sub_gallery_seeds, parent_gallery_seed = self )
                     
                     added_new_gallery_pages = True
                     
-                    gallery_urls_seen_before.update( sub_gallery_urls )
-                    
-                    note += ' - {} sub-gallery urls found'.format( HydrusData.ToHumanInt( num_new_sub_gallery_urls ) )
+                    note += ' - {} sub-gallery urls found'.format( HydrusData.ToHumanInt( len( new_sub_gallery_seeds ) ) )
                     
                 
                 if self._can_generate_more_pages and can_add_more_gallery_urls:
@@ -564,7 +604,7 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                         
                         # we have failed to parse a next page url, but we would still like one, so let's see if the url match can provide one
                         
-                        url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url_to_check )
+                        url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url_to_check )
                         
                         if url_class is not None and url_class.CanGenerateNextGalleryPage():
                             
@@ -604,8 +644,8 @@ class GallerySeed( HydrusSerialisable.SerialisableBase ):
                                 
                                 next_gallery_seed.SetRunToken( self._run_token )
                                 next_gallery_seed.SetReferralURL( url_for_child_referral )
-                                next_gallery_seed.SetExternalFilterableTags( self._external_filterable_tags )
-                                next_gallery_seed.SetExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
+                                next_gallery_seed.AddExternalFilterableTags( self._external_filterable_tags )
+                                next_gallery_seed.AddExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
                                 
                             
                             gallery_seed_log.AddGallerySeeds( next_gallery_seeds, parent_gallery_seed = self )
@@ -1147,7 +1187,7 @@ class GallerySeedLog( HydrusSerialisable.SerialisableBase ):
             self._SetStatusDirty()
             
         
-        HG.client_controller.pub( 'gallery_seed_log_gallery_seeds_updated', self._gallery_seed_log_key, gallery_seeds )
+        CG.client_controller.pub( 'gallery_seed_log_gallery_seeds_updated', self._gallery_seed_log_key, gallery_seeds )
         
     
     def RemoveGallerySeeds( self, gallery_seeds_to_delete ):

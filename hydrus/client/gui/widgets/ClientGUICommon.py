@@ -1,8 +1,9 @@
+import collections.abc
 import os
 import re
 import typing
 
-from qtpy import QtCore as QC, QtWidgets as QW
+from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
@@ -13,6 +14,7 @@ from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientPaths
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIFunctions
@@ -21,10 +23,13 @@ from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.widgets import ClientGUIColourPicker
 
-def AddGridboxStretchSpacer( layout: QW.QGridLayout ):
+def AddGridboxStretchSpacer( win: QW.QWidget, layout: QW.QGridLayout ):
     
-    layout.addItem( QW.QSpacerItem( 10, 10, QW.QSizePolicy.Expanding, QW.QSizePolicy.Fixed ) )
+    widget = QW.QWidget( win )
     
+    QP.AddToLayout( layout, widget, CC.FLAGS_CENTER_PERPENDICULAR_EXPAND_DEPTH )
+    
+
 def WrapInGrid( parent, rows, expand_text = False, add_stretch_at_end = True ):
     
     gridbox = QP.GridLayout( cols = 2 )
@@ -46,52 +51,77 @@ def WrapInGrid( parent, rows, expand_text = False, add_stretch_at_end = True ):
         sizer_flags = CC.FLAGS_EXPAND_SIZER_BOTH_WAYS
         
     
-    for ( text, control ) in rows:
+    for row in rows:
         
-        if isinstance( text, BetterStaticText ):
+        if HydrusData.IsAListLikeCollection( row ) and len( row ) == 2:
             
-            st = text
+            ( text, control ) = row
+            
+            if isinstance( text, BetterStaticText ):
+                
+                st = text
+                
+            else:
+                
+                st = BetterStaticText( parent, text )
+                
+            
+            if control.objectName() == 'HydrusWarning':
+                
+                st.setObjectName( 'HydrusWarning' )
+                
+            
+            possible_tooltip_widget = None
+            
+            if isinstance( control, QW.QLayout ):
+                
+                cflags = sizer_flags
+                
+                if control.count() > 0:
+                    
+                    possible_widget_item = control.itemAt( 0 )
+                    
+                    if isinstance( possible_widget_item, QW.QWidgetItem ):
+                        
+                        possible_tooltip_widget = possible_widget_item.widget()
+                        
+                    
+                
+            else:
+                
+                cflags = control_flags
+                
+                possible_tooltip_widget = control
+                
+            
+            if possible_tooltip_widget is not None and isinstance( possible_tooltip_widget, QW.QWidget ) and possible_tooltip_widget.toolTip() != '':
+                
+                st.setToolTip( possible_tooltip_widget.toolTip() )
+                
+            
+            QP.AddToLayout( gridbox, st, text_flags )
+            QP.AddToLayout( gridbox, control, cflags )
             
         else:
             
-            st = BetterStaticText( parent, text )
+            control = row
             
-        
-        if control.objectName() == 'HydrusWarning':
+            r = gridbox.next_row
+            c = gridbox.next_col
             
-            st.setObjectName( 'HydrusWarning' )
+            rowSpan = 1
+            columnSpan = -1
             
-        
-        possible_tooltip_widget = None
-        
-        if isinstance( control, QW.QLayout ):
+            gridbox.addWidget( control, r, c, rowSpan, columnSpan )
             
-            cflags = sizer_flags
+            gridbox.next_row += 1
+            gridbox.next_col = 0
             
-            if control.count() > 0:
-                
-                possible_widget_item = control.itemAt( 0 )
-                
-                if isinstance( possible_widget_item, QW.QWidgetItem ):
-                    
-                    possible_tooltip_widget = possible_widget_item.widget()
-                    
-                
+            h_policy = QW.QSizePolicy.Expanding
+            v_policy = QW.QSizePolicy.Fixed
             
-        else:
+            control.setSizePolicy( h_policy, v_policy )
             
-            cflags = control_flags
-            
-            possible_tooltip_widget = control
-            
-        
-        if possible_tooltip_widget is not None and isinstance( possible_tooltip_widget, QW.QWidget ) and possible_tooltip_widget.toolTip() != '':
-            
-            st.setToolTip( possible_tooltip_widget.toolTip() )
-            
-        
-        QP.AddToLayout( gridbox, st, text_flags )
-        QP.AddToLayout( gridbox, control, cflags )
         
     
     if add_stretch_at_end:
@@ -534,7 +564,7 @@ class ButtonWithMenuArrow( QW.QToolButton ):
         
         self.setDefaultAction( action )
         
-        self._menu = QW.QMenu( self )
+        self._menu = ClientGUIMenus.GenerateMenu( self )
         
         self._menu.installEventFilter( self )
         
@@ -557,11 +587,20 @@ class ButtonWithMenuArrow( QW.QToolButton ):
     
     def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.Show and watched == self._menu:
+        try:
             
-            pos = QG.QCursor.pos()
+            if event.type() == QC.QEvent.Show and watched == self._menu:
+                
+                pos = QG.QCursor.pos()
+                
+                self._menu.move( pos )
+                
+                return True
+                
             
-            self._menu.move( pos )
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             
@@ -747,13 +786,18 @@ class BufferedWindowIcon( BufferedWindow ):
         
         painter.setRenderHint( QG.QPainter.SmoothPixmapTransform, True ) # makes any scaling here due to jank thumbs look good
         
+        device_independant_pixmap_size = self._pixmap.size() / self._pixmap.devicePixelRatio()
+        
+        x_offset = int( ( self.width() - device_independant_pixmap_size.width() ) / 2 )
+        y_offset = int( ( self.height() - device_independant_pixmap_size.height() ) / 2 )
+        
         if isinstance( self._pixmap, QG.QImage ):
             
-            painter.drawImage( self.rect(), self._pixmap )
+            painter.drawImage( x_offset, y_offset, self._pixmap )
             
         else:
             
-            painter.drawPixmap( self.rect(), self._pixmap )
+            painter.drawPixmap( x_offset, y_offset, self._pixmap )
             
         
     
@@ -855,26 +899,27 @@ class CheckboxManagerOptions( CheckboxManager ):
     
     def GetCurrentValue( self ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         return new_options.GetBoolean( self._boolean_name )
         
     
     def Invert( self ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         new_options.InvertBoolean( self._boolean_name )
         
         if self._boolean_name == 'advanced_mode':
             
-            HG.client_controller.pub( 'notify_advanced_mode' )
+            CG.client_controller.pub( 'notify_advanced_mode' )
             
         
-        HG.client_controller.pub( 'checkbox_manager_inverted' )
-        HG.client_controller.pub( 'notify_new_menu_option' )
+        CG.client_controller.pub( 'checkbox_manager_inverted' )
+        CG.client_controller.pub( 'notify_new_menu_option' )
         
     
+
 class AlphaColourControl( QW.QWidget ):
     
     def __init__( self, parent ):
@@ -925,25 +970,25 @@ class ExportPatternButton( BetterButton ):
     
     def _Hit( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         ClientGUIMenus.AppendMenuLabel( menu, 'click on a phrase to copy to clipboard' )
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'unique numerical file id - {file_id}', 'copy "{file_id}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{file_id}' )
-        ClientGUIMenus.AppendMenuItem( menu, 'the file\'s hash - {hash}', 'copy "{hash}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{hash}' )
-        ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s tags - {tags}', 'copy "{tags}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{tags}' )
-        ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s non-namespaced tags - {nn tags}', 'copy "{nn tags}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{nn tags}' )
-        ClientGUIMenus.AppendMenuItem( menu, 'file order - {#}', 'copy "{#}" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '{#}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'unique numerical file id - {file_id}', 'copy "{file_id}" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '{file_id}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'the file\'s hash - {hash}', 'copy "{hash}" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '{hash}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s tags - {tags}', 'copy "{tags}" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '{tags}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'all the file\'s non-namespaced tags - {nn tags}', 'copy "{nn tags}" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '{nn tags}' )
+        ClientGUIMenus.AppendMenuItem( menu, 'file order - {#}', 'copy "{#}" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '{#}' )
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'all instances of a particular namespace - [\u2026]', 'copy "[\u2026]" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '[\u2026]' )
+        ClientGUIMenus.AppendMenuItem( menu, f'all instances of a particular namespace - [{HC.UNICODE_ELLIPSIS}]', f'copy "[{HC.UNICODE_ELLIPSIS}]" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'[{HC.UNICODE_ELLIPSIS}]' )
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'a particular tag, if the file has it - (\u2026)', 'copy "(\u2026)" to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(\u2026)' )
+        ClientGUIMenus.AppendMenuItem( menu, f'a particular tag, if the file has it - ({HC.UNICODE_ELLIPSIS})', f'copy "({HC.UNICODE_ELLIPSIS})" to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'({HC.UNICODE_ELLIPSIS})' )
         
         CGC.core().PopupMenu( self, menu )
         
@@ -1410,7 +1455,7 @@ class ListBook( QW.QWidget ):
         
     
 class NoneableSpinCtrl( QW.QWidget ):
-
+    
     valueChanged = QC.Signal()
     
     def __init__( self, parent, message = '', none_phrase = 'no limit', min = 0, max = 1000000, unit = None, multiplier = 1, num_dimensions = 1 ):
@@ -1726,51 +1771,51 @@ class RegexButton( BetterButton ):
     
     def _ShowMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         ClientGUIMenus.AppendMenuLabel( menu, 'click on a phrase to copy it to the clipboard' )
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
-        ClientGUIMenus.AppendMenuItem( submenu, r'whitespace character - \s', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'\s' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'number character - \d', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'\d' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'alphanumeric or backspace character - \w', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'\w' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'any character - .', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'.' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'backslash character - \\', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'\\' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'beginning of line - ^', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'^' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'end of line - $', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'$' )
-        ClientGUIMenus.AppendMenuItem( submenu, 'any of these - [\u2026]', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '[\u2026]' )
-        ClientGUIMenus.AppendMenuItem( submenu, 'anything other than these - [^\u2026]', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '[^\u2026]' )
-        
-        ClientGUIMenus.AppendSeparator( submenu )
-        
-        ClientGUIMenus.AppendMenuItem( submenu, r'0 or more matches, consuming as many as possible - *', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'*' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'1 or more matches, consuming as many as possible - +', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'+' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'0 or 1 matches, preferring 1 - ?', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'?' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'0 or more matches, consuming as few as possible - *?', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'*?' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'1 or more matches, consuming as few as possible - +?', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'+?' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'0 or 1 matches, preferring 0 - ??', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'??' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'exactly m matches - {m}', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'{m}' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'm to n matches, consuming as many as possible - {m,n}', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'{m,n}' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'm to n matches, consuming as few as possible - {m,n}?', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'{m,n}?' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'whitespace character - \s', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'\s' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'number character - \d', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'\d' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'alphanumeric or underscore character - \w', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'\w' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'any character - .', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'.' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'backslash character - \\', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'\\' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'beginning of line - ^', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'^' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'end of line - $', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'$' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'any of these - [{HC.UNICODE_ELLIPSIS}]', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', f'text', '[{HC.UNICODE_ELLIPSIS}]' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'anything other than these - [^{HC.UNICODE_ELLIPSIS}]', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'[^{HC.UNICODE_ELLIPSIS}]' )
         
         ClientGUIMenus.AppendSeparator( submenu )
         
-        ClientGUIMenus.AppendMenuItem( submenu, 'the next characters are: (non-consuming) - (?=\u2026)', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(?=\u2026)' )
-        ClientGUIMenus.AppendMenuItem( submenu, 'the next characters are not: (non-consuming) - (?!\u2026)', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(?!\u2026)' )
-        ClientGUIMenus.AppendMenuItem( submenu, 'the previous characters are: (non-consuming) - (?<=\u2026)', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(?<=\u2026)' )
-        ClientGUIMenus.AppendMenuItem( submenu, 'the previous characters are not: (non-consuming) - (?<!\u2026)', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(?<!\u2026)' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'0 or more matches, consuming as many as possible - *', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'*' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'1 or more matches, consuming as many as possible - +', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'+' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'0 or 1 matches, preferring 1 - ?', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'?' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'0 or more matches, consuming as few as possible - *?', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'*?' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'1 or more matches, consuming as few as possible - +?', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'+?' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'0 or 1 matches, preferring 0 - ??', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'??' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'exactly m matches - {m}', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'{m}' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'm to n matches, consuming as many as possible - {m,n}', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'{m,n}' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'm to n matches, consuming as few as possible - {m,n}?', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'{m,n}?' )
         
         ClientGUIMenus.AppendSeparator( submenu )
         
-        ClientGUIMenus.AppendMenuItem( submenu, r'0074 -> 74 - [1-9]+\d*', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', r'[1-9]+\d*' )
-        ClientGUIMenus.AppendMenuItem( submenu, r'filename - (?<=' + re.escape( os.path.sep ) + r')[^' + re.escape( os.path.sep ) + r']*?(?=\..*$)', 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', '(?<=' + re.escape( os.path.sep ) + r')[^' + re.escape( os.path.sep ) + r']*?(?=\..*$)' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'the next characters are: (non-consuming) - (?={HC.UNICODE_ELLIPSIS})', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'(?={HC.UNICODE_ELLIPSIS})' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'the next characters are not: (non-consuming) - (?!{HC.UNICODE_ELLIPSIS})', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'(?!{HC.UNICODE_ELLIPSIS})' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'the previous characters are: (non-consuming) - (?<={HC.UNICODE_ELLIPSIS})', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'(?<={HC.UNICODE_ELLIPSIS})' )
+        ClientGUIMenus.AppendMenuItem( submenu, f'the previous characters are not: (non-consuming) - (?<!{HC.UNICODE_ELLIPSIS})', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', f'(?<!{HC.UNICODE_ELLIPSIS})' )
+        
+        ClientGUIMenus.AppendSeparator( submenu )
+        
+        ClientGUIMenus.AppendMenuItem( submenu, r'0074 -> 74 - [1-9]+\d*', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', r'[1-9]+\d*' )
+        ClientGUIMenus.AppendMenuItem( submenu, r'filename - (?<=' + re.escape( os.path.sep ) + r')[^' + re.escape( os.path.sep ) + r']*?(?=\..*$)', 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', '(?<=' + re.escape( os.path.sep ) + r')[^' + re.escape( os.path.sep ) + r']*?(?=\..*$)' )
         
         ClientGUIMenus.AppendMenu( menu, submenu, 'regex components' )
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         ClientGUIMenus.AppendMenuItem( submenu, 'manage favourites', 'manage some custom favourite phrases', self._ManageFavourites )
         
@@ -1778,7 +1823,7 @@ class RegexButton( BetterButton ):
         
         for ( regex_phrase, description ) in HC.options[ 'regex_favourites' ]:
             
-            ClientGUIMenus.AppendMenuItem( submenu, description, 'copy this phrase to the clipboard', HG.client_controller.pub, 'clipboard', 'text', regex_phrase )
+            ClientGUIMenus.AppendMenuItem( submenu, description, 'copy this phrase to the clipboard', CG.client_controller.pub, 'clipboard', 'text', regex_phrase )
             
         
         ClientGUIMenus.AppendMenu( menu, submenu, 'favourites' )
@@ -1805,7 +1850,7 @@ class RegexButton( BetterButton ):
                 
                 HC.options[ 'regex_favourites' ] = regex_favourites
                 
-                HG.client_controller.Write( 'save_options', HC.options )
+                CG.client_controller.Write( 'save_options', HC.options )
                 
             
         
@@ -1903,11 +1948,20 @@ class TextCatchEnterEventFilter( QC.QObject ):
     
     def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.KeyPress and event.key() in ( QC.Qt.Key_Enter, QC.Qt.Key_Return ):
+        try:
             
-            self._callable()
+            if event.type() == QC.QEvent.KeyPress and event.key() in ( QC.Qt.Key_Enter, QC.Qt.Key_Return ):
+                
+                self._callable()
+                
+                event.accept()
+                
+                return True
+                
             
-            event.accept()
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             

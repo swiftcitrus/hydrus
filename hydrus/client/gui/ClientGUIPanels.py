@@ -1,8 +1,9 @@
-from qtpy import QtWidgets as QW
-
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.widgets import ClientGUICommon
 
@@ -103,11 +104,11 @@ class IPFSDaemonStatusAndInteractionPanel( ClientGUICommon.StaticBox ):
         
         self._check_nocopy.setEnabled( False )
         
-        self._nocopy_status.setText( 'checking\u2026' )
+        self._nocopy_status.setText( 'checking' + HC.UNICODE_ELLIPSIS )
         
         service = self._service_callable()
         
-        HG.client_controller.CallToThread( do_it, service )
+        CG.client_controller.CallToThread( do_it, service )
         
     
     def _CheckRunning( self ):
@@ -162,11 +163,11 @@ class IPFSDaemonStatusAndInteractionPanel( ClientGUICommon.StaticBox ):
         self._check_nocopy.setEnabled( False )
         self._enable_nocopy.setEnabled( False )
         
-        self._running_status.setText( 'checking\u2026' )
+        self._running_status.setText( 'checking' + HC.UNICODE_ELLIPSIS )
         
         service = self._service_callable()
         
-        HG.client_controller.CallToThread( do_it, service )
+        CG.client_controller.CallToThread( do_it, service )
         
     
     def _EnableNoCopy( self ):
@@ -184,7 +185,7 @@ class IPFSDaemonStatusAndInteractionPanel( ClientGUICommon.StaticBox ):
                 
             else:
                 
-                QW.QMessageBox.critical( self, 'Error', 'Unfortunately, was unable to set nocopy configuration.' )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', 'Unfortunately, was unable to set nocopy configuration.' )
                 
                 self._enable_nocopy.setEnabled( True )
                 
@@ -202,7 +203,7 @@ class IPFSDaemonStatusAndInteractionPanel( ClientGUICommon.StaticBox ):
                 
                 message = 'Problem: {}'.format( str( e ) )
                 
-                QP.CallAfter( QW.QMessageBox.critical, None, 'Error', message )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', message )
                 
                 success = False
                 
@@ -216,6 +217,6 @@ class IPFSDaemonStatusAndInteractionPanel( ClientGUICommon.StaticBox ):
         
         service = self._service_callable()
         
-        HG.client_controller.CallToThread( do_it, service )
+        CG.client_controller.CallToThread( do_it, service )
         
     

@@ -1,10 +1,13 @@
-import collections
 import threading
+import typing
 
-controller = None
-client_controller = None
-server_controller = None
-test_controller = None
+from hydrus.core.interfaces import HydrusControllerInterface
+
+controller: typing.Optional[ HydrusControllerInterface.HydrusControllerInterface ] = None
+client_controller: typing.Optional[ HydrusControllerInterface.HydrusControllerInterface ] = None
+server_controller: typing.Optional[ HydrusControllerInterface.HydrusControllerInterface ] = None
+test_controller: typing.Optional[ HydrusControllerInterface.HydrusControllerInterface ] = None
+
 started_shutdown = False
 view_shutdown = False
 model_shutdown = False
@@ -67,16 +70,19 @@ network_report_mode = False
 pubsub_report_mode = False
 daemon_report_mode = False
 mpv_report_mode = False
+
 force_idle_mode = False
 no_page_limit_mode = False
 thumbnail_debug_mode = False
 autocomplete_delay_mode = False
+blurhash_mode = False
 
 do_idle_shutdown_work = False
 shutdown_complete = False
 restart = False
 
 twisted_is_broke = False
+twisted_is_broke_exception = None
 
 dirty_object_lock = threading.Lock()
 client_busy = threading.Lock()

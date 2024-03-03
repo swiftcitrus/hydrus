@@ -6,6 +6,7 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusDBBase
 
 from hydrus.client import ClientData
+from hydrus.client.db import ClientDBMaintenance
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBServices
 from hydrus.client.metadata import ClientTags
@@ -16,7 +17,7 @@ def GenerateCombinedFilesMappingsCountsCacheTableName( tag_display_type, tag_ser
         
         name = 'combined_files_ac_cache'
         
-    elif tag_display_type == ClientTags.TAG_DISPLAY_ACTUAL:
+    elif tag_display_type == ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL:
         
         name = 'combined_files_display_ac_cache'
         
@@ -33,7 +34,7 @@ def GenerateSpecificCountsCacheTableName( tag_display_type, file_service_id, tag
         
         name = 'specific_ac_cache'
         
-    elif tag_display_type == ClientTags.TAG_DISPLAY_ACTUAL:
+    elif tag_display_type == ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL:
         
         name = 'specific_display_ac_cache'
         
@@ -48,8 +49,9 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
     
     CAN_REPOPULATE_ALL_MISSING_DATA = True
     
-    def __init__( self, cursor: sqlite3.Cursor, modules_services: ClientDBServices.ClientDBMasterServices ):
+    def __init__( self, cursor: sqlite3.Cursor, modules_db_maintenance: ClientDBMaintenance.ClientDBMaintenance, modules_services: ClientDBServices.ClientDBMasterServices ):
         
+        self.modules_db_maintenance = modules_db_maintenance
         self.modules_services = modules_services
         
         ClientDBModule.ClientDBModule.__init__( self, 'client mappings counts', cursor )
@@ -83,7 +85,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
         
         for file_service_id in file_service_ids:
             
-            for tag_display_type in ( ClientTags.TAG_DISPLAY_STORAGE, ClientTags.TAG_DISPLAY_ACTUAL ):
+            for tag_display_type in ( ClientTags.TAG_DISPLAY_STORAGE, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ):
                 
                 single_table_dict = self._GetServiceTableGenerationDictSingle( tag_display_type, file_service_id, tag_service_id )
                 
@@ -119,7 +121,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
                     self._missing_storage_tag_service_pairs.add( ( file_service_id, tag_service_id ) )
                     
                 
-                display_table_dict_for_this = self._GetServiceTableGenerationDictSingle( ClientTags.TAG_DISPLAY_ACTUAL, file_service_id, tag_service_id )
+                display_table_dict_for_this = self._GetServiceTableGenerationDictSingle( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, file_service_id, tag_service_id )
                 
                 display_table_names_for_this = set( display_table_dict_for_this.keys() )
                 
@@ -194,7 +196,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
         
         #
         
-        if tag_display_type == ClientTags.TAG_DISPLAY_ACTUAL and populate_from_storage:
+        if tag_display_type == ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL and populate_from_storage:
             
             display_table_name = self.GetCountsCacheTableName( tag_display_type, file_service_id, tag_service_id )
             storage_table_name = self.GetCountsCacheTableName( ClientTags.TAG_DISPLAY_STORAGE, file_service_id, tag_service_id )
@@ -207,7 +209,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
         
         table_name = self.GetCountsCacheTableName( tag_display_type, file_service_id, tag_service_id )
         
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( table_name ) )
+        self.modules_db_maintenance.DeferredDropTable( table_name )
         
     
     def FilterExistingTagIds( self, tag_display_type, file_service_id, tag_service_id, tag_ids_table_name ):
@@ -260,7 +262,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
         return ( current_count, pending_count )
         
     
-    def GetCounts( self, tag_display_type, tag_service_id, file_service_id, tag_ids, include_current, include_pending, domain_is_cross_referenced = True, zero_count_ok = False, job_key = None, tag_ids_table_name = None ):
+    def GetCounts( self, tag_display_type, tag_service_id, file_service_id, tag_ids, include_current, include_pending, domain_is_cross_referenced = True, zero_count_ok = False, job_status = None, tag_ids_table_name = None ):
         
         if len( tag_ids ) == 0:
             
@@ -293,7 +295,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
                     
                     for search_tag_service_id in search_tag_service_ids:
                         
-                        if job_key is not None and job_key.IsCancelled():
+                        if job_status is not None and job_status.IsCancelled():
                             
                             return {}
                             
@@ -306,7 +308,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
                 
                 for search_tag_service_id in search_tag_service_ids:
                     
-                    if job_key is not None and job_key.IsCancelled():
+                    if job_status is not None and job_status.IsCancelled():
                         
                         return {}
                         
@@ -531,14 +533,7 @@ class ClientDBMappingsCounts( ClientDBModule.ClientDBModule ):
         
         result = self._Execute( 'SELECT SUM( current_count ) FROM {};'.format( counts_cache_table_name ) ).fetchone()
         
-        if result is None or result[0] is None:
-            
-            count = 0
-            
-        else:
-            
-            ( count, ) = result
-            
+        count = self._GetSumResult( result )
         
         return count
         

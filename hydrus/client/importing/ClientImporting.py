@@ -1,10 +1,12 @@
 import random
+import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client import ClientThreading
 from hydrus.client.importing import ClientImportFileSeeds
@@ -61,7 +63,7 @@ def ConvertAllParseResultsToFileSeeds( all_parse_results, source_url, file_impor
             
             file_seed.SetReferralURL( source_url )
             
-            file_seed.SetRequestHeaders( parsed_request_headers )
+            file_seed.AddRequestHeaders( parsed_request_headers )
             
             file_seed.AddParseResults( parse_results, file_import_options )
             
@@ -71,18 +73,18 @@ def ConvertAllParseResultsToFileSeeds( all_parse_results, source_url, file_impor
     
     return file_seeds
     
-def GenerateMultiplePopupNetworkJobPresentationContextFactory( job_key ):
+def GenerateMultiplePopupNetworkJobPresentationContextFactory( job_status ):
     
     def network_job_presentation_context_factory( network_job ):
         
         def enter_call():
             
-            job_key.SetNetworkJob( network_job )
+            job_status.SetNetworkJob( network_job )
             
         
         def exit_call():
             
-            job_key.DeleteNetworkJob()
+            job_status.DeleteNetworkJob()
             
         
         return NetworkJobPresentationContext( enter_call, exit_call )
@@ -90,18 +92,18 @@ def GenerateMultiplePopupNetworkJobPresentationContextFactory( job_key ):
     
     return network_job_presentation_context_factory
     
-def GenerateSinglePopupNetworkJobPresentationContextFactory( job_key ):
+def GenerateSinglePopupNetworkJobPresentationContextFactory( job_status ):
     
     def network_job_presentation_context_factory( network_job ):
         
         def enter_call():
             
-            job_key.SetNetworkJob( network_job )
+            job_status.SetNetworkJob( network_job )
             
         
         def exit_call():
             
-            job_key.DeleteNetworkJob()
+            job_status.DeleteNetworkJob()
             
         
         return NetworkJobPresentationContext( enter_call, exit_call )
@@ -113,27 +115,31 @@ def GetRepeatingJobInitialDelay():
     
     return 0.5 + ( random.random() * 0.5 )
     
-def PublishPresentationHashes( publishing_label, hashes, publish_to_popup_button, publish_files_to_page ):
+
+def PublishPresentationHashes( publishing_label: str, hashes: typing.List[ bytes ], publish_to_popup_button: bool, publish_files_to_page: bool ):
     
     if publish_to_popup_button:
         
-        files_job_key = ClientThreading.JobKey()
+        job_status = ClientThreading.JobStatus()
         
-        files_job_key.SetVariable( 'attached_files_mergable', True )
-        files_job_key.SetFiles( list( hashes ), publishing_label )
+        job_status.SetVariable( 'attached_files_mergable', True )
+        job_status.SetFiles( list( hashes ), publishing_label )
         
-        HG.client_controller.pub( 'message', files_job_key )
+        job_status.Finish() # important to later make it auto-dismiss on all files disappearing
+        
+        CG.client_controller.pub( 'message', job_status )
         
     
     if publish_files_to_page:
         
-        HG.client_controller.pub( 'imported_files_to_page', list( hashes ), publishing_label )
+        CG.client_controller.pub( 'imported_files_to_page', list( hashes ), publishing_label )
         
     
-def THREADDownloadURL( job_key, url, url_string ):
+
+def THREADDownloadURL( job_status, url, url_string ):
     
-    job_key.SetStatusTitle( url_string )
-    job_key.SetStatusText( 'initialising' )
+    job_status.SetStatusTitle( url_string )
+    job_status.SetStatusText( 'initialising' )
     
     #
     
@@ -156,10 +162,10 @@ def THREADDownloadURL( job_key, url, url_string ):
             text = text.splitlines()[0]
             
         
-        job_key.SetStatusText( text )
+        job_status.SetStatusText( text )
         
     
-    network_job_presentation_context_factory = GenerateSinglePopupNetworkJobPresentationContextFactory( job_key )
+    network_job_presentation_context_factory = GenerateSinglePopupNetworkJobPresentationContextFactory( job_status )
     
     file_seed = ClientImportFileSeeds.FileSeed( ClientImportFileSeeds.FILE_SEED_TYPE_URL, url )
     
@@ -175,34 +181,34 @@ def THREADDownloadURL( job_key, url, url_string ):
             
             if status == CC.STATUS_SUCCESSFUL_AND_NEW:
                 
-                job_key.SetStatusText( 'successful!' )
+                job_status.SetStatusText( 'successful!' )
                 
             elif status == CC.STATUS_SUCCESSFUL_BUT_REDUNDANT:
                 
-                job_key.SetStatusText( 'was already in the database!' )
+                job_status.SetStatusText( 'was already in the database!' )
                 
             
             if file_seed.HasHash():
                 
                 hash = file_seed.GetHash()
                 
-                job_key.SetFiles( [ hash ], 'download' )
+                job_status.SetFiles( [ hash ], 'download' )
                 
             
         elif status == CC.STATUS_DELETED:
             
-            job_key.SetStatusText( 'had already been deleted!' )
+            job_status.SetStatusText( 'had already been deleted!' )
             
         
     finally:
         
-        job_key.Finish()
+        job_status.Finish()
         
     
-def THREADDownloadURLs( job_key: ClientThreading.JobKey, urls, title ):
+def THREADDownloadURLs( job_status: ClientThreading.JobStatus, urls, title ):
     
-    job_key.SetStatusTitle( title )
-    job_key.SetStatusText( 'initialising' )
+    job_status.SetStatusTitle( title )
+    job_status.SetStatusText( 'initialising' )
     
     num_successful = 0
     num_redundant = 0
@@ -231,22 +237,22 @@ def THREADDownloadURLs( job_key: ClientThreading.JobKey, urls, title ):
             text = text.splitlines()[0]
             
         
-        job_key.SetStatusText( text, 2 )
+        job_status.SetStatusText( text, 2 )
         
     
-    network_job_presentation_context_factory = GenerateMultiplePopupNetworkJobPresentationContextFactory( job_key )
+    network_job_presentation_context_factory = GenerateMultiplePopupNetworkJobPresentationContextFactory( job_status )
     
     for ( i, url ) in enumerate( urls ):
         
-        ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+        ( i_paused, should_quit ) = job_status.WaitIfNeeded()
         
         if should_quit:
             
             break
             
         
-        job_key.SetStatusText( HydrusData.ConvertValueRangeToPrettyString( i + 1, len( urls ) ) )
-        job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( urls ) ) )
+        job_status.SetStatusText( HydrusData.ConvertValueRangeToPrettyString( i + 1, len( urls ) ) )
+        job_status.SetVariable( 'popup_gauge_1', ( i + 1, len( urls ) ) )
         
         file_seed = ClientImportFileSeeds.FileSeed( ClientImportFileSeeds.FILE_SEED_TYPE_URL, url )
         
@@ -281,7 +287,7 @@ def THREADDownloadURLs( job_key: ClientThreading.JobKey, urls, title ):
                 
                 if len( presentation_hashes ) > 0:
                     
-                    job_key.SetFiles( presentation_hashes, 'downloads' )
+                    job_status.SetFiles( presentation_hashes, 'downloads' )
                     
                 
             elif status == CC.STATUS_DELETED:
@@ -298,11 +304,11 @@ def THREADDownloadURLs( job_key: ClientThreading.JobKey, urls, title ):
             
         finally:
             
-            job_key.DeleteStatusText( 2 )
+            job_status.DeleteStatusText( 2 )
             
         
     
-    job_key.DeleteNetworkJob()
+    job_status.DeleteNetworkJob()
     
     text_components = []
     
@@ -326,16 +332,16 @@ def THREADDownloadURLs( job_key: ClientThreading.JobKey, urls, title ):
         text_components.append( HydrusData.ToHumanInt( num_failed ) + ' failed (errors written to log)' )
         
     
-    job_key.SetStatusText( ', '.join( text_components ) )
+    job_status.SetStatusText( ', '.join( text_components ) )
     
     if len( presentation_hashes ) > 0:
         
-        job_key.SetFiles( presentation_hashes, 'downloads' )
+        job_status.SetFiles( presentation_hashes, 'downloads' )
         
     
-    job_key.DeleteVariable( 'popup_gauge_1' )
+    job_status.DeleteVariable( 'popup_gauge_1' )
     
-    job_key.Finish()
+    job_status.Finish()
     
 def UpdateFileSeedCacheWithFileSeeds( file_seed_cache, file_seeds, max_new_urls_allowed = None ):
     

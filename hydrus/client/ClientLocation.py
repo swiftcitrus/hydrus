@@ -4,12 +4,14 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 
 def FilterOutRedundantMetaServices( list_of_service_keys: typing.List[ bytes ] ):
     
-    services_manager = HG.client_controller.services_manager
+    services_manager = CG.client_controller.services_manager
     
     special_local_file_service_keys = { CC.TRASH_SERVICE_KEY, CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, CC.LOCAL_UPDATE_SERVICE_KEY }
     
@@ -36,13 +38,13 @@ def FilterOutRedundantMetaServices( list_of_service_keys: typing.List[ bytes ] )
 
 def GetPossibleFileDomainServicesInOrder( all_known_files_allowed: bool, only_local_file_domains_allowed: bool ):
     
-    services_manager = HG.client_controller.services_manager
+    services_manager = CG.client_controller.services_manager
     
     service_types_in_order = [ HC.LOCAL_FILE_DOMAIN ]
     
     if not only_local_file_domains_allowed:
         
-        advanced_mode = HG.client_controller.new_options.GetBoolean( 'advanced_mode' )
+        advanced_mode = CG.client_controller.new_options.GetBoolean( 'advanced_mode' )
         
         if len( services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) ) > 1 or advanced_mode:
             
@@ -59,6 +61,8 @@ def GetPossibleFileDomainServicesInOrder( all_known_files_allowed: bool, only_lo
         if advanced_mode:
             
             service_types_in_order.append( HC.COMBINED_LOCAL_FILE )
+            
+            service_types_in_order.append( HC.COMBINED_DELETED_FILE )
             
         
         service_types_in_order.append( HC.FILE_REPOSITORY )
@@ -88,7 +92,7 @@ def SortFileServiceKeysNicely( list_of_service_keys ):
 
 def ValidLocalDomainsFilter( service_keys ):
     
-    return [ service_key for service_key in service_keys if HG.client_controller.services_manager.ServiceExists( service_key ) and HG.client_controller.services_manager.GetServiceType( service_key ) == HC.LOCAL_FILE_DOMAIN ]
+    return [ service_key for service_key in service_keys if CG.client_controller.services_manager.ServiceExists( service_key ) and CG.client_controller.services_manager.GetServiceType( service_key ) == HC.LOCAL_FILE_DOMAIN ]
     
 class LocationContext( HydrusSerialisable.SerialisableBase ):
     
@@ -178,10 +182,18 @@ class LocationContext( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def FixMissingServices( self, services_exist_func: typing.Callable ):
+    def FixMissingServices( self, services_exist_func: typing.Callable ) -> bool:
+        
+        prev_len = len( self.current_service_keys ) + len( self.deleted_service_keys )
         
         self.current_service_keys = frozenset( services_exist_func( self.current_service_keys ) )
         self.deleted_service_keys = frozenset( services_exist_func( self.deleted_service_keys ) )
+        
+        post_len = len( self.current_service_keys ) + len( self.deleted_service_keys )
+        
+        some_removed = prev_len != post_len
+        
+        return some_removed
         
     
     def GetCoveringCurrentFileServiceKeys( self ):
@@ -196,6 +208,17 @@ class LocationContext( HydrusSerialisable.SerialisableBase ):
             
         
         return ( file_service_keys, file_location_is_cross_referenced )
+        
+    
+    def GetDeletedInverse( self ):
+        
+        inverse = self.Duplicate()
+        
+        a = inverse.current_service_keys
+        inverse.current_service_keys = inverse.deleted_service_keys
+        inverse.deleted_service_keys = a
+        
+        return inverse
         
     
     def GetStatusesAndServiceKeysList( self ):
@@ -298,6 +321,14 @@ class LocationContext( HydrusSerialisable.SerialisableBase ):
             
         
         return prefix + service_string
+        
+    
+    def ToDictForAPI( self ):
+
+        return {
+            'current_service_keys' : [ service_key.hex() for service_key in self.current_service_keys ],
+            'deleted_service_keys' : [ service_key.hex() for service_key in self.deleted_service_keys ]
+        }
         
     
     @staticmethod

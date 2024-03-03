@@ -15,7 +15,9 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientStrings
 from hydrus.client.networking import ClientNetworkingFunctions
 from hydrus.client.networking import ClientNetworkingJobs
@@ -116,7 +118,7 @@ def ConvertParseResultToPrettyString( result ):
             
         except Exception as e:
             
-            parsed_text = 'Could not decode a hash from {}: {}'.format( parsed_text, str( e ) )
+            parsed_text = 'Could not decode a hash from {}: {}'.format( parsed_text, repr( e ) )
             
         
         return '{} hash: {}'.format( hash_type, parsed_text )
@@ -129,17 +131,17 @@ def ConvertParseResultToPrettyString( result ):
             
             timestamp = int( parsed_text )
             
-            timestamp_string = HydrusData.ConvertTimestampToPrettyTime( timestamp )
+            timestamp_string = HydrusTime.TimestampToPrettyTime( timestamp )
             
         except:
             
             timestamp_string = 'could not convert to integer'
             
         
-        if timestamp_type == HC.TIMESTAMP_TYPE_SOURCE:
+        if timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
             
-            return 'source time: ' + timestamp_string
-        
+            return 'source/post time: ' + timestamp_string
+            
         
     elif content_type == HC.CONTENT_TYPE_TITLE:
         
@@ -235,9 +237,9 @@ def ConvertParsableContentToPrettyString( parsable_content, include_veto = False
                 
                 for timestamp_type in additional_infos:
                     
-                    if timestamp_type == HC.TIMESTAMP_TYPE_SOURCE:
+                    if timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
                         
-                        pretty_strings.append( 'source time' )
+                        pretty_strings.append( 'source/post time' )
                         
                     
                 
@@ -281,7 +283,7 @@ def ConvertParsableContentToPrettyString( parsable_content, include_veto = False
         
     
 
-def GetChildrenContent( job_key, children, parsing_text, referral_url ):
+def GetChildrenContent( job_status, children, parsing_text, referral_url ):
     
     content = []
     
@@ -291,7 +293,7 @@ def GetChildrenContent( job_key, children, parsing_text, referral_url ):
             
             if isinstance( child, ParseNodeContentLink ):
                 
-                child_content = child.Parse( job_key, parsing_text, referral_url )
+                child_content = child.Parse( job_status, parsing_text, referral_url )
                 
             elif isinstance( child, ContentParser ):
                 
@@ -532,9 +534,9 @@ def GetTimestampFromParseResults( results, desired_timestamp_type ):
                     continue
                     
                 
-                if timestamp_type == HC.TIMESTAMP_TYPE_SOURCE:
+                if timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
                     
-                    timestamp = min( HydrusData.GetNow() - 30, timestamp )
+                    timestamp = min( HydrusTime.GetNow() - 5, timestamp )
                     
                 
                 timestamp_results.append( timestamp )
@@ -586,7 +588,7 @@ def GetTitleFromAllParseResults( all_parse_results ):
 def GetHTTPHeadersFromParseResults( parse_results ):
     
     headers = {}
-        
+    
     for ( ( name, content_type, additional_info ), parsed_text ) in parse_results:
         
         if content_type == HC.CONTENT_TYPE_HTTP_HEADERS:
@@ -784,6 +786,11 @@ class ParseFormula( HydrusSerialisable.SerialisableBase ):
             
             # maybe should use HydrusText.DeserialiseNewlinedTexts, but that might change/break some existing parsers with the strip() trim
             raw_texts = [ HydrusText.RemoveNewlines( raw_text ) for raw_text in raw_texts ]
+            
+        else:
+            
+            # note this does get rid of leading/trailing newlines, which is fine!
+            raw_texts = [ raw_text.strip() for raw_text in raw_texts ]
             
         
         texts = self._string_processor.ProcessStrings( raw_texts )
@@ -1232,11 +1239,11 @@ class ParseFormulaHTML( ParseFormula ):
         
         try:
             
-            root = HG.client_controller.parsing_cache.GetSoup( parsing_text )
+            root = CG.client_controller.parsing_cache.GetSoup( parsing_text )
             
         except Exception as e:
             
-            raise HydrusExceptions.ParseException( 'Unable to parse that HTML: {}. HTML Sample: {}'.format( str( e ), parsing_text[:1024] ) )
+            raise HydrusExceptions.ParseException( 'Unable to parse that HTML: {}. HTML Sample: {}'.format( repr( e ), parsing_text[:1024] ) )
             
         
         tags = self._FindHTMLTags( root )
@@ -1432,12 +1439,14 @@ HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIAL
 
 HTML_RULE_TYPE_DESCENDING = 0
 HTML_RULE_TYPE_ASCENDING = 1
+HTML_RULE_TYPE_NEXT_SIBLINGS = 2
+HTML_RULE_TYPE_PREV_SIBLINGS = 3
 
 class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_PARSE_RULE_HTML
     SERIALISABLE_NAME = 'HTML Parsing Rule'
-    SERIALISABLE_VERSION = 2
+    SERIALISABLE_VERSION = 3
     
     def __init__( self, rule_type = None, tag_name = None, tag_attributes = None, tag_index = None, tag_depth = None, should_test_tag_string = False, tag_string_string_match = None ):
         
@@ -1453,13 +1462,14 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
                 
             
         
-        if rule_type == HTML_RULE_TYPE_DESCENDING:
+        if rule_type in [ HTML_RULE_TYPE_DESCENDING, HTML_RULE_TYPE_NEXT_SIBLINGS, HTML_RULE_TYPE_PREV_SIBLINGS ]:
             
             if tag_attributes is None:
                 
                 tag_attributes = {}
                 
             
+        
         elif rule_type == HTML_RULE_TYPE_ASCENDING:
             
             if tag_depth is None:
@@ -1514,6 +1524,11 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
             return ( 2, new_serialisable_info )
             
         
+        if version == 2:
+            
+            return ( 3, old_serialisable_info )
+            
+        
     
     def GetNodes( self, nodes ):
         
@@ -1521,7 +1536,7 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
         
         for node in nodes:
             
-            if self._rule_type == HTML_RULE_TYPE_DESCENDING:
+            if self._rule_type in [ HTML_RULE_TYPE_DESCENDING, HTML_RULE_TYPE_NEXT_SIBLINGS, HTML_RULE_TYPE_PREV_SIBLINGS ]:
                 
                 # having class : [ 'a', 'b' ] works here, but it does OR not AND
                 # instead do node.find_all( lambda tag: 'class' in tag.attrs and 'a' in tag[ 'class' ] and 'b' in tag[ 'class' ] )
@@ -1534,8 +1549,19 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
                     kwargs[ 'name' ] = self._tag_name
                     
                 
-                found_nodes = node.find_all( **kwargs )
-                
+                if self._rule_type == HTML_RULE_TYPE_DESCENDING:
+                    
+                    found_nodes = node.find_all( **kwargs )
+                    
+                elif self._rule_type == HTML_RULE_TYPE_NEXT_SIBLINGS:
+                    
+                    found_nodes = node.find_next_siblings( **kwargs )
+                    
+                elif self._rule_type == HTML_RULE_TYPE_PREV_SIBLINGS:
+                    
+                    found_nodes = node.find_previous_siblings( **kwargs )
+                    
+
                 if self._tag_index is not None:
                     
                     try:
@@ -1610,10 +1636,20 @@ class ParseRuleHTML( HydrusSerialisable.SerialisableBase ):
     
     def ToString( self ):
         
-        if self._rule_type == HTML_RULE_TYPE_DESCENDING:
+        if self._rule_type in [ HTML_RULE_TYPE_DESCENDING, HTML_RULE_TYPE_NEXT_SIBLINGS, HTML_RULE_TYPE_PREV_SIBLINGS ]:
             
-            s = 'search descendants for'
-            
+            if self._rule_type == HTML_RULE_TYPE_DESCENDING:
+                
+                s = 'search descendants for'
+                
+            elif self._rule_type == HTML_RULE_TYPE_NEXT_SIBLINGS:
+                
+                s = 'search next siblings for'
+                
+            elif self._rule_type == HTML_RULE_TYPE_PREV_SIBLINGS:
+                
+                s = 'search previous siblings for'
+                
             if self._tag_index is None:
                 
                 s += ' every'
@@ -1866,7 +1902,7 @@ class ParseFormulaJSON( ParseFormula ):
         
         try:
             
-            j = HG.client_controller.parsing_cache.GetJSON( parsing_text )
+            j = CG.client_controller.parsing_cache.GetJSON( parsing_text )
             
         except Exception as e:
             
@@ -1876,7 +1912,7 @@ class ParseFormulaJSON( ParseFormula ):
                 
             else:
                 
-                message = 'Unable to parse that JSON: {}.'.format( str( e ) )
+                message = 'Unable to parse that JSON: {}.'.format( repr( e ) )
                 
             
             message += ' Parsing text sample: {}'.format( parsing_text[:1024] )
@@ -2306,14 +2342,27 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
                     # ->
                     # http:/www.pixiv.net/member_illust.php?illust_id=48114073&mode=medium
                     
-                    while re.search( r'\shttp', u ) is not None:
+                    gumpf_until_scheme = r'^.*\s(?P<scheme>https?://)'
+                    
+                    result = re.search( gumpf_until_scheme, u )
+                    
+                    if result is not None:
                         
-                        u = re.sub( r'^.*\shttp', 'http', u )
+                        scheme = result.group( 'scheme' )
+                        
+                        u = re.sub( gumpf_until_scheme, scheme, u )
                         
                     
-                    while u.startswith( 'https://https://' ):
+                    # http://http://...
+                    multiple_schemes_pattern = r'^(?:https?://)+(?P<scheme>https?://)'
+                    
+                    result = re.search( multiple_schemes_pattern, u )
+                    
+                    if result is not None:
                         
-                        u = u[8:]
+                        true_scheme = result.group( 'scheme' )
+                        
+                        u = re.sub( multiple_schemes_pattern, true_scheme, u )
                         
                     
                     return u
@@ -2323,7 +2372,7 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
                 
                 for parsed_text in parsed_texts:
                     
-                    if not parsed_text.startswith( 'http' ) and ( 'http://' in parsed_text or 'https://' in parsed_text ):
+                    if not ClientNetworkingFunctions.LooksLikeAFullURL( parsed_text ) and ( 'http://' in parsed_text or 'https://' in parsed_text ):
                         
                         parsed_text = clean_url( parsed_text )
                         
@@ -2331,9 +2380,21 @@ class ContentParser( HydrusSerialisable.SerialisableBase ):
                     clean_parsed_texts.append( parsed_text )
                     
                 
-                parsed_texts = clean_parsed_texts
+                parsed_texts = []
                 
-                parsed_texts = [ urllib.parse.urljoin( base_url, parsed_text ) for parsed_text in parsed_texts ]
+                for clean_parsed_text in clean_parsed_texts:
+                    
+                    try:
+                        
+                        parsed_text = urllib.parse.urljoin( base_url, clean_parsed_text )
+                        
+                    except:
+                        
+                        parsed_text = clean_parsed_text
+                        
+                    
+                    parsed_texts.append( parsed_text )
+                    
                 
             
         
@@ -2829,21 +2890,21 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
         return children_parsable_content
         
     
-    def Parse( self, job_key, parsing_text, referral_url ):
+    def Parse( self, job_status, parsing_text, referral_url ):
         
-        search_urls = self.ParseURLs( job_key, parsing_text, referral_url )
+        search_urls = self.ParseURLs( job_status, parsing_text, referral_url )
         
         content = []
         
         for search_url in search_urls:
             
-            job_key.SetVariable( 'script_status', 'fetching ' + HydrusText.ElideText( search_url, 32 ) )
+            job_status.SetVariable( 'script_status', 'fetching ' + HydrusText.ElideText( search_url, 32 ) )
             
             network_job = ClientNetworkingJobs.NetworkJob( 'GET', search_url, referral_url = referral_url )
             
             network_job.OverrideBandwidth()
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             try:
                 
@@ -2857,7 +2918,7 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
                 
                 if isinstance( e, HydrusExceptions.NotFoundException ):
                     
-                    job_key.SetVariable( 'script_status', '404 - nothing found' )
+                    job_status.SetVariable( 'script_status', '404 - nothing found' )
                     
                     time.sleep( 2 )
                     
@@ -2865,9 +2926,9 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
                     
                 elif isinstance( e, HydrusExceptions.NetworkException ):
                     
-                    job_key.SetVariable( 'script_status', 'Network error! Details written to log.' )
+                    job_status.SetVariable( 'script_status', 'Network error! Details written to log.' )
                     
-                    HydrusData.Print( 'Problem fetching ' + HydrusText.ElideText( search_url, 32 ) + ':' )
+                    HydrusData.Print( 'Problem fetching ' + HydrusText.ElideText( search_url, 256 ) + ':' )
                     HydrusData.PrintException( e )
                     
                     time.sleep( 2 )
@@ -2882,11 +2943,11 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
             
             linked_text = network_job.GetContentText()
             
-            children_content = GetChildrenContent( job_key, self._children, linked_text, search_url )
+            children_content = GetChildrenContent( job_status, self._children, linked_text, search_url )
             
             content.extend( children_content )
             
-            if job_key.IsCancelled():
+            if job_status.IsCancelled():
                 
                 raise HydrusExceptions.CancelledException( 'Job was cancelled.' )
                 
@@ -2895,7 +2956,7 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
         return content
         
     
-    def ParseURLs( self, job_key, parsing_text, referral_url ):
+    def ParseURLs( self, job_status, parsing_text, referral_url ):
         
         collapse_newlines = True
         
@@ -2905,7 +2966,7 @@ class ParseNodeContentLink( HydrusSerialisable.SerialisableBase ):
         
         for url in absolute_urls:
             
-            job_key.AddURL( url )
+            job_status.AddURL( url )
             
         
         return absolute_urls
@@ -3037,7 +3098,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             
             try:
                 
-                source_to_desired = HG.client_controller.Read( 'file_hashes', ( sha256_hash, ), 'sha256', hash_type )
+                source_to_desired = CG.client_controller.Read( 'file_hashes', ( sha256_hash, ), 'sha256', hash_type )
                 
                 other_hash = list( source_to_desired.values() )[0]
                 
@@ -3053,7 +3114,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             hash = media.GetHash()
             mime = media.GetMime()
             
-            client_files_manager = HG.client_controller.client_files_manager
+            client_files_manager = CG.client_controller.client_files_manager
             
             try:
                 
@@ -3068,7 +3129,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             
         
     
-    def FetchParsingText( self, job_key, file_identifier ):
+    def FetchParsingText( self, job_status, file_identifier ):
         
         # add gauge report hook and in-stream cancel support to the get/post calls
         
@@ -3092,9 +3153,9 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             
             full_request_url = self._url + '?' + ClientNetworkingFunctions.ConvertQueryDictToText( request_args, single_value_parameters )
             
-            job_key.SetVariable( 'script_status', 'fetching ' + HydrusText.ElideText( full_request_url, 32 ) )
+            job_status.SetVariable( 'script_status', 'fetching ' + HydrusText.ElideText( full_request_url, 32 ) )
             
-            job_key.AddURL( full_request_url )
+            job_status.AddURL( full_request_url )
             
             network_job = ClientNetworkingJobs.NetworkJob( 'GET', full_request_url )
             
@@ -3105,7 +3166,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             
             if self._file_identifier_type == FILE_IDENTIFIER_TYPE_FILE:
                 
-                job_key.SetVariable( 'script_status', 'uploading file' )
+                job_status.SetVariable( 'script_status', 'uploading file' )
                 
                 path  = file_identifier
                 
@@ -3131,7 +3192,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
                 
             else:
                 
-                job_key.SetVariable( 'script_status', 'uploading identifier' )
+                job_status.SetVariable( 'script_status', 'uploading identifier' )
                 
                 files = None
                 
@@ -3153,7 +3214,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
         
         network_job.OverrideBandwidth()
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         try:
             
@@ -3161,13 +3222,13 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
             
         except HydrusExceptions.NotFoundException:
             
-            job_key.SetVariable( 'script_status', '404 - nothing found' )
+            job_status.SetVariable( 'script_status', '404 - nothing found' )
             
             raise
             
         except HydrusExceptions.NetworkException as e:
             
-            job_key.SetVariable( 'script_status', 'Network error!' )
+            job_status.SetVariable( 'script_status', 'Network error!' )
             
             HydrusData.ShowException( e )
             
@@ -3181,7 +3242,7 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
                 
             
         
-        if job_key.IsCancelled():
+        if job_status.IsCancelled():
             
             raise HydrusExceptions.CancelledException( 'Job was cancelled.' )
             
@@ -3203,32 +3264,32 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
         return children_parsable_content
         
     
-    def DoQuery( self, job_key, file_identifier ):
+    def DoQuery( self, job_status, file_identifier ):
         
         try:
             
             try:
                 
-                parsing_text = self.FetchParsingText( job_key, file_identifier )
+                parsing_text = self.FetchParsingText( job_status, file_identifier )
                 
             except HydrusExceptions.NetworkException as e:
                 
                 return []
                 
             
-            parse_results = self.Parse( job_key, parsing_text )
+            parse_results = self.Parse( job_status, parsing_text )
             
             return parse_results
             
         except HydrusExceptions.CancelledException:
             
-            job_key.SetVariable( 'script_status', 'Cancelled!' )
+            job_status.SetVariable( 'script_status', 'Cancelled!' )
             
             return []
             
         finally:
             
-            job_key.Finish()
+            job_status.Finish()
             
         
     
@@ -3237,17 +3298,17 @@ class ParseRootFileLookup( HydrusSerialisable.SerialisableBaseNamed ):
         return self._file_identifier_type == FILE_IDENTIFIER_TYPE_USER_INPUT
         
     
-    def Parse( self, job_key, parsing_text ):
+    def Parse( self, job_status, parsing_text ):
         
-        parse_results = GetChildrenContent( job_key, self._children, parsing_text, self._url )
+        parse_results = GetChildrenContent( job_status, self._children, parsing_text, self._url )
         
         if len( parse_results ) == 0:
             
-            job_key.SetVariable( 'script_status', 'Did not find anything.' )
+            job_status.SetVariable( 'script_status', 'Did not find anything.' )
             
         else:
             
-            job_key.SetVariable( 'script_status', 'Found ' + HydrusData.ToHumanInt( len( parse_results ) ) + ' rows.' )
+            job_status.SetVariable( 'script_status', 'Found ' + HydrusData.ToHumanInt( len( parse_results ) ) + ' rows.' )
             
         
         return parse_results

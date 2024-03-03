@@ -3,6 +3,7 @@ from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
 from hydrus.core import HydrusData
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
@@ -15,29 +16,38 @@ class ResizingEventFilter( QC.QObject ):
     
     def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.Resize:
+        try:
             
-            parent = self.parent()
+            if event.type() == QC.QEvent.Resize:
+                
+                parent = self.parent()
+                
+                if isinstance( parent, ResizingScrolledPanel ):
+                    
+                    # weird hack fix for a guy who was getting QPaintEvents in here
+                    if not hasattr( event, 'oldSize' ):
+                        
+                        return False
+                        
+                    
+                    old_size = event.oldSize()
+                    size = event.size()
+                    
+                    width_larger = size.width() > old_size.width() and size.height() >= old_size.height()
+                    height_larger = size.width() >= old_size.width() and size.height() > old_size.height()
+                    
+                    if width_larger or height_larger:
+                        
+                        QP.CallAfter( parent.WidgetJustSized, width_larger, height_larger )
+                        
+                    
+                
             
-            if isinstance( parent, ResizingScrolledPanel ):
-                
-                # weird hack fix for a guy who was getting QPaintEvents in here
-                if not hasattr( event, 'oldSize' ):
-                    
-                    return False
-                    
-                
-                old_size = event.oldSize()
-                size = event.size()
-                
-                width_larger = size.width() > old_size.width() and size.height() >= old_size.height()
-                height_larger = size.width() >= old_size.width() and size.height() > old_size.height()
-                
-                if width_larger or height_larger:
-                    
-                    QP.CallAfter( parent.WidgetJustSized, width_larger, height_larger )
-                    
-                
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
+            
+            return True
             
         
         return False
@@ -128,7 +138,7 @@ class ResizingScrolledPanel( QW.QScrollArea ):
             
             # ok this is a stupid sizing hack to stop the ever-growing window that has a sizeHint three pixels bigger than its current size causing a resize growth loop
             # if we get a bunch of resizes real quick, we cut them off, hopefully breaking the cycle
-            if not HydrusData.TimeHasPassedFloat( self._last_just_sized_cascade_start_time + 1.0 ):
+            if not HydrusTime.TimeHasPassedFloat( self._last_just_sized_cascade_start_time + 1.0 ):
                 
                 self._number_of_just_sizedes += 1
                 
@@ -139,7 +149,7 @@ class ResizingScrolledPanel( QW.QScrollArea ):
                 
             else:
                 
-                self._last_just_sized_cascade_start_time = HydrusData.GetNowFloat()
+                self._last_just_sized_cascade_start_time = HydrusTime.GetNowFloat()
                 
                 self._number_of_just_sizedes = 1
                 
@@ -191,12 +201,12 @@ class EditPanel( ResizingScrolledPanel ):
         self.GetValue()
         
     
-class EditSingleCtrlPanel( EditPanel, CAC.ApplicationCommandProcessorMixin ):
+class EditSingleCtrlPanel( CAC.ApplicationCommandProcessorMixin, EditPanel ):
     
-    def __init__( self, parent, ok_on_these_commands = None ):
+    def __init__( self, parent, ok_on_these_commands = None, message = None ):
         
-        CAC.ApplicationCommandProcessorMixin.__init__( self )
         EditPanel.__init__( self, parent )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         
         self._control = None
         
@@ -210,6 +220,17 @@ class EditSingleCtrlPanel( EditPanel, CAC.ApplicationCommandProcessorMixin ):
         #
         
         self._vbox = QP.VBoxLayout( margin = 0 )
+        
+        if message is not None:
+            
+            from hydrus.client.gui.widgets import ClientGUICommon
+            
+            st = ClientGUICommon.BetterStaticText( self, label = message )
+            
+            st.setWordWrap( True )
+            
+            QP.AddToLayout( self._vbox, st, CC.FLAGS_EXPAND_PERPENDICULAR )
+            
         
         self.widget().setLayout( self._vbox )
         

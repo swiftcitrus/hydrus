@@ -7,6 +7,7 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusDBBase
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
 from hydrus.client.db import ClientDBModule
 from hydrus.client.networking import ClientNetworkingFunctions
@@ -48,7 +49,7 @@ class ClientDBMasterHashes( ClientDBModule.ClientDBModule ):
         }
         
     
-    def _PopulateHashIdsToHashesCache( self, hash_ids, exception_on_error = False ):
+    def _PopulateHashIdsToHashesCache( self, hash_ids ):
         
         if len( self._hash_ids_to_hashes_cache ) > 100000:
             
@@ -63,8 +64,6 @@ class ClientDBMasterHashes( ClientDBModule.ClientDBModule ):
         uncached_hash_ids = { hash_id for hash_id in hash_ids if hash_id not in self._hash_ids_to_hashes_cache }
         
         if len( uncached_hash_ids ) > 0:
-            
-            pubbed_error = False
             
             if len( uncached_hash_ids ) == 1:
                 
@@ -85,26 +84,48 @@ class ClientDBMasterHashes( ClientDBModule.ClientDBModule ):
             
             if len( uncached_hash_ids_to_hashes ) < len( uncached_hash_ids ):
                 
+                pubbed_error = False
+                
                 for hash_id in uncached_hash_ids:
                     
                     if hash_id not in uncached_hash_ids_to_hashes:
                         
-                        if exception_on_error:
+                        # TODO: ultimately move this to the 'recover from missing definitions' stuff I am building in ClientDB, since the local hash cache may have it
+                        # for now though, screw it
+                        
+                        # I shouldn't be able to see this here, but this is emergency code, screw it.
+                        result = self._Execute( 'SELECT hash FROM local_hashes_cache WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+                        
+                        if result is None:
                             
-                            raise HydrusExceptions.DataMissing( 'Did not find all entries for those hash ids!' )
+                            hash = bytes.fromhex( 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa' ) + os.urandom( 16 )
+                            
+                            if not pubbed_error:
+                                
+                                HydrusData.ShowText( 'A file identifier was missing! This is a serious error that means your client database had an orphan file id! You have very likely encountered database corruption, perhaps recently, or perhaps years ago, please check the "help my db is broke.txt" document under install_dir/db folder as background reading. Additional info has been written to the log.' )
+                                
+                                pubbed_error = True
+                                
+                            
+                            HydrusData.DebugPrint( 'Database master hash definition error: hash_id {} was missing! Replaced with hash {}.'.format( hash_id, hash.hex() ) )
+                            
+                        else:
+                            
+                            ( hash, ) = result
+                            
+                            if not pubbed_error:
+                                
+                                HydrusData.ShowText( 'A file identifier was missing! This is a serious error that means your client database had an orphan file id! Luckily, I was able to find a duplicate record in another location and fill in the missing record. You have, however, very likely encountered database corruption, perhaps recently, or perhaps years ago, please check the "help my db is broke.txt" document under install_dir/db folder as background reading. Additional info has been written to the log.' )
+                                
+                                pubbed_error = True
+                                
+                            
+                            HydrusData.DebugPrint( 'Database master hash definition error: hash_id {} was missing! Recovered from local hash cache with hash {}.'.format( hash_id, hash.hex() ) )
                             
                         
-                        HydrusData.DebugPrint( 'Database hash error: hash_id ' + str( hash_id ) + ' was missing!' )
+                        self._Execute( 'INSERT OR IGNORE INTO hashes ( hash_id, hash ) VALUES ( ?, ? );', ( hash_id, sqlite3.Binary( hash ) ) )
+                        
                         HydrusData.PrintException( Exception( 'Missing file identifier stack trace.' ) )
-                        
-                        if not pubbed_error:
-                            
-                            HydrusData.ShowText( 'A file identifier was missing! This is a serious error that means your client database has an orphan file id! Think about contacting hydrus dev!' )
-                            
-                            pubbed_error = True
-                            
-                        
-                        hash = bytes.fromhex( 'aaaaaaaaaaaaaaaa' ) + os.urandom( 16 )
                         
                         uncached_hash_ids_to_hashes[ hash_id ] = hash
                         
@@ -278,7 +299,7 @@ class ClientDBMasterHashes( ClientDBModule.ClientDBModule ):
         
         if hash_ids is not None:
             
-            self._PopulateHashIdsToHashesCache( hash_ids, exception_on_error = True )
+            self._PopulateHashIdsToHashesCache( hash_ids )
             
             hash_ids_to_hashes = { hash_id : self._hash_ids_to_hashes_cache[ hash_id ] for hash_id in hash_ids }
             

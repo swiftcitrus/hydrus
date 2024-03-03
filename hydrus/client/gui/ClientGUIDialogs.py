@@ -8,8 +8,11 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIFrames
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIShortcuts
@@ -39,9 +42,9 @@ class Dialog( QP.Dialog ):
         
         self.setWindowFlag( QC.Qt.WindowContextHelpButtonHint, on = False )
         
-        self._new_options = HG.client_controller.new_options
+        self._new_options = CG.client_controller.new_options
         
-        self.setWindowIcon( QG.QIcon( HG.client_controller.frame_icon_pixmap ) )
+        self.setWindowIcon( QG.QIcon( CG.client_controller.frame_icon_pixmap ) )
         
         self._widget_event_filter = QP.WidgetEventFilter( self )
         
@@ -50,14 +53,17 @@ class Dialog( QP.Dialog ):
             QP.CallAfter( QP.CenterOnWindow, parent, self )
             
         
-        HG.client_controller.ResetIdleTimer()
+        CG.client_controller.ResetIdleTimer()
         
     
     def keyPressEvent( self, event ):
         
-        ( modifier, key ) = ClientGUIShortcuts.ConvertKeyEventToSimpleTuple( event )
+        shortcut = ClientGUIShortcuts.ConvertKeyEventToShortcut( event )
         
-        if key == QC.Qt.Key_Escape:
+        escape_shortcut = ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_SPECIAL, ClientGUIShortcuts.SHORTCUT_KEY_SPECIAL_ESCAPE, ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [] )
+        command_w_shortcut = ClientGUIShortcuts.Shortcut( ClientGUIShortcuts.SHORTCUT_TYPE_KEYBOARD_CHARACTER, ord( 'W' ), ClientGUIShortcuts.SHORTCUT_PRESS_TYPE_PRESS, [ ClientGUIShortcuts.SHORTCUT_MODIFIER_CTRL ] )
+        
+        if shortcut == escape_shortcut or ( HC.PLATFORM_MACOS and shortcut == command_w_shortcut ):
             
             self.done( QW.QDialog.Rejected )
             
@@ -158,7 +164,7 @@ class DialogGenerateNewAccounts( Dialog ):
         
         self._num.setValue( 1 )
         
-        service = HG.client_controller.services_manager.GetService( service_key )
+        service = CG.client_controller.services_manager.GetService( service_key )
         
         response = service.Request( HC.GET, 'account_types' )
         
@@ -222,10 +228,10 @@ class DialogGenerateNewAccounts( Dialog ):
             
         else:
             
-            expires = HydrusData.GetNow() + lifetime
+            expires = HydrusTime.GetNow() + lifetime
             
         
-        service = HG.client_controller.services_manager.GetService( self._service_key )
+        service = CG.client_controller.services_manager.GetService( self._service_key )
         
         try:
             
@@ -296,7 +302,7 @@ class DialogInputLocalBooruShare( Dialog ):
             
         else:
             
-            time_left = HydrusData.GetTimeDeltaUntilTime( timeout )
+            time_left = HydrusTime.GetTimeDeltaUntilTime( timeout )
             
             if time_left < 60 * 60 * 12: time_value = 60
             elif time_left < 60 * 60 * 24 * 7: time_value = 60 * 60 
@@ -309,7 +315,7 @@ class DialogInputLocalBooruShare( Dialog ):
         
         self._hashes = hashes
         
-        self._service = HG.client_controller.services_manager.GetService( CC.LOCAL_BOORU_SERVICE_KEY )
+        self._service = CG.client_controller.services_manager.GetService( CC.LOCAL_BOORU_SERVICE_KEY )
         
         internal_port = self._service.GetPort()
         
@@ -370,7 +376,7 @@ class DialogInputLocalBooruShare( Dialog ):
         
         if internal_port is None:
             
-            QW.QMessageBox.warning( self, 'Warning', 'The local booru is not currently running!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'The local booru is not currently running!' )
             
         
         try:
@@ -381,21 +387,21 @@ class DialogInputLocalBooruShare( Dialog ):
             
             HydrusData.ShowException( e )
             
-            QW.QMessageBox.critical( self, 'Error', 'Unfortunately, could not generate an external URL: {}'.format(e) )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Error', 'Unfortunately, could not generate an external URL: {}'.format(e) )
             
             return
             
         
-        HG.client_controller.pub( 'clipboard', 'text', url )
+        CG.client_controller.pub( 'clipboard', 'text', url )
         
     
     def EventCopyInternalShareURL( self ):
         
-        self._service = HG.client_controller.services_manager.GetService( CC.LOCAL_BOORU_SERVICE_KEY )
+        self._service = CG.client_controller.services_manager.GetService( CC.LOCAL_BOORU_SERVICE_KEY )
         
         url = self._service.GetInternalShareURL( self._share_key )
         
-        HG.client_controller.pub( 'clipboard', 'text', url )
+        CG.client_controller.pub( 'clipboard', 'text', url )
         
     
     def GetInfo( self ):
@@ -406,7 +412,7 @@ class DialogInputLocalBooruShare( Dialog ):
         
         timeout = self._timeout_number.GetValue()
         
-        if timeout is not None: timeout = timeout * self._timeout_multiplier.GetValue() + HydrusData.GetNow()
+        if timeout is not None: timeout = timeout * self._timeout_multiplier.GetValue() + HydrusTime.GetNow()
         
         return ( self._share_key, name, text, timeout, self._hashes )
         
@@ -477,7 +483,7 @@ class DialogInputNamespaceRegex( Dialog ):
         
         if namespace == '':
             
-            QW.QMessageBox.warning( self, 'Warning', 'Please enter something for the namespace.' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Please enter something for the namespace.' )
             
             return
             
@@ -492,7 +498,7 @@ class DialogInputNamespaceRegex( Dialog ):
             text += os.linesep * 2
             text += str( e )
             
-            QW.QMessageBox.critical( self, 'Error', text )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Error', text )
             
             return
             
@@ -519,7 +525,7 @@ class DialogInputTags( Dialog ):
         
         self._tags = ClientGUIListBoxes.ListBoxTagsStringsAddRemove( self, service_key, tag_display_type = tag_display_type )
         
-        default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
+        default_location_context = CG.client_controller.new_options.GetDefaultLocalLocationContext()
         
         self._tag_autocomplete = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self, self.EnterTags, default_location_context, service_key, show_paste_button = True )
         

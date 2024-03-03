@@ -6,8 +6,10 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
-from hydrus.client import ClientSearch
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.search import ClientSearch
 
 CLIENT_API_PERMISSION_ADD_URLS = 0
 CLIENT_API_PERMISSION_ADD_FILES = 1
@@ -18,20 +20,39 @@ CLIENT_API_PERMISSION_MANAGE_HEADERS = 5
 CLIENT_API_PERMISSION_MANAGE_DATABASE = 6
 CLIENT_API_PERMISSION_ADD_NOTES = 7
 CLIENT_API_PERMISSION_MANAGE_FILE_RELATIONSHIPS = 8
+CLIENT_API_PERMISSION_EDIT_RATINGS = 9
+CLIENT_API_PERMISSION_MANAGE_POPUPS = 10
+CLIENT_API_PERMISSION_EDIT_TIMES = 11
 
-ALLOWED_PERMISSIONS = ( CLIENT_API_PERMISSION_ADD_FILES, CLIENT_API_PERMISSION_ADD_TAGS, CLIENT_API_PERMISSION_ADD_URLS, CLIENT_API_PERMISSION_SEARCH_FILES, CLIENT_API_PERMISSION_MANAGE_PAGES, CLIENT_API_PERMISSION_MANAGE_HEADERS, CLIENT_API_PERMISSION_MANAGE_DATABASE, CLIENT_API_PERMISSION_ADD_NOTES, CLIENT_API_PERMISSION_MANAGE_FILE_RELATIONSHIPS )
+ALLOWED_PERMISSIONS = (
+    CLIENT_API_PERMISSION_ADD_FILES,
+    CLIENT_API_PERMISSION_ADD_TAGS,
+    CLIENT_API_PERMISSION_ADD_URLS,
+    CLIENT_API_PERMISSION_SEARCH_FILES,
+    CLIENT_API_PERMISSION_MANAGE_PAGES,
+    CLIENT_API_PERMISSION_MANAGE_HEADERS,
+    CLIENT_API_PERMISSION_MANAGE_DATABASE,
+    CLIENT_API_PERMISSION_ADD_NOTES,
+    CLIENT_API_PERMISSION_MANAGE_FILE_RELATIONSHIPS,
+    CLIENT_API_PERMISSION_EDIT_RATINGS,
+    CLIENT_API_PERMISSION_MANAGE_POPUPS,
+    CLIENT_API_PERMISSION_EDIT_TIMES
+)
 
 basic_permission_to_str_lookup = {}
 
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_ADD_URLS ] = 'import and edit urls'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_ADD_FILES ] = 'import and delete files'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_ADD_TAGS ] = 'edit file tags'
-basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_SEARCH_FILES ] = 'search and fetch files'
+basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_SEARCH_FILES ] = 'search for and fetch files'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_PAGES ] = 'manage pages'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_HEADERS ] = 'manage cookies and headers'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_DATABASE ] = 'manage database'
 basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_ADD_NOTES ] = 'edit file notes'
-basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_FILE_RELATIONSHIPS ] = 'manage file relationships'
+basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_FILE_RELATIONSHIPS ] = 'edit file relationships'
+basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_EDIT_RATINGS ] = 'edit file ratings'
+basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_MANAGE_POPUPS ] = 'manage popups'
+basic_permission_to_str_lookup[ CLIENT_API_PERMISSION_EDIT_TIMES ] = 'edit file times'
 
 SEARCH_RESULTS_CACHE_TIMEOUT = 4 * 3600
 
@@ -58,7 +79,7 @@ class APIManager( HydrusSerialisable.SerialisableBase ):
         
         self._lock = threading.Lock()
         
-        HG.client_controller.sub( self, 'MaintainMemory', 'memory_maintenance_pulse' )
+        CG.client_controller.sub( self, 'MaintainMemory', 'memory_maintenance_pulse' )
         
     
     def _GetSerialisableInfo( self ):
@@ -114,7 +135,7 @@ class APIManager( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            self._session_keys_to_access_keys_and_expirys[ session_key ] = ( access_key, HydrusData.GetNow() + SESSION_EXPIRY )
+            self._session_keys_to_access_keys_and_expirys[ session_key ] = ( access_key, HydrusTime.GetNow() + SESSION_EXPIRY )
             
         
         return session_key
@@ -131,14 +152,14 @@ class APIManager( HydrusSerialisable.SerialisableBase ):
             
             ( access_key, session_expiry ) = self._session_keys_to_access_keys_and_expirys[ session_key ]
             
-            if HydrusData.TimeHasPassed( session_expiry ):
+            if HydrusTime.TimeHasPassed( session_expiry ):
                 
                 del self._session_keys_to_access_keys_and_expirys[ session_expiry ]
                 
                 raise HydrusExceptions.SessionException( 'That session key has expired!' )
                 
             
-            self._session_keys_to_access_keys_and_expirys[ session_key ] = ( access_key, HydrusData.GetNow() + SESSION_EXPIRY )
+            self._session_keys_to_access_keys_and_expirys[ session_key ] = ( access_key, HydrusTime.GetNow() + SESSION_EXPIRY )
             
         
         return access_key
@@ -320,7 +341,7 @@ class APIPermissions( HydrusSerialisable.SerialisableBaseNamed ):
             
         
     
-    def CheckPermissionToSeeFiles( self, hash_ids ):
+    def CheckPermissionToSeeFiles( self, hash_ids: typing.Collection[ int ] ):
         
         with self._lock:
             
@@ -339,14 +360,12 @@ class APIPermissions( HydrusSerialisable.SerialisableBaseNamed ):
             
             if num_files_allowed_to_see != num_files_asked_for:
                 
-                error_text = 'You do not seem to have access to all those files! You asked to see {} files, but you were only authorised to see {} of them!'
-                
-                error_text = error_text.format( HydrusData.ToHumanInt( num_files_asked_for ), HydrusData.ToHumanInt( num_files_allowed_to_see ) )
+                error_text = f'You do not seem to have access to all those files! You asked to see {HydrusData.ToHumanInt( num_files_asked_for )} files, but you were only authorised to see {HydrusData.ToHumanInt( num_files_allowed_to_see )} of them!'
                 
                 raise HydrusExceptions.InsufficientCredentialsException( error_text )
                 
             
-            self._search_results_timeout = HydrusData.GetNow() + SEARCH_RESULTS_CACHE_TIMEOUT
+            self._search_results_timeout = HydrusTime.GetNow() + SEARCH_RESULTS_CACHE_TIMEOUT
             
         
     
@@ -406,9 +425,9 @@ class APIPermissions( HydrusSerialisable.SerialisableBaseNamed ):
         
         with self._lock:
             
-            l = sorted( ( basic_permission_to_str_lookup[ p ] for p in self._basic_permissions ) )
+            sorted_perms = sorted( ( basic_permission_to_str_lookup[ p ] for p in self._basic_permissions ) )
             
-            return ', '.join( l )
+            return ', '.join( sorted_perms )
             
         
     
@@ -432,7 +451,7 @@ class APIPermissions( HydrusSerialisable.SerialisableBaseNamed ):
         
         with self._lock:
             
-            if self._last_search_results is not None and HydrusData.TimeHasPassed( self._search_results_timeout ):
+            if self._last_search_results is not None and HydrusTime.TimeHasPassed( self._search_results_timeout ):
                 
                 self._last_search_results = None
                 
@@ -450,7 +469,7 @@ class APIPermissions( HydrusSerialisable.SerialisableBaseNamed ):
             
             self._last_search_results = set( hash_ids )
             
-            self._search_results_timeout = HydrusData.GetNow() + SEARCH_RESULTS_CACHE_TIMEOUT
+            self._search_results_timeout = HydrusTime.GetNow() + SEARCH_RESULTS_CACHE_TIMEOUT
             
         
     

@@ -1,13 +1,14 @@
-import re
 import sqlite3
 import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
+from hydrus.core import HydrusDB
 
+from hydrus.client import ClientThreading
 from hydrus.client.db import ClientDBMaster
 from hydrus.client.db import ClientDBModule
-from hydrus.client.db import ClientDBDefinitionsCache
+from hydrus.client.search import ClientSearch
 
 class ClientDBNotesMap( ClientDBModule.ClientDBModule ):
     
@@ -44,54 +45,105 @@ class ClientDBNotesMap( ClientDBModule.ClientDBModule ):
         self._Execute( 'DELETE FROM file_notes WHERE hash_id = ? AND name_id = ?;', ( hash_id, name_id ) )
         
     
-    def GetHashIdsFromNoteName( self, name: str, hash_ids_table_name: str ):
+    def GetHashIdsFromNoteName( self, name: str, hash_ids_table_name: str, job_status: typing.Optional[ ClientThreading.JobStatus ] = None ):
         
         label_id = self.modules_texts.GetLabelId( name )
         
+        cancelled_hook = None
+        
+        if job_status is not None:
+            
+            cancelled_hook = job_status.IsCancelled
+            
+        
         # as note name is rare, we force this to run opposite to typical: notes to temp hashes
-        return self._STS( self._Execute( 'SELECT hash_id FROM file_notes CROSS JOIN {} USING ( hash_id ) WHERE name_id = ?;'.format( hash_ids_table_name ), ( label_id, ) ) )
+        return self._STS( self._ExecuteCancellable( 'SELECT hash_id FROM file_notes CROSS JOIN {} USING ( hash_id ) WHERE name_id = ?;'.format( hash_ids_table_name ), ( label_id, ), cancelled_hook ) )
         
     
-    def GetHashIdsFromNumNotes( self, min_num_notes: typing.Optional[ int ], max_num_notes: typing.Optional[ int ], hash_ids_table_name: str ):
+    def GetHashIdsFromNumNotes( self, number_tests: typing.List[ ClientSearch.NumberTest ], hash_ids: typing.Collection[ int ], hash_ids_table_name: str, job_status: typing.Optional[ ClientThreading.JobStatus ] = None ):
         
-        has_notes = max_num_notes is None and min_num_notes == 1
-        not_has_notes = ( min_num_notes is None or min_num_notes == 0 ) and max_num_notes is not None and max_num_notes == 0
+        result_hash_ids = set( hash_ids )
         
-        if has_notes or not_has_notes:
+        specific_number_tests = [ number_test for number_test in number_tests if not ( number_test.IsZero() or number_test.IsAnythingButZero() ) ]
+        
+        megalambda = ClientSearch.NumberTest.STATICCreateMegaLambda( specific_number_tests )
+        
+        is_zero = True in ( number_test.IsZero() for number_test in number_tests )
+        is_anything_but_zero = True in ( number_test.IsAnythingButZero() for number_test in number_tests )
+        wants_zero = True in ( number_test.WantsZero() for number_test in number_tests )
+        
+        cancelled_hook = None
+        
+        if job_status is not None:
             
-            has_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} WHERE EXISTS ( SELECT 1 FROM file_notes WHERE file_notes.hash_id = {}.hash_id );'.format( hash_ids_table_name, hash_ids_table_name ) ) )
+            cancelled_hook = job_status.IsCancelled
             
-            if has_notes:
+        
+        nonzero_hash_ids = set()
+        
+        if is_zero or is_anything_but_zero or wants_zero:
+            
+            nonzero_hash_ids = self.GetHashIdsThatHaveNotes( hash_ids_table_name, job_status = job_status )
+            
+            if is_zero:
                 
-                hash_ids = has_hash_ids
-                
-            else:
-                
-                all_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {};'.format( hash_ids_table_name ) ) )
-                
-                hash_ids = all_hash_ids.difference( has_hash_ids )
+                result_hash_ids.difference_update( nonzero_hash_ids )
                 
             
-        else:
+            if is_anything_but_zero:
+                
+                result_hash_ids.intersection_update( nonzero_hash_ids )
+                
             
-            if min_num_notes is None:
-                
-                filt = lambda c: c <= max_num_notes
-                
-            elif max_num_notes is None:
-                
-                filt = lambda c: min_num_notes <= c
-                
-            else:
-                
-                filt = lambda c: min_num_notes <= c <= max_num_notes
-                
+        
+        if len( specific_number_tests ) > 0:
             
             # temp hashes to notes
             query = 'SELECT hash_id, COUNT( * ) FROM {} CROSS JOIN file_notes USING ( hash_id ) GROUP BY hash_id;'.format( hash_ids_table_name )
             
-            hash_ids = { hash_id for ( hash_id, count ) in self._Execute( query ) if filt( count ) }
+            good_url_count_hash_ids = { hash_id for ( hash_id, count ) in self._ExecuteCancellable( query, (), cancelled_hook ) if megalambda( count ) }
             
+            if wants_zero:
+                
+                zero_hash_ids = result_hash_ids.difference( nonzero_hash_ids )
+                
+                good_url_count_hash_ids.update( zero_hash_ids )
+                
+            
+            result_hash_ids.intersection_update( good_url_count_hash_ids )
+            
+        
+        return result_hash_ids
+        
+    
+    def GetHashIdsThatDoNotHaveNotes( self, hash_ids_table_name: str, job_status: typing.Optional[ ClientThreading.JobStatus ] = None ):
+        
+        cancelled_hook = None
+        
+        if job_status is not None:
+            
+            cancelled_hook = job_status.IsCancelled
+            
+        
+        query = 'SELECT hash_id FROM {} WHERE NOT EXISTS ( SELECT 1 FROM file_notes WHERE file_notes.hash_id = {}.hash_id );'.format( hash_ids_table_name, hash_ids_table_name )
+        
+        hash_ids = self._STS( self._ExecuteCancellable( query, (), cancelled_hook ) )
+        
+        return hash_ids
+        
+    
+    def GetHashIdsThatHaveNotes( self, hash_ids_table_name: str, job_status: typing.Optional[ ClientThreading.JobStatus ] = None ):
+        
+        cancelled_hook = None
+        
+        if job_status is not None:
+            
+            cancelled_hook = job_status.IsCancelled
+            
+        
+        query = 'SELECT hash_id FROM {} WHERE EXISTS ( SELECT 1 FROM file_notes WHERE file_notes.hash_id = {}.hash_id );'.format( hash_ids_table_name, hash_ids_table_name )
+        
+        hash_ids = self._STS( self._ExecuteCancellable( query, (), cancelled_hook ) )
         
         return hash_ids
         

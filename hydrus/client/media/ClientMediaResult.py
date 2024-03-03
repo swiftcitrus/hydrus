@@ -4,6 +4,7 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.media import ClientMediaManagers
 
 class MediaResult( object ):
@@ -12,6 +13,7 @@ class MediaResult( object ):
         self,
         file_info_manager: ClientMediaManagers.FileInfoManager,
         tags_manager: ClientMediaManagers.TagsManager,
+        times_manager: ClientMediaManagers.TimesManager,
         locations_manager: ClientMediaManagers.LocationsManager,
         ratings_manager: ClientMediaManagers.RatingsManager,
         notes_manager: ClientMediaManagers.NotesManager,
@@ -20,6 +22,7 @@ class MediaResult( object ):
         
         self._file_info_manager = file_info_manager
         self._tags_manager = tags_manager
+        self._times_manager = times_manager
         self._locations_manager = locations_manager
         self._ratings_manager = ratings_manager
         self._notes_manager = notes_manager
@@ -30,7 +33,7 @@ class MediaResult( object ):
         
         try:
             
-            service = HG.client_controller.services_manager.GetService( service_key )
+            service = CG.client_controller.services_manager.GetService( service_key )
             
         except HydrusExceptions.DataMissing:
             
@@ -43,7 +46,7 @@ class MediaResult( object ):
             
             self._tags_manager.DeletePending( service_key )
             
-        elif service_type in HC.FILE_SERVICES:
+        elif service_type in HC.REAL_FILE_SERVICES:
             
             self._locations_manager.DeletePending( service_key )
             
@@ -53,12 +56,18 @@ class MediaResult( object ):
         
         file_info_manager = self._file_info_manager.Duplicate()
         tags_manager = self._tags_manager.Duplicate()
-        locations_manager = self._locations_manager.Duplicate()
+        times_manager = self._times_manager.Duplicate()
+        locations_manager = self._locations_manager.Duplicate( times_manager )
         ratings_manager = self._ratings_manager.Duplicate()
         notes_manager = self._notes_manager.Duplicate()
-        file_viewing_stats_manager = self._file_viewing_stats_manager.Duplicate()
+        file_viewing_stats_manager = self._file_viewing_stats_manager.Duplicate( times_manager )
         
-        return MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        return MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        
+    
+    def GetDuration( self ):
+        
+        return self._file_info_manager.duration / 1000
         
     
     def GetDurationMS( self ):
@@ -116,7 +125,7 @@ class MediaResult( object ):
         return self._file_info_manager.num_words
         
     
-    def GetRatingsManager( self ):
+    def GetRatingsManager( self ) -> ClientMediaManagers.RatingsManager:
         
         return self._ratings_manager
         
@@ -136,6 +145,11 @@ class MediaResult( object ):
         return self._tags_manager
         
     
+    def GetTimesManager( self ) -> ClientMediaManagers.TimesManager:
+        
+        return self._times_manager
+        
+    
     def HasAudio( self ):
         
         return self._file_info_manager.has_audio is True
@@ -150,7 +164,7 @@ class MediaResult( object ):
         
         # TODO: ultimately replace this with metadata conditionals for whatever the user likes, 'don't delete anything rated 5 stars', whatever
         
-        delete_lock_for_archived_files = HG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' )
+        delete_lock_for_archived_files = CG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' )
         
         if delete_lock_for_archived_files:
             
@@ -165,17 +179,23 @@ class MediaResult( object ):
     
     def IsStaticImage( self ):
         
-        image = self._file_info_manager.mime in HC.IMAGES
-        static_animation = self._file_info_manager.mime in HC.ANIMATIONS and self._file_info_manager.duration in ( 0, None )
+        if self._file_info_manager.mime in HC.IMAGES:
+            
+            return True
+            
+        elif self._file_info_manager.mime in HC.VIEWABLE_IMAGE_PROJECT_FILES:
+            
+            return True
+            
         
-        return image or static_animation
+        return False
         
     
     def ProcessContentUpdate( self, service_key, content_update ):
         
         try:
             
-            service = HG.client_controller.services_manager.GetService( service_key )
+            service = CG.client_controller.services_manager.GetService( service_key )
             
         except HydrusExceptions.DataMissing:
             
@@ -188,7 +208,7 @@ class MediaResult( object ):
             
             self._tags_manager.ProcessContentUpdate( service_key, content_update )
             
-        elif service_type in HC.FILE_SERVICES:
+        elif service_type in HC.REAL_FILE_SERVICES:
             
             if content_update.GetDataType() == HC.CONTENT_TYPE_FILE_VIEWING_STATS:
                 

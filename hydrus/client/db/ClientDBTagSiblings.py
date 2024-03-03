@@ -6,9 +6,11 @@ import typing
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusDBBase
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client.db import ClientDBDefinitionsCache
+from hydrus.client.db import ClientDBMaintenance
 from hydrus.client.db import ClientDBMaster
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBServices
@@ -19,15 +21,16 @@ def GenerateTagSiblingsLookupCacheTableName( display_type: int, service_id: int 
     
     ( cache_ideal_tag_siblings_lookup_table_name, cache_actual_tag_siblings_lookup_table_name ) = GenerateTagSiblingsLookupCacheTableNames( service_id )
     
-    if display_type == ClientTags.TAG_DISPLAY_IDEAL:
+    if display_type == ClientTags.TAG_DISPLAY_DISPLAY_IDEAL:
         
         return cache_ideal_tag_siblings_lookup_table_name
         
-    elif display_type == ClientTags.TAG_DISPLAY_ACTUAL:
+    elif display_type == ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL:
         
         return cache_actual_tag_siblings_lookup_table_name
         
     
+
 def GenerateTagSiblingsLookupCacheTableNames( service_id ):
     
     cache_ideal_tag_siblings_lookup_table_name = 'external_caches.ideal_tag_siblings_lookup_cache_{}'.format( service_id )
@@ -35,12 +38,14 @@ def GenerateTagSiblingsLookupCacheTableNames( service_id ):
     
     return ( cache_ideal_tag_siblings_lookup_table_name, cache_actual_tag_siblings_lookup_table_name )
     
+
 class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
     
     CAN_REPOPULATE_ALL_MISSING_DATA = True
     
-    def __init__( self, cursor: sqlite3.Cursor, modules_services: ClientDBServices.ClientDBMasterServices, modules_tags: ClientDBMaster.ClientDBMasterTags, modules_tags_local_cache: ClientDBDefinitionsCache.ClientDBCacheLocalTags ):
+    def __init__( self, cursor: sqlite3.Cursor, modules_db_maintenance: ClientDBMaintenance.ClientDBMaintenance, modules_services: ClientDBServices.ClientDBMasterServices, modules_tags: ClientDBMaster.ClientDBMasterTags, modules_tags_local_cache: ClientDBDefinitionsCache.ClientDBCacheLocalTags ):
         
+        self.modules_db_maintenance = modules_db_maintenance
         self.modules_services = modules_services
         self.modules_tags_local_cache = modules_tags_local_cache
         self.modules_tags = modules_tags
@@ -160,7 +165,7 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
     
     def ClearActual( self, service_id ):
         
-        cache_actual_tag_sibling_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_ACTUAL, service_id )
+        cache_actual_tag_sibling_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, service_id )
         
         self._Execute( 'DELETE FROM {};'.format( cache_actual_tag_sibling_lookup_table_name ) )
         
@@ -185,8 +190,8 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         
         ( cache_ideal_tag_siblings_lookup_table_name, cache_actual_tag_siblings_lookup_table_name ) = GenerateTagSiblingsLookupCacheTableNames( tag_service_id )
         
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( cache_actual_tag_siblings_lookup_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( cache_ideal_tag_siblings_lookup_table_name ) )
+        self.modules_db_maintenance.DeferredDropTable( cache_actual_tag_siblings_lookup_table_name )
+        self.modules_db_maintenance.DeferredDropTable( cache_ideal_tag_siblings_lookup_table_name )
         
         self._Execute( 'DELETE FROM tag_sibling_application WHERE master_service_id = ? OR application_service_id = ?;', ( tag_service_id, tag_service_id ) )
         
@@ -576,6 +581,20 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         return self._service_ids_to_interested_service_ids[ tag_service_id ]
         
     
+    def GetPendingSiblingsCount( self, service_id: int ):
+        
+        ( info, ) = self._Execute( 'SELECT COUNT( * ) FROM tag_sibling_petitions WHERE service_id = ? AND status = ?;', ( service_id, HC.CONTENT_STATUS_PENDING ) ).fetchone()
+        
+        return info
+        
+    
+    def GetPetitionedSiblingsCount( self, service_id: int ):
+        
+        ( info, ) = self._Execute( 'SELECT COUNT( * ) FROM tag_sibling_petitions WHERE service_id = ? AND status = ?;', ( service_id, HC.CONTENT_STATUS_PETITIONED ) ).fetchone()
+        
+        return info
+        
+    
     def GetTablesAndColumnsThatUseDefinitions( self, content_type: int ) -> typing.List[ typing.Tuple[ str, str ] ]:
         
         if content_type == HC.CONTENT_TYPE_TAG:
@@ -648,11 +667,11 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         
         for tag_service_id in tag_service_ids:
             
-            tag_ids_to_ideal_tag_ids = self.GetTagIdsToIdealTagIds( ClientTags.TAG_DISPLAY_ACTUAL, tag_service_id, existing_tag_ids )
+            tag_ids_to_ideal_tag_ids = self.GetTagIdsToIdealTagIds( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, tag_service_id, existing_tag_ids )
             
             ideal_tag_ids = set( tag_ids_to_ideal_tag_ids.values() )
             
-            ideal_tag_ids_to_chain_tag_ids = self.GetIdealTagIdsToChains( ClientTags.TAG_DISPLAY_ACTUAL, tag_service_id, ideal_tag_ids )
+            ideal_tag_ids_to_chain_tag_ids = self.GetIdealTagIdsToChains( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, tag_service_id, ideal_tag_ids )
             
             for tag_id in existing_tag_ids:
                 
@@ -684,7 +703,7 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         
         tag_service_id = self.modules_services.GetServiceId( service_key )
         
-        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_ACTUAL, tag_service_id )
+        cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, tag_service_id )
         
         pair_ids = self._Execute( 'SELECT bad_tag_id, ideal_tag_id FROM {};'.format( cache_tag_siblings_lookup_table_name ) ).fetchall()
         
@@ -851,7 +870,7 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         
         for tag_service_id in tag_service_ids:
             
-            cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_IDEAL, tag_service_id )
+            cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_DISPLAY_IDEAL, tag_service_id )
             
             self._Execute( 'DELETE FROM {};'.format( cache_tag_siblings_lookup_table_name ) )
             
@@ -901,13 +920,13 @@ class ClientDBTagSiblings( ClientDBModule.ClientDBModule ):
         
         for tag_service_id in tag_service_ids:
             
-            cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_IDEAL, tag_service_id )
+            cache_tag_siblings_lookup_table_name = GenerateTagSiblingsLookupCacheTableName( ClientTags.TAG_DISPLAY_DISPLAY_IDEAL, tag_service_id )
             
             tag_ids_to_clear_and_regen = set( tag_ids )
             
-            ideal_tag_ids = self.GetIdealTagIds( ClientTags.TAG_DISPLAY_IDEAL, tag_service_id, tag_ids )
+            ideal_tag_ids = self.GetIdealTagIds( ClientTags.TAG_DISPLAY_DISPLAY_IDEAL, tag_service_id, tag_ids )
             
-            tag_ids_to_clear_and_regen.update( self.GetChainsMembersFromIdeals( ClientTags.TAG_DISPLAY_IDEAL, tag_service_id, ideal_tag_ids ) )
+            tag_ids_to_clear_and_regen.update( self.GetChainsMembersFromIdeals( ClientTags.TAG_DISPLAY_DISPLAY_IDEAL, tag_service_id, ideal_tag_ids ) )
             
             self._ExecuteMany( 'DELETE FROM {} WHERE bad_tag_id = ? OR ideal_tag_id = ?;'.format( cache_tag_siblings_lookup_table_name ), ( ( tag_id, tag_id ) for tag_id in tag_ids_to_clear_and_regen ) )
             

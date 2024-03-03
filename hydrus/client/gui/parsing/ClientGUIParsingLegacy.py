@@ -1,7 +1,6 @@
 import os
 import threading
 
-from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
 from hydrus.core import HydrusConstants as HC
@@ -9,14 +8,18 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
 from hydrus.client import ClientStrings
 from hydrus.client import ClientThreading
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -132,7 +135,7 @@ class EditNodes( QW.QWidget ):
                 
             else:
                 
-                QW.QMessageBox.warning( self, 'Warning', 'That was not a script--it was a: '+type(obj).__name__ )
+                ClientGUIDialogsMessage.ShowWarning( self, f'That was not a script--it was a: {type(obj).__name__}' )
                 
             
         
@@ -194,7 +197,7 @@ class EditNodes( QW.QWidget ):
             
             json = export_object.DumpToString()
             
-            HG.client_controller.pub( 'clipboard', 'text', json )
+            CG.client_controller.pub( 'clipboard', 'text', json )
             
         
     
@@ -262,11 +265,13 @@ class EditNodes( QW.QWidget ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -277,9 +282,9 @@ class EditNodes( QW.QWidget ):
             
             self._ImportObject( obj )
             
-        except:
+        except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Nodes', e )
             
         
     
@@ -421,7 +426,7 @@ The formula should attempt to parse full or relative urls. If the url is relativ
         
         network_job.OverrideBandwidth()
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         try:
             
@@ -475,11 +480,11 @@ The formula should attempt to parse full or relative urls. If the url is relativ
             
             try:
                 
-                stop_time = HydrusData.GetNow() + 30
+                stop_time = HydrusTime.GetNow() + 30
                 
-                job_key = ClientThreading.JobKey( cancellable = True, stop_time = stop_time )
+                job_status = ClientThreading.JobStatus( cancellable = True, stop_time = stop_time )
                 
-                parsed_urls = node.ParseURLs( job_key, data, referral_url )
+                parsed_urls = node.ParseURLs( job_status, data, referral_url )
                 
                 QP.CallAfter( qt_code, parsed_urls )
                 
@@ -489,7 +494,7 @@ The formula should attempt to parse full or relative urls. If the url is relativ
                 
                 message = 'Could not parse!'
                 
-                QP.CallAfter( QW.QMessageBox.critical, None, 'Error', message )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Parsing problem!', message )
                 
             
         
@@ -497,7 +502,7 @@ The formula should attempt to parse full or relative urls. If the url is relativ
         data = self._example_data.toPlainText()
         referral_url = self._referral_url
         
-        HG.client_controller.CallToThread( do_it, node, data, referral_url )
+        CG.client_controller.CallToThread( do_it, node, data, referral_url )
         
     
     def GetExampleData( self ):
@@ -719,7 +724,7 @@ And pass that html to a number of 'parsing children' that will each look through
             
             if not os.path.exists( test_arg ):
                 
-                QW.QMessageBox.critical( self, 'Error', 'That file does not exist!' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'That file does not exist!' )
                 
                 return
                 
@@ -737,13 +742,13 @@ And pass that html to a number of 'parsing children' that will each look through
         
         try:
             
-            stop_time = HydrusData.GetNow() + 30
+            stop_time = HydrusTime.GetNow() + 30
             
-            job_key = ClientThreading.JobKey( cancellable = True, stop_time = stop_time )
+            job_status = ClientThreading.JobStatus( cancellable = True, stop_time = stop_time )
             
-            self._test_script_management.SetJobKey( job_key )
+            self._test_script_management.SetJobStatus( job_status )
             
-            parsing_text = script.FetchParsingText( job_key, file_identifier )
+            parsing_text = script.FetchParsingText( job_status, file_identifier )
             
             try:
                 
@@ -762,11 +767,11 @@ And pass that html to a number of 'parsing children' that will each look through
             message += os.linesep * 2
             message += str( e )
             
-            QW.QMessageBox.critical( self, 'Error', message )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Could not fetch!', message )
             
         finally:
             
-            job_key.Finish()
+            job_status.Finish()
             
         
     
@@ -790,11 +795,11 @@ And pass that html to a number of 'parsing children' that will each look through
             self._results.setPlainText( results_text )
             
         
-        def do_it( script, job_key, data ):
+        def do_it( script, job_status, data ):
             
             try:
                 
-                results = script.Parse( job_key, data )
+                results = script.Parse( job_status, data )
                 
                 QP.CallAfter( qt_code, results )
                 
@@ -804,25 +809,25 @@ And pass that html to a number of 'parsing children' that will each look through
                 
                 message = 'Could not parse!'
                 
-                QP.CallAfter( QW.QMessageBox.critical, None, 'Error', message )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', message )
                 
             finally:
                 
-                job_key.Finish()
+                job_status.Finish()
                 
             
         
         script = self.GetValue()
         
-        stop_time = HydrusData.GetNow() + 30
+        stop_time = HydrusTime.GetNow() + 30
         
-        job_key = ClientThreading.JobKey( cancellable = True, stop_time = stop_time )
+        job_status = ClientThreading.JobStatus( cancellable = True, stop_time = stop_time )
         
-        self._test_script_management.SetJobKey( job_key )
+        self._test_script_management.SetJobStatus( job_status )
         
         data = self._example_data.toPlainText()
         
-        HG.client_controller.CallToThread( do_it, script, job_key, data )
+        CG.client_controller.CallToThread( do_it, script, job_status, data )
         
     
     def GetExampleData( self ):
@@ -895,7 +900,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         for script_type in self.SCRIPT_TYPES:
             
-            scripts.extend( HG.client_controller.Read( 'serialisable_named', script_type ) )
+            scripts.extend( CG.client_controller.Read( 'serialisable_named', script_type ) )
             
         
         for script in scripts:
@@ -973,7 +978,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
                 
             else:
                 
-                QW.QMessageBox.warning( self, 'Warning', 'That was not a script--it was a: '+type(obj).__name__ )
+                ClientGUIDialogsMessage.ShowWarning( self, f'That was not a script--it was a: {type(obj).__name__}' )
                 
             
         
@@ -1021,7 +1026,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         scripts = self._scripts.GetData()
         
-        HG.client_controller.Write( 'serialisables_overwrite', self.SCRIPT_TYPES, scripts )
+        CG.client_controller.Write( 'serialisables_overwrite', self.SCRIPT_TYPES, scripts )
         
     
     def Delete( self ):
@@ -1093,7 +1098,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
             json = export_object.DumpToString()
             
-            HG.client_controller.pub( 'clipboard', 'text', json )
+            CG.client_controller.pub( 'clipboard', 'text', json )
             
         
     
@@ -1118,11 +1123,13 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str(e) )
             
             return
             
@@ -1135,7 +1142,7 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Parsing Scripts', e )
             
         
     
@@ -1153,7 +1160,9 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
                     
                 except Exception as e:
                     
-                    QW.QMessageBox.critical( self, 'Error', str(e) )
+                    HydrusData.PrintException( e )
+                    
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', str(e) )
                     
                     return
                     
@@ -1164,9 +1173,11 @@ class ManageParsingScriptsPanel( ClientGUIScrolledPanels.ManagePanel ):
                     
                     self._ImportObject( obj )
                     
-                except:
+                except Exception as e:
                     
-                    QW.QMessageBox.critical( self, 'Error', 'I could not understand what was encoded in the png!' )
+                    HydrusData.PrintException( e )
+                    
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', 'I could not understand what was encoded in the png!' )
                     
                 
             
@@ -1178,7 +1189,7 @@ class ScriptManagementControl( QW.QWidget ):
         
         QW.QWidget.__init__( self, parent )
         
-        self._job_key = None
+        self._job_status = None
         
         self._lock = threading.Lock()
         
@@ -1232,15 +1243,15 @@ class ScriptManagementControl( QW.QWidget ):
     
     def _Update( self ):
         
-        if self._job_key is None:
+        if self._job_status is None:
             
             self._Reset()
             
         else:
             
-            if self._job_key.HasVariable( 'script_status' ):
+            if self._job_status.HasVariable( 'script_status' ):
                 
-                status = self._job_key.GetIfHasVariable( 'script_status' )
+                status = self._job_status.GetIfHasVariable( 'script_status' )
                 
             else:
                 
@@ -1249,9 +1260,9 @@ class ScriptManagementControl( QW.QWidget ):
             
             self._status.setText( status )
             
-            if self._job_key.HasVariable( 'script_gauge' ):
+            if self._job_status.HasVariable( 'script_gauge' ):
                 
-                ( value, range ) = self._job_key.GetIfHasVariable( 'script_gauge' )
+                ( value, range ) = self._job_status.GetIfHasVariable( 'script_gauge' )
                 
             else:
                 
@@ -1261,7 +1272,7 @@ class ScriptManagementControl( QW.QWidget ):
             self._gauge.SetRange( range )
             self._gauge.SetValue( value )
             
-            urls = self._job_key.GetURLs()
+            urls = self._job_status.GetURLs()
             
             if len( urls ) == 0:
                 
@@ -1278,7 +1289,7 @@ class ScriptManagementControl( QW.QWidget ):
                     
                 
             
-            if self._job_key.IsDone():
+            if self._job_status.IsDone():
                 
                 if self._cancel_button.isEnabled():
                     
@@ -1301,9 +1312,9 @@ class ScriptManagementControl( QW.QWidget ):
             
             self._Update()
             
-            if self._job_key is None:
+            if self._job_status is None:
                 
-                HG.client_controller.gui.UnregisterUIUpdateWindow( self )
+                CG.client_controller.gui.UnregisterUIUpdateWindow( self )
                 
             
         
@@ -1312,9 +1323,9 @@ class ScriptManagementControl( QW.QWidget ):
         
         with self._lock:
             
-            if self._job_key is not None:
+            if self._job_status is not None:
                 
-                self._job_key.Cancel()
+                self._job_status.Cancel()
                 
             
         
@@ -1323,15 +1334,15 @@ class ScriptManagementControl( QW.QWidget ):
         
         with self._lock:
             
-            if self._job_key is None:
+            if self._job_status is None:
                 
                 return
                 
             
-            urls = self._job_key.GetURLs()
+            urls = self._job_status.GetURLs()
             
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         for url in urls:
             
@@ -1342,12 +1353,12 @@ class ScriptManagementControl( QW.QWidget ):
         
         
     
-    def SetJobKey( self, job_key ):
+    def SetJobStatus( self, job_status ):
         
         with self._lock:
             
-            self._job_key = job_key
+            self._job_status = job_status
             
         
-        HG.client_controller.gui.RegisterUIUpdateWindow( self )
+        CG.client_controller.gui.RegisterUIUpdateWindow( self )
         

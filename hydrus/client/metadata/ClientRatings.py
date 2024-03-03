@@ -1,5 +1,6 @@
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusGlobals as HG
+
+from hydrus.client import ClientGlobals as CG
 
 LIKE = 0
 DISLIKE = 1
@@ -11,6 +12,13 @@ CIRCLE = 0
 SQUARE = 1
 FAT_STAR = 2
 PENTAGRAM_STAR = 3
+
+shape_to_str_lookup_dict = {
+    CIRCLE : 'circle',
+    SQUARE : 'square',
+    FAT_STAR : 'fat star',
+    PENTAGRAM_STAR : 'pentagram star'
+}
 
 def GetIncDecStateFromMedia( media, service_key ):
     
@@ -135,7 +143,7 @@ def GetShape( service_key ):
     
     try:
         
-        service = HG.client_controller.services_manager.GetService( service_key )
+        service = CG.client_controller.services_manager.GetService( service_key )
         
         shape = service.GetShape()
         

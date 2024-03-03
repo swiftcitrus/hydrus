@@ -1,13 +1,8 @@
-import os
 import typing
 
 from qtpy import QtCore as QC
-from qtpy import QtWidgets as QW
 
-from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusExceptions
-
-from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui.widgets import ClientGUICommon
@@ -47,7 +42,7 @@ class MenuMixin( object ):
                 
             elif item_type == 'submenu':
                 
-                submenu = QW.QMenu( menu )
+                submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 self._PopulateMenu( submenu, data )
                 
@@ -69,13 +64,13 @@ class MenuBitmapButton( MenuMixin, ClientGUICommon.BetterBitmapButton ):
     
     def __init__( self, parent, bitmap, menu_items ):
         
-        MenuMixin.__init__( self, menu_items )
         ClientGUICommon.BetterBitmapButton.__init__( self, parent, bitmap, self.DoMenu )
+        MenuMixin.__init__( self, menu_items )
         
     
     def DoMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         self._PopulateMenu( menu, self._menu_items )
         
@@ -91,13 +86,13 @@ class MenuButton( MenuMixin, ClientGUICommon.BetterButton ):
     
     def __init__( self, parent, label, menu_items ):
         
-        MenuMixin.__init__( self, menu_items )
         ClientGUICommon.BetterButton.__init__( self, parent, label, self.DoMenu )
+        MenuMixin.__init__( self, menu_items )
         
     
     def DoMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         self._PopulateMenu( menu, self._menu_items )
         
@@ -122,8 +117,8 @@ class MenuChoiceButton( MenuMixin, ClientGUICommon.BetterButton ):
         
         menu_items = self._GenerateMenuItems()
         
-        MenuMixin.__init__( self, menu_items )
         ClientGUICommon.BetterButton.__init__( self, parent, label, self.DoMenu )
+        MenuMixin.__init__( self, menu_items )
         
     
     def _GenerateMenuItems( self ):
@@ -174,7 +169,7 @@ class MenuChoiceButton( MenuMixin, ClientGUICommon.BetterButton ):
     
     def DoMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         self._PopulateMenu( menu, self._menu_items )
         
@@ -229,7 +224,7 @@ class MenuChoiceButton( MenuMixin, ClientGUICommon.BetterButton ):
     
     def wheelEvent( self, event ):
         
-        can_do_it = HG.client_controller.new_options.GetBoolean( 'menu_choice_buttons_can_mouse_scroll' )
+        can_do_it = CG.client_controller.new_options.GetBoolean( 'menu_choice_buttons_can_mouse_scroll' )
         
         if can_do_it:
             

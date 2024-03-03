@@ -5,8 +5,10 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
 from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
@@ -37,7 +39,7 @@ class EditMultipleLocationContextPanel( ClientGUIScrolledPanels.EditPanel ):
             self._location_list.Append( name, ( HC.CONTENT_STATUS_CURRENT, service_key ), starts_checked = starts_checked )
             
         
-        advanced_mode = HG.client_controller.new_options.GetBoolean( 'advanced_mode' )
+        advanced_mode = CG.client_controller.new_options.GetBoolean( 'advanced_mode' )
         
         if advanced_mode and not only_local_file_domains_allowed:
             
@@ -46,7 +48,7 @@ class EditMultipleLocationContextPanel( ClientGUIScrolledPanels.EditPanel ):
                 name = service.GetName()
                 service_key = service.GetServiceKey()
                 
-                if service_key in ( CC.COMBINED_FILE_SERVICE_KEY, CC.TRASH_SERVICE_KEY ):
+                if service.GetServiceType() in HC.FILE_SERVICES_WITH_NO_DELETE_RECORD:
                     
                     continue
                     
@@ -56,6 +58,12 @@ class EditMultipleLocationContextPanel( ClientGUIScrolledPanels.EditPanel ):
                 self._location_list.Append( 'deleted from {}'.format( name ), ( HC.CONTENT_STATUS_DELETED, service_key ), starts_checked = starts_checked )
                 
             
+        
+        height_rows = min( 24, self._location_list.count() )
+        
+        ( gumpf, min_height ) = ClientGUIFunctions.ConvertTextToPixels( self._location_list, ( 24, height_rows + 2 ) )
+        
+        self._location_list.setMinimumHeight( min_height )
         
         vbox = QP.VBoxLayout()
         
@@ -74,7 +82,7 @@ class EditMultipleLocationContextPanel( ClientGUIScrolledPanels.EditPanel ):
         
         location_context = self._GetValue()
         
-        location_context.ClearSurplusLocalFilesServices( HG.client_controller.services_manager.GetServiceType )
+        location_context.ClearSurplusLocalFilesServices( CG.client_controller.services_manager.GetServiceType )
         
         if set( location_context.GetStatusesAndServiceKeysList() ) != set( self._location_list.GetValue() ):
             
@@ -142,9 +150,11 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
         
         services = ClientLocation.GetPossibleFileDomainServicesInOrder( self._IsAllKnownFilesServiceTypeAllowed(), self._only_importable_domains_allowed )
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         last_seen_service_type = None
+        
+        we_have_checked_something = False
         
         for service in services:
             
@@ -164,7 +174,21 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
                 name = service.GetName()
                 
             
-            ClientGUIMenus.AppendMenuItem( menu, name, 'Change the current file domain to {}.'.format( service.GetName() ), self.SetValue, location_context )
+            desc = 'Change the current file domain to {}.'.format( service.GetName() )
+            
+            if service.GetServiceKey() == CC.COMBINED_DELETED_FILE_SERVICE_KEY:
+                
+                desc += ' Note this includes files deleted from any domain at all, including those removed from one local file service but still in another local file service.'
+                
+            
+            check_it = location_context == self._location_context
+            
+            ClientGUIMenus.AppendMenuCheckItem( menu, name, desc, check_it, self.SetValue, location_context )
+            
+            if check_it:
+                
+                we_have_checked_something = True
+                
             
             last_seen_service_type = service.GetServiceType()
             
@@ -174,13 +198,22 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
                 
                 location_context = ClientLocation.LocationContext( current_service_keys = ( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, ), deleted_service_keys = ( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, ) )
                 
-                ClientGUIMenus.AppendMenuItem( menu, 'all files ever imported/deleted', 'Change the current file domain to all current and deleted files your client has seen.', self.SetValue, location_context )
+                check_it = location_context == self._location_context
+                
+                ClientGUIMenus.AppendMenuCheckItem( menu, 'all files ever imported or deleted', 'Change the current file domain to all current and deleted files your client has seen.', check_it, self.SetValue, location_context )
+                
+                if check_it:
+                    
+                    we_have_checked_something = True
+                    
                 
             
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'multiple/deleted locations', 'Change the current file domain to something with multiple locations.', self._EditMultipleLocationContext )
+        check_it = not we_have_checked_something
+        
+        ClientGUIMenus.AppendMenuCheckItem( menu, 'multiple/deleted locations', 'Change the current file domain to something with multiple locations.', check_it, self._EditMultipleLocationContext )
         
         CGC.core().PopupMenu( self, menu )
         
@@ -206,7 +239,7 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
         
         if self._all_known_files_allowed:
             
-            if self._all_known_files_allowed_only_in_advanced_mode and not HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+            if self._all_known_files_allowed_only_in_advanced_mode and not CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
                 
                 return False
                 
@@ -241,7 +274,7 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
         
         location_context = location_context.Duplicate()
         
-        location_context.FixMissingServices( HG.client_controller.services_manager.FilterValidServiceKeys )
+        location_context.FixMissingServices( CG.client_controller.services_manager.FilterValidServiceKeys )
         
         if not force_label:
             
@@ -259,7 +292,7 @@ class LocationSearchContextButton( ClientGUICommon.BetterButton ):
             
         else:
             
-            text = self._location_context.ToString( HG.client_controller.services_manager.GetName )
+            text = self._location_context.ToString( CG.client_controller.services_manager.GetName )
             
         
         self.setText( text )

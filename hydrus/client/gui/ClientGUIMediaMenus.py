@@ -11,6 +11,7 @@ from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
 from hydrus.client import ClientPaths
 from hydrus.client.gui import ClientGUIMedia
@@ -25,28 +26,28 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
     
     multiple_selected = num_selected > 1
     
-    duplicates_menu = QW.QMenu( menu )
+    duplicates_menu = ClientGUIMenus.GenerateMenu( menu )
     
     focused_hash = focus_singleton.GetHash()
     
     combined_local_location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
     
-    if HG.client_controller.DBCurrentlyDoingJob():
+    if CG.client_controller.DBCurrentlyDoingJob():
         
         file_duplicate_info = {}
         all_local_files_file_duplicate_info = {}
         
     else:
         
-        file_duplicate_info = HG.client_controller.Read( 'file_duplicate_info', location_context, focused_hash )
+        file_duplicate_info = CG.client_controller.Read( 'file_duplicate_info', location_context, focused_hash )
         
-        if location_context.current_service_keys.isdisjoint( HG.client_controller.services_manager.GetServiceKeys( HC.SPECIFIC_LOCAL_FILE_SERVICES ) ):
+        if location_context.current_service_keys.isdisjoint( CG.client_controller.services_manager.GetServiceKeys( HC.SPECIFIC_LOCAL_FILE_SERVICES ) ):
             
             all_local_files_file_duplicate_info = {}
             
         else:
             
-            all_local_files_file_duplicate_info = HG.client_controller.Read( 'file_duplicate_info', combined_local_location_context, focused_hash )
+            all_local_files_file_duplicate_info = CG.client_controller.Read( 'file_duplicate_info', combined_local_location_context, focused_hash )
             
         
     
@@ -82,9 +83,9 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
             
             if len( view_duplicate_relations_jobs ) > 1:
                 
-                label = '-for {}-'.format( job_location_context.ToString( HG.client_controller.services_manager.GetName ) )
+                label = '-for {}-'.format( job_location_context.ToString( CG.client_controller.services_manager.GetName ) )
                 
-                ClientGUIMenus.AppendMenuLabel( duplicates_menu, label, label )
+                ClientGUIMenus.AppendMenuLabel( duplicates_menu, label )
                 
             
             if HC.DUPLICATE_MEMBER in file_duplicate_types_to_counts:
@@ -95,7 +96,16 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
                     
                 else:
                     
-                    ClientGUIMenus.AppendMenuItem( duplicates_menu, 'show the best quality file of this file\'s group', 'Load up a new search with this file\'s best quality duplicate.', ClientGUIMedia.ShowDuplicatesInNewPage, job_location_context, focused_hash, HC.DUPLICATE_KING )
+                    num_other_dupe_members_in_this_domain = file_duplicate_types_to_counts[ HC.DUPLICATE_MEMBER ]
+                    
+                    if num_other_dupe_members_in_this_domain == 0:
+                        
+                        ClientGUIMenus.AppendMenuLabel( duplicates_menu, 'cannot show the best quality file of this file\'s group here, it is not in this domain', 'The king of this group has probably been deleted from this domain.' )
+                        
+                    else:
+                        
+                        ClientGUIMenus.AppendMenuItem( duplicates_menu, 'show the best quality file of this file\'s group', 'Load up a new search with this file\'s best quality duplicate.', ClientGUIMedia.ShowDuplicatesInNewPage, job_location_context, focused_hash, HC.DUPLICATE_KING )
+                        
                     
                 
                 ClientGUIMenus.AppendSeparator( duplicates_menu )
@@ -145,7 +155,7 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
     
     if multiple_selected or single_action_available:
         
-        duplicates_action_submenu = QW.QMenu( duplicates_menu )
+        duplicates_action_submenu = ClientGUIMenus.GenerateMenu( duplicates_menu )
         
         if len( file_duplicate_info ) == 0:
             
@@ -190,14 +200,14 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
             
             ClientGUIMenus.AppendSeparator( duplicates_action_submenu )
             
-            duplicates_edit_action_submenu = QW.QMenu( duplicates_action_submenu )
+            duplicates_edit_action_submenu = ClientGUIMenus.GenerateMenu( duplicates_action_submenu )
             
             for duplicate_type in ( HC.DUPLICATE_BETTER, HC.DUPLICATE_SAME_QUALITY ):
                 
                 ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[duplicate_type], 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateContentMergeOptions, win, duplicate_type )
                 
             
-            if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+            if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
                 
                 ClientGUIMenus.AppendMenuItem( duplicates_edit_action_submenu, 'for ' + HC.duplicate_type_string_lookup[HC.DUPLICATE_ALTERNATE] + ' (advanced!)', 'Edit what happens when you set this status.', ClientGUIMedia.EditDuplicateContentMergeOptions, win, HC.DUPLICATE_ALTERNATE )
                 
@@ -215,7 +225,7 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
             
             ClientGUIMenus.AppendSeparator( duplicates_action_submenu )
             
-            duplicates_single_dissolution_menu = QW.QMenu( duplicates_action_submenu )
+            duplicates_single_dissolution_menu = ClientGUIMenus.GenerateMenu( duplicates_action_submenu )
             
             if focus_can_be_searched:
                 
@@ -254,9 +264,9 @@ def AddDuplicatesMenu( win: QW.QWidget, menu: QW.QMenu, location_context: Client
         
         if multiple_selected:
             
-            if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+            if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
                 
-                duplicates_multiple_dissolution_menu = QW.QMenu( duplicates_action_submenu )
+                duplicates_multiple_dissolution_menu = ClientGUIMenus.GenerateMenu( duplicates_action_submenu )
                 
                 ClientGUIMenus.AppendMenuItem( duplicates_multiple_dissolution_menu, 'schedule these files to be searched for potentials again', 'Queue these files for another potentials search. Will not remove any existing potentials.', win.ProcessApplicationCommand, CAC.ApplicationCommand.STATICCreateSimpleCommand( CAC.SIMPLE_DUPLICATE_MEDIA_RESET_POTENTIAL_SEARCH ) )
                 ClientGUIMenus.AppendMenuItem( duplicates_multiple_dissolution_menu, 'remove these files\' potential relationships', 'Clear out these files\' potential relationships.', win.ProcessApplicationCommand, CAC.ApplicationCommand.STATICCreateSimpleCommand( CAC.SIMPLE_DUPLICATE_MEDIA_REMOVE_POTENTIALS ) )
@@ -286,7 +296,7 @@ def AddFileViewingStatsMenu( menu, medias: typing.Collection[ ClientMedia.Media 
         return
         
     
-    view_style = HG.client_controller.new_options.GetInteger( 'file_viewing_stats_menu_display' )
+    view_style = CG.client_controller.new_options.GetInteger( 'file_viewing_stats_menu_display' )
     
     if view_style == CC.FILE_VIEWING_STATS_MENU_DISPLAY_NONE:
         
@@ -321,7 +331,7 @@ def AddFileViewingStatsMenu( menu, medias: typing.Collection[ ClientMedia.Media 
             
         elif view_style == CC.FILE_VIEWING_STATS_MENU_DISPLAY_MEDIA_AND_PREVIEW_IN_SUBMENU:
             
-            submenu = QW.QMenu( menu )
+            submenu = ClientGUIMenus.GenerateMenu( menu )
             
             ClientGUIMenus.AppendMenuLabel( submenu, preview_line )
             
@@ -339,6 +349,11 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
     
     # figure out which urls this focused file has
     
+    if focus_media.IsCollection():
+        
+        focus_media = focus_media.GetDisplayMedia()
+        
+    
     focus_urls = focus_media.GetLocationsManager().GetURLs()
     
     focus_matched_labels_and_urls = []
@@ -351,7 +366,7 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
             
             try:
                 
-                url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url )
+                url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url )
                 
             except HydrusExceptions.URLClassException:
                 
@@ -383,69 +398,73 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
     selected_media_url_classes = set()
     multiple_or_unmatching_selection_url_classes = False
     
-    if selected_media is not None and len( selected_media ) > 1:
+    if selected_media is not None:
         
         selected_media = ClientMedia.FlattenMedia( selected_media )
         
-        SAMPLE_SIZE = 256
-        
-        if len( selected_media ) > SAMPLE_SIZE:
+        if len( selected_media ) > 1:
             
-            selected_media_sample = random.sample( selected_media, SAMPLE_SIZE )
+            SAMPLE_SIZE = 256
             
-        else:
-            
-            selected_media_sample = selected_media
-            
-        
-        for media in selected_media_sample:
-            
-            media_urls = media.GetLocationsManager().GetURLs()
-            
-            for url in media_urls:
+            if len( selected_media ) > SAMPLE_SIZE:
                 
-                try:
-                    
-                    url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url )
-                    
-                except HydrusExceptions.URLClassException:
-                    
-                    continue
-                    
+                selected_media_sample = random.sample( selected_media, SAMPLE_SIZE )
                 
-                if url_class is None:
-                    
-                    multiple_or_unmatching_selection_url_classes = True
-                    
-                else:
-                    
-                    selected_media_url_classes.add( url_class )
-                    
+            else:
+                
+                selected_media_sample = selected_media
                 
             
-        
-        if len( selected_media_url_classes ) > 1:
+            for media in selected_media_sample:
+                
+                media_urls = media.GetLocationsManager().GetURLs()
+                
+                for url in media_urls:
+                    
+                    try:
+                        
+                        url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url )
+                        
+                    except HydrusExceptions.URLClassException:
+                        
+                        continue
+                        
+                    
+                    if url_class is None:
+                        
+                        multiple_or_unmatching_selection_url_classes = True
+                        
+                    else:
+                        
+                        selected_media_url_classes.add( url_class )
+                        
+                    
+                
             
-            multiple_or_unmatching_selection_url_classes = True
+            if len( selected_media_url_classes ) > 1:
+                
+                multiple_or_unmatching_selection_url_classes = True
+                
             
         
     
     if len( focus_labels_and_urls ) > 0 or len( selected_media_url_classes ) > 0 or multiple_or_unmatching_selection_url_classes:
         
-        urls_menu = QW.QMenu( menu )
+        urls_menu = ClientGUIMenus.GenerateMenu( menu )
         
-        urls_visit_menu = QW.QMenu( urls_menu )
-        urls_copy_menu = QW.QMenu( urls_menu )
+        urls_visit_menu = ClientGUIMenus.GenerateMenu( urls_menu )
+        urls_copy_menu = ClientGUIMenus.GenerateMenu( urls_menu )
         
         # copy each this file's urls (of a particular type)
         
         if len( focus_labels_and_urls ) > 0:
             
-            for ( label, url ) in focus_labels_and_urls:
-                
-                ClientGUIMenus.AppendMenuItem( urls_visit_menu, label, 'Open this url in your web browser.', ClientPaths.LaunchURLInWebBrowser, url )
-                ClientGUIMenus.AppendMenuItem( urls_copy_menu, label, 'Copy this url to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', url )
-                
+            MAX_TO_SHOW = 15
+            
+            description = 'Open this url in your web browser.'
+            
+            ClientGUIMenus.SpamItems( urls_visit_menu, [ ( label, description, HydrusData.Call( ClientPaths.LaunchURLInWebBrowser, url ) ) for ( label, url ) in focus_labels_and_urls ], MAX_TO_SHOW )
+            ClientGUIMenus.SpamLabels( urls_copy_menu, focus_labels_and_urls, MAX_TO_SHOW )
             
         
         # copy this file's urls
@@ -471,7 +490,7 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
             
             label = 'copy this file\'s ' + HydrusData.ToHumanInt( len( urls ) ) + ' recognised urls to your clipboard'
             
-            ClientGUIMenus.AppendMenuItem( urls_copy_menu, label, 'Copy these urls to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', urls_string )
+            ClientGUIMenus.AppendMenuItem( urls_copy_menu, label, 'Copy these urls to your clipboard.', CG.client_controller.pub, 'clipboard', 'text', urls_string )
             
         
         if multiple_or_unmatching_focus_url_classes:
@@ -486,7 +505,7 @@ def AddKnownURLsViewCopyMenu( win, menu, focus_media, selected_media = None ):
             
             label = 'copy this file\'s ' + HydrusData.ToHumanInt( len( urls ) ) + ' urls to your clipboard'
             
-            ClientGUIMenus.AppendMenuItem( urls_copy_menu, label, 'Copy this url to your clipboard.', HG.client_controller.pub, 'clipboard', 'text', urls_string )
+            ClientGUIMenus.AppendMenuItem( urls_copy_menu, label, 'Copy this url to your clipboard.', CG.client_controller.pub, 'clipboard', 'text', urls_string )
             
         
         # now by url match type
@@ -546,7 +565,7 @@ def AddLocalFilesMoveAddToMenu( win: QW.QWidget, menu: QW.QMenu, local_duplicabl
         return
         
     
-    local_action_menu = QW.QMenu( menu )
+    local_action_menu = ClientGUIMenus.GenerateMenu( menu )
     
     if len( local_duplicable_to_file_service_keys ) > 0:
         
@@ -559,7 +578,7 @@ def AddLocalFilesMoveAddToMenu( win: QW.QWidget, menu: QW.QMenu, local_duplicabl
                 data = ( s_k, HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, None )
             )
             
-            label = HG.client_controller.services_manager.GetName( s_k )
+            label = CG.client_controller.services_manager.GetName( s_k )
             description = 'Duplicate the files to this local file service.'
             call = HydrusData.Call( process_application_command_call, application_command )
             
@@ -589,7 +608,7 @@ def AddLocalFilesMoveAddToMenu( win: QW.QWidget, menu: QW.QMenu, local_duplicabl
                 data = ( dest_s_k, HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_MOVE, source_s_k )
             )
             
-            label = 'from {} to {}'.format( HG.client_controller.services_manager.GetName( source_s_k ), HG.client_controller.services_manager.GetName( dest_s_k ) )
+            label = 'from {} to {}'.format( CG.client_controller.services_manager.GetName( source_s_k ), CG.client_controller.services_manager.GetName( dest_s_k ) )
             description = 'Add the files to the destination and delete from the source.'
             call = HydrusData.Call( process_application_command_call, application_command )
             
@@ -615,7 +634,7 @@ def AddManageFileViewingStatsMenu( win: QW.QWidget, menu: QW.QMenu, flat_medias:
     
     # add test here for if media actually has stats, edit them, all that
     
-    submenu = QW.QMenu( menu )
+    submenu = ClientGUIMenus.GenerateMenu( menu )
     
     ClientGUIMenus.AppendMenuItem( submenu, 'clear', 'Clear all the recorded file viewing stats for the selected files.', ClientGUIMedia.DoClearFileViewingStats, win, flat_medias )
     
@@ -626,7 +645,7 @@ def AddPrettyInfoLines( menu, pretty_info_lines ):
     
     def add_pretty_info_str( m, line ):
         
-        ClientGUIMenus.AppendMenuLabel( m, line, line )
+        ClientGUIMenus.AppendMenuLabel( m, line )
         
     
     def add_pretty_info_rows( m, rows ):
@@ -650,7 +669,7 @@ def AddPrettyInfoLines( menu, pretty_info_lines ):
                     continue
                     
                 
-                lines_submenu = QW.QMenu( m )
+                lines_submenu = ClientGUIMenus.GenerateMenu( m )
                 
                 add_pretty_info_rows( lines_submenu, rows )
                 
@@ -664,7 +683,7 @@ def AddPrettyInfoLines( menu, pretty_info_lines ):
 
 def AddServiceKeyLabelsToMenu( menu, service_keys, phrase ):
     
-    services_manager = HG.client_controller.services_manager
+    services_manager = CG.client_controller.services_manager
     
     if len( service_keys ) == 1:
         
@@ -678,7 +697,7 @@ def AddServiceKeyLabelsToMenu( menu, service_keys, phrase ):
         
     else:
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         for service_key in service_keys:
             
@@ -687,7 +706,7 @@ def AddServiceKeyLabelsToMenu( menu, service_keys, phrase ):
             ClientGUIMenus.AppendMenuLabel( submenu, name )
             
         
-        ClientGUIMenus.AppendMenu( menu, submenu, phrase + '\u2026' )
+        ClientGUIMenus.AppendMenu( menu, submenu, phrase + HC.UNICODE_ELLIPSIS )
         
     
 
@@ -695,7 +714,7 @@ def AddServiceKeysToMenu( menu, service_keys, submenu_name, description, bare_ca
     
     menu_tuples = []
     
-    services_manager = HG.client_controller.services_manager
+    services_manager = CG.client_controller.services_manager
     
     for service_key in service_keys:
         

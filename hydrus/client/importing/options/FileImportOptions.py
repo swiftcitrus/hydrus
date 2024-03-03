@@ -4,13 +4,13 @@ import typing
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
 from hydrus.client.importing.options import PresentationImportOptions
+from hydrus.client.search import ClientSearch
 
 IMPORT_TYPE_QUIET = 0
 IMPORT_TYPE_LOUD = 1
@@ -19,7 +19,7 @@ def GetRealFileImportOptions( file_import_options: "FileImportOptions", loud_or_
     
     if file_import_options.IsDefault():
         
-        file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( loud_or_quiet )
+        file_import_options = CG.client_controller.new_options.GetDefaultFileImportOptions( loud_or_quiet )
         
     
     return file_import_options
@@ -40,7 +40,7 @@ class FileImportOptions( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_FILE_IMPORT_OPTIONS
     SERIALISABLE_NAME = 'File Import Options'
-    SERIALISABLE_VERSION = 9
+    SERIALISABLE_VERSION = 10
     
     def __init__( self ):
         
@@ -64,7 +64,7 @@ class FileImportOptions( HydrusSerialisable.SerialisableBase ):
         
         try:
             
-            fallback = HG.client_controller.services_manager.GetLocalMediaFileServices()[0].GetServiceKey()
+            fallback = CG.client_controller.services_manager.GetLocalMediaFileServices()[0].GetServiceKey()
             
         except:
             
@@ -277,6 +277,33 @@ class FileImportOptions( HydrusSerialisable.SerialisableBase ):
             return ( 9, new_serialisable_info )
             
         
+        if version == 9:
+            
+            ( pre_import_options, post_import_options, serialisable_presentation_import_options, is_default ) = old_serialisable_info
+            
+            ( exclude_deleted, preimport_hash_check_type, preimport_url_check_type, preimport_url_check_looks_for_neighbours, allow_decompression_bombs, serialisable_filetype_filter_predicate, min_size, max_size, max_gif_size, min_resolution, max_resolution, serialisable_import_destination_location_context ) = pre_import_options
+            
+            filetype_filter_predicate = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_filetype_filter_predicate )
+            
+            mimes = list( filetype_filter_predicate.GetValue() )
+            
+            if HC.GENERAL_APPLICATION in mimes:
+                
+                mimes.append( HC.GENERAL_APPLICATION_ARCHIVE )
+                mimes.append( HC.GENERAL_IMAGE_PROJECT )
+                
+                filetype_filter_predicate = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, value = mimes )
+                
+            
+            serialisable_filetype_filter_predicate = filetype_filter_predicate.GetSerialisableTuple()
+            
+            pre_import_options = ( exclude_deleted, preimport_hash_check_type, preimport_url_check_type, preimport_url_check_looks_for_neighbours, allow_decompression_bombs, serialisable_filetype_filter_predicate, min_size, max_size, max_gif_size, min_resolution, max_resolution, serialisable_import_destination_location_context )
+            
+            new_serialisable_info = ( pre_import_options, post_import_options, serialisable_presentation_import_options, is_default )
+            
+            return ( 10, new_serialisable_info )
+            
+        
     
     def AllowsDecompressionBombs( self ):
         
@@ -307,7 +334,7 @@ class FileImportOptions( HydrusSerialisable.SerialisableBase ):
             raise HydrusExceptions.FileImportRulesException( 'File was ' + HydrusData.ToHumanBytes( size ) + ' but the upper limit is ' + HydrusData.ToHumanBytes( self._max_size ) + '.' )
             
         
-        if mime == HC.IMAGE_GIF and self._max_gif_size is not None and size > self._max_gif_size:
+        if mime == HC.ANIMATION_GIF and self._max_gif_size is not None and size > self._max_gif_size:
             
             raise HydrusExceptions.FileImportRulesException( 'File was ' + HydrusData.ToHumanBytes( size ) + ' but the upper limit for gifs is ' + HydrusData.ToHumanBytes( self._max_gif_size ) + '.' )
             
@@ -360,7 +387,8 @@ class FileImportOptions( HydrusSerialisable.SerialisableBase ):
         
         if possible_mime is not None:
             
-            if possible_mime == HC.IMAGE_GIF and self._max_gif_size is not None and num_bytes > self._max_gif_size:
+            # this should always be animation_gif, but let's allow for future confusion
+            if possible_mime in ( HC.ANIMATION_GIF, HC.IMAGE_GIF, HC.UNDETERMINED_GIF ) and self._max_gif_size is not None and num_bytes > self._max_gif_size:
                 
                 raise HydrusExceptions.FileImportRulesException( error_prefix + HydrusData.ToHumanBytes( num_bytes ) + ' but the upper limit for gifs is ' + HydrusData.ToHumanBytes( self._max_gif_size ) + '.' )
                 

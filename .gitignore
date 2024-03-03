@@ -56,8 +56,10 @@ crash.log
 
 # in case user adds their own
 /bin/ffmpeg.exe
+/bin/ffmpeg
 /mpv-1.dll
 /mpv-2.dll
+/libmpv-2.dll
 /sqlite3.dll
 
 # Environments
@@ -73,7 +75,12 @@ venv.bak/
 /client-user.bat
 /client-user.sh
 /client-user.command
+/hydrus_client-user.bat
+/hydrus_client-user.sh
+/hydrus_client-user.command
 
 # docs builds
 /site/
 /help/
+
+.DS_Store

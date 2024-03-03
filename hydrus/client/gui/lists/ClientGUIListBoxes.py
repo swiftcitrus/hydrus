@@ -12,15 +12,17 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusLists
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
 from hydrus.client import ClientSerialisable
 from hydrus.client.gui import ClientGUIAsync
 from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIShortcuts
@@ -34,6 +36,7 @@ from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.media import ClientMedia
 from hydrus.client.metadata import ClientTags
 from hydrus.client.metadata import ClientTagSorting
+from hydrus.client.search import ClientSearch
 
 class BetterQListWidget( QW.QListWidget ):
     
@@ -417,7 +420,7 @@ class AddEditDeleteListBox( QW.QWidget ):
             
             json = export_object.DumpToString()
             
-            HG.client_controller.pub( 'clipboard', 'text', json )
+            CG.client_controller.pub( 'clipboard', 'text', json )
             
         
     
@@ -498,11 +501,13 @@ class AddEditDeleteListBox( QW.QWidget ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -515,7 +520,7 @@ class AddEditDeleteListBox( QW.QWidget ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Hydrus Object(s)', e )
             
         
     
@@ -533,7 +538,9 @@ class AddEditDeleteListBox( QW.QWidget ):
                         
                     except Exception as e:
                         
-                        QW.QMessageBox.critical( self, 'Error', str(e) )
+                        HydrusData.PrintException( e )
+                        
+                        ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', str(e) )
                         
                         return
                         
@@ -544,9 +551,11 @@ class AddEditDeleteListBox( QW.QWidget ):
                         
                         self._ImportObject( obj )
                         
-                    except:
+                    except Exception as e:
                         
-                        QW.QMessageBox.critical( self, 'Error', 'I could not understand what was encoded in the png!' )
+                        HydrusData.PrintException( e )
+                        
+                        ClientGUIDialogsMessage.ShowCritical( self, 'Problem importing!', 'I could not understand what was encoded in the png!' )
                         
                         return
                         
@@ -614,7 +623,7 @@ class AddEditDeleteListBox( QW.QWidget ):
                 message += os.linesep * 2
                 message += os.linesep.join( ( HydrusData.GetTypeName( o ) for o in self._permitted_object_types ) )
                 
-                QW.QMessageBox.critical( self, 'Error', message )
+                ClientGUIDialogsMessage.ShowWarning( self, message )
                 
             
             if len( other_bad_errors ) > 0:
@@ -623,14 +632,14 @@ class AddEditDeleteListBox( QW.QWidget ):
                 message += os.linesep * 2
                 message += os.linesep.join( other_bad_errors )
                 
-                QW.QMessageBox.critical( self, 'Error', message )
+                ClientGUIDialogsMessage.ShowWarning( self, message )
                 
             
             if num_added > 0:
                 
                 message = '{} objects added!'.format( HydrusData.ToHumanInt( num_added ) )
                 
-                QW.QMessageBox.information( self, 'Success', message )
+                ClientGUIDialogsMessage.ShowInformation( self, message )
                 
             
         
@@ -1017,6 +1026,7 @@ class ListBox( QW.QScrollArea ):
         
         self._height_num_chars = height_num_chars
         self._minimum_height_num_chars = 8
+        self._max_height_num_chars = None
         
         self._num_rows_per_page = 0
         
@@ -1154,9 +1164,38 @@ class ListBox( QW.QScrollArea ):
         self._positional_indices_to_terms = {}
         self._total_positional_rows = 0
         
+        self._shift_click_start_logical_index = None
+        self._logical_indices_selected_this_shift_click = set()
+        self._logical_indices_deselected_this_shift_click = set()
+        self._in_drag = False
+        self._this_drag_is_a_deselection = False
+        
         self._last_hit_logical_index = None
         
         self._last_view_start = None
+        
+    
+    def _CopySelectedTexts( self ):
+        
+        if len( self._selected_terms ) > 1:
+            
+            # keep order
+            terms = [ term for term in self._ordered_terms if term in self._selected_terms ]
+            
+        else:
+            
+            # nice and fast
+            terms = self._selected_terms
+            
+        
+        texts = [ term.GetCopyableText() for term in terms ]
+        
+        if len( texts ) > 0:
+            
+            text = '\n'.join( texts )
+            
+            CG.client_controller.pub( 'clipboard', 'text', text )
+            
         
     
     def _DataHasChanged( self ):
@@ -1172,7 +1211,17 @@ class ListBox( QW.QScrollArea ):
     
     def _Deselect( self, index ):
         
-        term = self._GetTermFromLogicalIndex( index )
+        try:
+            
+            term = self._GetTermFromLogicalIndex( index )
+            
+        except HydrusExceptions.DataMissing:
+            
+            # we've got ghosts, so exorcise them
+            self._DeselectAll()
+            
+            return
+            
         
         self._selected_terms.discard( term )
         
@@ -1704,7 +1753,7 @@ class ListBox( QW.QScrollArea ):
             return
             
         
-        fades_can_ever_happen = QtInit.WE_ARE_QT6 and HG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' )
+        fades_can_ever_happen = QtInit.WE_ARE_QT6 and CG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' )
         
         current_visible_index = first_visible_positional_index
         
@@ -1841,9 +1890,16 @@ class ListBox( QW.QScrollArea ):
             return
             
         
-        for term in removable_terms:
+        if len( removable_terms ) > len( self._ordered_terms ) ** 0.5:
             
-            self._ordered_terms.remove( term )
+            self._ordered_terms = [ term for term in self._ordered_terms if term not in removable_terms ]
+            
+        else:
+            
+            for term in removable_terms:
+                
+                self._ordered_terms.remove( term )
+                
             
         
         self._selected_terms.difference_update( removable_terms )
@@ -1952,6 +2008,10 @@ class ListBox( QW.QScrollArea ):
                 
                 self.widget().update()
                 
+            elif ctrl and key_code in ( ord( 'C' ), ord( 'c' ), QC.Qt.Key_Insert ):
+                
+                self._CopySelectedTexts()
+                
             else:
                 
                 hit_logical_index = None
@@ -1973,10 +2033,24 @@ class ListBox( QW.QScrollArea ):
                         
                     elif self._last_hit_logical_index is not None:
                         
-                        if key_code in ( QC.Qt.Key_Up, ):
+                        if ctrl and key_code in ( ord( 'P' ), ord( 'p' ) ):
+                            
+                            # remove ctrl key to make it act exactly like the up arrow
+                            ctrl = False
                             
                             hit_logical_index = ( self._last_hit_logical_index - 1 ) % len( self._ordered_terms )
                             
+                        elif ctrl and key_code in ( ord( 'N' ), ord( 'n' ) ):
+                            
+                            # remove ctrl key to make it act exactly like the down arrow
+                            ctrl = False
+                            
+                            hit_logical_index = ( self._last_hit_logical_index + 1 ) % len( self._ordered_terms )
+                        
+                        elif key_code in ( QC.Qt.Key_Up, ):
+                            
+                            hit_logical_index = ( self._last_hit_logical_index - 1 ) % len( self._ordered_terms )
+                        
                         elif key_code in ( QC.Qt.Key_Down, ):
                             
                             hit_logical_index = ( self._last_hit_logical_index + 1 ) % len( self._ordered_terms )
@@ -2014,47 +2088,56 @@ class ListBox( QW.QScrollArea ):
     
     def eventFilter( self, watched, event ):
         
-        # we do the event filter since we need to 'scroll' the click, so we capture the event on the widget, not ourselves
-        
-        if watched == self.widget():
+        try:
             
-            if event.type() == QC.QEvent.MouseButtonPress:
+            # we do the event filter since we need to 'scroll' the click, so we capture the event on the widget, not ourselves
+            
+            if watched == self.widget():
                 
-                self._HandleClick( event )
-                
-                event.accept()
-                
-                return True
-                
-            elif event.type() == QC.QEvent.MouseButtonRelease:
-                
-                self._in_drag = False
-                
-                event.ignore()
-                
-            elif event.type() == QC.QEvent.MouseButtonDblClick:
-                
-                if event.button() == QC.Qt.LeftButton:
+                if event.type() == QC.QEvent.MouseButtonPress:
                     
-                    ctrl_down = event.modifiers() & QC.Qt.ControlModifier
-                    shift_down = event.modifiers() & QC.Qt.ShiftModifier
+                    self._HandleClick( event )
                     
-                    action_occurred = self._Activate( ctrl_down, shift_down )
+                    event.accept()
                     
-                    if action_occurred:
+                    return True
+                    
+                elif event.type() == QC.QEvent.MouseButtonRelease:
+                    
+                    self._in_drag = False
+                    
+                    event.ignore()
+                    
+                elif event.type() == QC.QEvent.MouseButtonDblClick:
+                    
+                    if event.button() == QC.Qt.LeftButton:
                         
-                        self.mouseActivationOccurred.emit()
+                        ctrl_down = event.modifiers() & QC.Qt.ControlModifier
+                        shift_down = event.modifiers() & QC.Qt.ShiftModifier
+                        
+                        action_occurred = self._Activate( ctrl_down, shift_down )
+                        
+                        if action_occurred:
+                            
+                            self.mouseActivationOccurred.emit()
+                            
+                        
+                    else:
+                        
+                        QW.QScrollArea.mouseDoubleClickEvent( self, event )
                         
                     
-                else:
+                    event.accept()
                     
-                    QW.QScrollArea.mouseDoubleClickEvent( self, event )
+                    return True
                     
                 
-                event.accept()
-                
-                return True
-                
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
+            
+            return True
             
         
         return False
@@ -2144,6 +2227,11 @@ class ListBox( QW.QScrollArea ):
         return text_height * self._total_positional_rows + 20
         
     
+    def GetNumTerms( self ):
+        
+        return len( self._ordered_terms )
+        
+    
     def HasValues( self ):
         
         return len( self._ordered_terms ) > 0
@@ -2211,6 +2299,11 @@ class ListBox( QW.QScrollArea ):
             
             self.widget().update()
             
+        
+    
+    def SetMaximumHeightNumChars( self, maximum_height_num_chars ):
+        
+        self._maximum_height_num_chars = maximum_height_num_chars
         
     
     def SetMinimumHeightNumChars( self, minimum_height_num_chars ):
@@ -2283,29 +2376,29 @@ class ListBoxTags( ListBox ):
         
         if terms_may_have_sibling_or_parent_info:
             
-            self._show_parent_decorators = HG.client_controller.new_options.GetBoolean( 'show_parent_decorators_on_storage_taglists' )
-            self._show_sibling_decorators = HG.client_controller.new_options.GetBoolean( 'show_sibling_decorators_on_storage_taglists' )
+            self._show_parent_decorators = CG.client_controller.new_options.GetBoolean( 'show_parent_decorators_on_storage_taglists' )
+            self._show_sibling_decorators = CG.client_controller.new_options.GetBoolean( 'show_sibling_decorators_on_storage_taglists' )
             
-            self._extra_parent_rows_allowed = HG.client_controller.new_options.GetBoolean( 'expand_parents_on_storage_taglists' )
+            self._extra_parent_rows_allowed = CG.client_controller.new_options.GetBoolean( 'expand_parents_on_storage_taglists' )
             
         
         self._render_for_user = not self._tag_display_type == ClientTags.TAG_DISPLAY_STORAGE
         
         self._page_key = None # placeholder. if a subclass sets this, it changes menu behaviour to allow 'select this tag' menu pubsubs
         
-        self._sibling_connector_string = HG.client_controller.new_options.GetString( 'sibling_connector' )
+        self._sibling_connector_string = CG.client_controller.new_options.GetString( 'sibling_connector' )
         self._sibling_connector_namespace = None
         
-        if not HG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' ):
+        if not CG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' ):
             
-            self._sibling_connector_namespace = HG.client_controller.new_options.GetNoneableString( 'sibling_connector_custom_namespace_colour' )
+            self._sibling_connector_namespace = CG.client_controller.new_options.GetNoneableString( 'sibling_connector_custom_namespace_colour' )
             
         
         self._UpdateBackgroundColour()
         
-        HG.client_controller.sub( self, 'ForceTagRecalc', 'refresh_all_tag_presentation_gui' )
-        HG.client_controller.sub( self, '_UpdateBackgroundColour', 'notify_new_colourset' )
-        HG.client_controller.sub( self, 'NotifyNewOptions', 'notify_new_options' )
+        CG.client_controller.sub( self, 'ForceTagRecalc', 'refresh_all_tag_presentation_gui' )
+        CG.client_controller.sub( self, '_UpdateBackgroundColour', 'notify_new_colourset' )
+        CG.client_controller.sub( self, 'NotifyNewOptions', 'notify_new_options' )
         
     
     def _GetCopyableTagStrings( self, command ):
@@ -2406,9 +2499,29 @@ class ListBoxTags( ListBox ):
         return False
         
     
+    def _NewDuplicateFilterPage( self, predicates ):
+        
+        activate_window = CG.client_controller.new_options.GetBoolean( 'activate_window_on_tag_search_page_activation' )
+        
+        predicates = ClientGUISearch.FleshOutPredicates( self, predicates )
+        
+        if len( predicates ) == 0:
+            
+            return
+            
+        
+        s = sorted( ( predicate.ToString() for predicate in predicates ) )
+        
+        page_name = 'duplicates: ' + ', '.join( s )
+        
+        location_context = self._GetCurrentLocationContext()
+        
+        CG.client_controller.pub( 'new_page_duplicates', location_context, initial_predicates = predicates, page_name = page_name, activate_window = activate_window )
+        
+    
     def _NewSearchPages( self, pages_of_predicates ):
         
-        activate_window = HG.client_controller.new_options.GetBoolean( 'activate_window_on_tag_search_page_activation' )
+        activate_window = CG.client_controller.new_options.GetBoolean( 'activate_window_on_tag_search_page_activation' )
         
         for predicates in pages_of_predicates:
             
@@ -2425,7 +2538,7 @@ class ListBoxTags( ListBox ):
             
             location_context = self._GetCurrentLocationContext()
             
-            HG.client_controller.pub( 'new_page_query', location_context, initial_predicates = predicates, page_name = page_name, activate_window = activate_window )
+            CG.client_controller.pub( 'new_page_query', location_context, initial_predicates = predicates, page_name = page_name, activate_window = activate_window )
             
             activate_window = False
             
@@ -2439,7 +2552,7 @@ class ListBoxTags( ListBox ):
             
             text = os.linesep.join( texts )
             
-            HG.client_controller.pub( 'clipboard', 'text', text )
+            CG.client_controller.pub( 'clipboard', 'text', text )
             
         
     
@@ -2456,59 +2569,43 @@ class ListBoxTags( ListBox ):
         
         if command in ( 'hide', 'hide_namespace' ):
             
-            if len( tags ) == 1:
+            if command == 'hide':
                 
-                ( tag, ) = tags
+                message = f'Hide{HydrusData.ConvertManyStringsToNiceInsertableHumanSummary( tags )}from here?'
                 
-                if command == 'hide':
+                from hydrus.client.gui import ClientGUIDialogsQuick
+                
+                result = ClientGUIDialogsQuick.GetYesNo( self, message )
+                
+                if result != QW.QDialog.Accepted:
                     
-                    message = 'Hide "{}" from here?'.format( tag )
-                    
-                    from hydrus.client.gui import ClientGUIDialogsQuick
-                    
-                    result = ClientGUIDialogsQuick.GetYesNo( self, message )
-                    
-                    if result != QW.QDialog.Accepted:
-                        
-                        return
-                        
-                    
-                    HG.client_controller.tag_display_manager.HideTag( self._tag_display_type, CC.COMBINED_TAG_SERVICE_KEY, tag )
-                    
-                elif command == 'hide_namespace':
-                    
-                    ( namespace, subtag ) = HydrusTags.SplitTag( tag )
-                    
-                    if namespace == '':
-                        
-                        insert = 'unnamespaced'
-                        
-                    else:
-                        
-                        insert = '"{}"'.format( namespace )
-                        
-                    
-                    message = 'Hide {} tags from here?'.format( insert )
-                    
-                    from hydrus.client.gui import ClientGUIDialogsQuick
-                    
-                    result = ClientGUIDialogsQuick.GetYesNo( self, message )
-                    
-                    if result != QW.QDialog.Accepted:
-                        
-                        return
-                        
-                    
-                    if namespace != '':
-                        
-                        namespace += ':'
-                        
-                    
-                    HG.client_controller.tag_display_manager.HideTag( self._tag_display_type, CC.COMBINED_TAG_SERVICE_KEY, namespace )
+                    return
                     
                 
-                HG.client_controller.pub( 'notify_new_tag_display_rules' )
+                CG.client_controller.tag_display_manager.HideTags( self._tag_display_type, CC.COMBINED_TAG_SERVICE_KEY, tags )
                 
+            elif command == 'hide_namespace':
+                
+                namespaces = { namespace for ( namespace, subtag ) in ( HydrusTags.SplitTag( tag ) for tag in tags ) }
+                nice_namespaces = [ ClientTags.RenderNamespaceForUser( namespace ) for namespace in namespaces ]
+                
+                message = f'Hide{HydrusData.ConvertManyStringsToNiceInsertableHumanSummary( nice_namespaces )}tags from here?'
+                
+                from hydrus.client.gui import ClientGUIDialogsQuick
+                
+                result = ClientGUIDialogsQuick.GetYesNo( self, message )
+                
+                if result != QW.QDialog.Accepted:
+                    
+                    return
+                    
+                
+                tag_slices = [ namespace if namespace == '' else namespace + ':' for namespace in namespaces ]
+                
+                CG.client_controller.tag_display_manager.HideTags( self._tag_display_type, CC.COMBINED_TAG_SERVICE_KEY, tag_slices )
+                
+            
+            CG.client_controller.pub( 'notify_new_tag_display_rules' )
             
         else:
             
@@ -2557,7 +2654,7 @@ class ListBoxTags( ListBox ):
     
     def _UpdateBackgroundColour( self ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         self._background_colour = new_options.GetColour( CC.COLOUR_TAGS_BOX )
         
@@ -2579,48 +2676,57 @@ class ListBoxTags( ListBox ):
     
     def eventFilter( self, watched, event ):
         
-        # we do the event filter since we need to 'scroll' the click, so we capture the event on the widget, not ourselves
-        
-        if watched == self.widget():
+        try:
             
-            if event.type() == QC.QEvent.MouseButtonPress:
+            # we do the event filter since we need to 'scroll' the click, so we capture the event on the widget, not ourselves
+            
+            if watched == self.widget():
                 
-                if event.button() == QC.Qt.MiddleButton:
+                if event.type() == QC.QEvent.MouseButtonPress:
                     
-                    self._HandleClick( event )
-                    
-                    if self.can_spawn_new_windows:
+                    if event.button() == QC.Qt.MiddleButton:
                         
-                        (predicates, or_predicate, inverse_predicates, namespace_predicate, inverse_namespace_predicate) = self._GetSelectedPredicatesAndInverseCopies()
+                        self._HandleClick( event )
                         
-                        if len( predicates ) > 0:
+                        if self.can_spawn_new_windows:
                             
-                            shift_down = event.modifiers() & QC.Qt.ShiftModifier
+                            (predicates, or_predicate, inverse_predicates, namespace_predicate, inverse_namespace_predicate) = self._GetSelectedPredicatesAndInverseCopies()
                             
-                            if shift_down and or_predicate is not None:
+                            if len( predicates ) > 0:
                                 
-                                predicates = (or_predicate,)
+                                shift_down = event.modifiers() & QC.Qt.ShiftModifier
                                 
-                            self._NewSearchPages( [ predicates ] )
+                                if shift_down and or_predicate is not None:
+                                    
+                                    predicates = (or_predicate,)
+                                    
+                                self._NewSearchPages( [ predicates ] )
+                                
                             
                         
+                        event.accept()
+                        
+                        return True
+                        
                     
-                    event.accept()
+                elif event.type() == QC.QEvent.MouseButtonRelease:
                     
-                    return True
+                    if event.button() == QC.Qt.RightButton:
+                        
+                        self.ShowMenu()
+                        
+                        event.accept()
+                        
+                        return True
+                        
                     
                 
-            elif event.type() == QC.QEvent.MouseButtonRelease:
-                
-                if event.button() == QC.Qt.RightButton:
-                    
-                    self.ShowMenu()
-                    
-                    event.accept()
-                    
-                    return True
-                    
-                
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
+            
+            return True
             
         
         return ListBox.eventFilter( self, watched, event )
@@ -2628,12 +2734,12 @@ class ListBoxTags( ListBox ):
     
     def NotifyNewOptions( self ):
         
-        new_sibling_connector_string = HG.client_controller.new_options.GetString( 'sibling_connector' )
+        new_sibling_connector_string = CG.client_controller.new_options.GetString( 'sibling_connector' )
         new_sibling_connector_namespace = None
         
-        if not HG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' ):
+        if not CG.client_controller.new_options.GetBoolean( 'fade_sibling_connector' ):
             
-            new_sibling_connector_namespace = HG.client_controller.new_options.GetNoneableString( 'sibling_connector_custom_namespace_colour' )
+            new_sibling_connector_namespace = CG.client_controller.new_options.GetNoneableString( 'sibling_connector_custom_namespace_colour' )
             
         
         if new_sibling_connector_string != self._sibling_connector_string or new_sibling_connector_namespace != self._sibling_connector_namespace:
@@ -2656,7 +2762,7 @@ class ListBoxTags( ListBox ):
         
         selected_actual_tags = self._GetTagsFromTerms( self._selected_terms )
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         if self._terms_may_have_sibling_or_parent_info:
             
@@ -2693,7 +2799,7 @@ class ListBoxTags( ListBox ):
             ClientGUIMenus.AppendSeparator( menu )
             
         
-        copy_menu = QW.QMenu( menu )
+        copy_menu = ClientGUIMenus.GenerateMenu( menu )
         
         selected_copyable_tag_strings = self._GetCopyableTagStrings( COPY_SELECTED_TAGS )
         selected_copyable_subtag_strings = self._GetCopyableTagStrings( COPY_SELECTED_SUBTAGS )
@@ -2766,8 +2872,8 @@ class ListBoxTags( ListBox ):
         
         if can_show_siblings_and_parents or can_launch_sibling_and_parent_dialogs:
             
-            siblings_menu = QW.QMenu( menu )
-            parents_menu = QW.QMenu( menu )
+            siblings_menu = ClientGUIMenus.GenerateMenu( menu )
+            parents_menu = ClientGUIMenus.GenerateMenu( menu )
             
             ClientGUIMenus.AppendMenu( menu, siblings_menu, 'siblings' )
             ClientGUIMenus.AppendMenu( menu, parents_menu, 'parents' )
@@ -2795,7 +2901,7 @@ class ListBoxTags( ListBox ):
                 
                 def sp_work_callable():
                     
-                    selected_tag_to_service_keys_to_siblings_and_parents = HG.client_controller.Read( 'tag_siblings_and_parents_lookup', ( selected_tag, ) )
+                    selected_tag_to_service_keys_to_siblings_and_parents = CG.client_controller.Read( 'tag_siblings_and_parents_lookup', ( selected_tag, ) )
                     
                     service_keys_to_siblings_and_parents = selected_tag_to_service_keys_to_siblings_and_parents[ selected_tag ]
                     
@@ -2804,7 +2910,7 @@ class ListBoxTags( ListBox ):
                 
                 def sp_publish_callable( service_keys_to_siblings_and_parents ):
                     
-                    service_keys_in_order = HG.client_controller.services_manager.GetServiceKeys( HC.REAL_TAG_SERVICES )
+                    service_keys_in_order = CG.client_controller.services_manager.GetServiceKeys( HC.REAL_TAG_SERVICES )
                     
                     all_siblings = set()
                     
@@ -2852,7 +2958,7 @@ class ListBoxTags( ListBox ):
                     num_parents = len( parents_to_service_keys )
                     num_children = len( children_to_service_keys )
                     
-                    service_keys_to_service_names = { service_key : HG.client_controller.services_manager.GetName( service_key ) for service_key in service_keys_in_order }
+                    service_keys_to_service_names = { service_key : CG.client_controller.services_manager.GetName( service_key ) for service_key in service_keys_in_order }
                     
                     ALL_SERVICES_LABEL = 'all services'
                     
@@ -2922,6 +3028,8 @@ class ListBoxTags( ListBox ):
                         return service_key_group_names_and_tags
                         
                     
+                    MAX_ITEMS_HERE = 10
+                    
                     if num_siblings == 0:
                         
                         siblings_menu.setTitle( 'no siblings' )
@@ -2945,7 +3053,7 @@ class ListBoxTags( ListBox ):
                             
                             ideal_label = 'ideal is "{}" on: {}'.format( ideal, convert_service_keys_to_name_string( ideals_to_service_keys[ ideal ] ) )
                             
-                            ClientGUIMenus.AppendMenuItem( siblings_menu, ideal_label, ideal_label, HG.client_controller.pub, 'clipboard', 'text', ideal )
+                            ClientGUIMenus.AppendMenuItem( siblings_menu, ideal_label, ideal_label, CG.client_controller.pub, 'clipboard', 'text', ideal )
                             
                         
                         #
@@ -2959,10 +3067,7 @@ class ListBoxTags( ListBox ):
                                 ClientGUIMenus.AppendMenuLabel( siblings_menu, '--{}--'.format( s_k_name ) )
                                 
                             
-                            for tag in tags:
-                                
-                                ClientGUIMenus.AppendMenuLabel( siblings_menu, tag )
-                                
+                            ClientGUIMenus.SpamLabels( siblings_menu, [ ( tag, tag ) for tag in tags ], MAX_ITEMS_HERE )
                             
                         
                     
@@ -2987,19 +3092,9 @@ class ListBoxTags( ListBox ):
                                 ClientGUIMenus.AppendMenuLabel( parents_menu, '--{}--'.format( s_k_name ) )
                                 
                             
-                            for parent in parents:
-                                
-                                parent_label = 'parent: {}'.format( parent )
-                                
-                                ClientGUIMenus.AppendMenuItem( parents_menu, parent_label, parent_label, HG.client_controller.pub, 'clipboard', 'text', parent )
-                                
+                            ClientGUIMenus.SpamLabels( parents_menu, [ ( f'parent: {parent}', parent ) for parent in parents ], MAX_ITEMS_HERE )
                             
-                            for child in children:
-                                
-                                child_label = 'child: {}'.format( child )
-                                
-                                ClientGUIMenus.AppendMenuItem( parents_menu, child_label, child_label, HG.client_controller.pub, 'clipboard', 'text', child )
-                                
+                            ClientGUIMenus.SpamLabels( parents_menu, [ ( f'child: {child}', child ) for child in children ], MAX_ITEMS_HERE )
                             
                         
                     
@@ -3020,7 +3115,7 @@ class ListBoxTags( ListBox ):
                 
                 if self.can_spawn_new_windows or self._CanProvideCurrentPagePredicates():
                     
-                    search_menu = QW.QMenu( menu )
+                    search_menu = ClientGUIMenus.GenerateMenu( menu )
                     
                     ClientGUIMenus.AppendMenu( menu, search_menu, 'search' )
                     
@@ -3039,6 +3134,10 @@ class ListBoxTags( ListBox ):
                             
                             ClientGUIMenus.AppendMenuItem( search_menu, 'open new search pages for each in selection', 'Open one new search page for each selected predicate.', self._NewSearchPages, for_each_predicates )
                             
+                        
+                        ClientGUIMenus.AppendSeparator( search_menu )
+                        
+                        ClientGUIMenus.AppendMenuItem( search_menu, f'open a new duplicate filter page for {selection_string}', 'Open a new duplicate filter page starting with the selected predicates.', self._NewDuplicateFilterPage, predicates )
                         
                         ClientGUIMenus.AppendSeparator( search_menu )
                         
@@ -3131,7 +3230,7 @@ class ListBoxTags( ListBox ):
             
             if len( selected_actual_tags ) > 0 and self._page_key is not None:
                 
-                select_menu = QW.QMenu( menu )
+                select_menu = ClientGUIMenus.GenerateMenu( menu )
                 
                 tags_sorted_to_show_on_menu = HydrusTags.SortNumericTags( selected_actual_tags )
                 
@@ -3147,7 +3246,7 @@ class ListBoxTags( ListBox ):
                         
                         tags_sorted_to_show_on_menu.pop( -1 )
                         
-                        tags_sorted_to_show_on_menu_string = ', '.join( tags_sorted_to_show_on_menu + [ '\u2026' ] )
+                        tags_sorted_to_show_on_menu_string = ', '.join( tags_sorted_to_show_on_menu + [ HC.UNICODE_ELLIPSIS ] )
                         
                     
                 
@@ -3173,61 +3272,150 @@ class ListBoxTags( ListBox ):
                 
             
         
-        if len( selected_actual_tags ) == 1:
-            
-            ( selected_tag, ) = selected_actual_tags
+        if len( selected_actual_tags ) > 0:
             
             if self._tag_display_type in ( ClientTags.TAG_DISPLAY_SINGLE_MEDIA, ClientTags.TAG_DISPLAY_SELECTION_LIST ):
                 
                 ClientGUIMenus.AppendSeparator( menu )
                 
-                ( namespace, subtag ) = HydrusTags.SplitTag( selected_tag )
+                namespaces = set()
                 
-                hide_menu = QW.QMenu( menu )
+                for selected_actual_tag in selected_actual_tags:
+                    
+                    ( namespace, subtag ) = HydrusTags.SplitTag( selected_actual_tag )
+                    
+                    namespaces.add( namespace )
+                    
                 
-                ClientGUIMenus.AppendMenuItem( hide_menu, '"{}" tags from here'.format( ClientTags.RenderNamespaceForUser( namespace ) ), 'Hide this namespace from view in future.', self._ProcessMenuTagEvent, 'hide_namespace' )
-                ClientGUIMenus.AppendMenuItem( hide_menu, '"{}" from here'.format( selected_tag ), 'Hide this tag from view in future.', self._ProcessMenuTagEvent, 'hide' )
+                if len( namespaces ) == 1:
+                    
+                    namespace = list( namespaces )[0]
+                    
+                    namespace_label = f'"{ClientTags.RenderNamespaceForUser( namespace )}" tags from here'
+                    
+                else:
+                    
+                    namespace_label = f'{HydrusData.ToHumanInt( len( namespaces ) )} selected namespaces from here'
+                    
+                
+                if len( selected_actual_tags ) == 1:
+                    
+                    actual_tag = list( selected_actual_tags )[0]
+                    
+                    actual_tag_label = f'"{actual_tag}" from here'
+                    
+                else:
+                    
+                    actual_tag_label = f'{HydrusData.ToHumanInt( len( selected_actual_tags ) )} selected tags from here'
+                    
+                
+                hide_menu = ClientGUIMenus.GenerateMenu( menu )
+                
+                ClientGUIMenus.AppendMenuItem( hide_menu, namespace_label, 'Hide these namespaces from view in future.', self._ProcessMenuTagEvent, 'hide_namespace' )
+                ClientGUIMenus.AppendMenuItem( hide_menu, actual_tag_label, 'Hide these tags from view in future.', self._ProcessMenuTagEvent, 'hide' )
                 
                 ClientGUIMenus.AppendMenu( menu, hide_menu, 'hide' )
                 
             
-            def set_favourite_tags( tag ):
+        
+        #
+        
+        def add_favourite_tags( tags ):
+            
+            if len( tags ) > 5:
                 
-                favourite_tags = list( HG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
+                message = f'Add{HydrusData.ConvertManyStringsToNiceInsertableHumanSummary( tags )}to the favourites list?'
                 
-                if selected_tag in favourite_tags:
+                from hydrus.client.gui import ClientGUIDialogsQuick
+                
+                result = ClientGUIDialogsQuick.GetYesNo( self, message )
+                
+                if result != QW.QDialog.Accepted:
                     
-                    favourite_tags.remove( tag )
+                    return
+                    
+                
+            
+            favourite_tags = set( CG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
+            
+            favourite_tags.update( tags )
+            
+            CG.client_controller.new_options.SetStringList( 'favourite_tags', list( favourite_tags ) )
+            
+            CG.client_controller.pub( 'notify_new_favourite_tags' )
+            
+        
+        def remove_favourite_tags( tags ):
+            
+            message = f'Remove{HydrusData.ConvertManyStringsToNiceInsertableHumanSummary( tags )}from the favourites list?'
+            
+            from hydrus.client.gui import ClientGUIDialogsQuick
+            
+            result = ClientGUIDialogsQuick.GetYesNo( self, message )
+            
+            if result != QW.QDialog.Accepted:
+                
+                return
+                
+            
+            favourite_tags = set( CG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
+            
+            favourite_tags.difference_update( tags )
+            
+            CG.client_controller.new_options.SetStringList( 'favourite_tags', list( favourite_tags ) )
+            
+            CG.client_controller.pub( 'notify_new_favourite_tags' )
+            
+        
+        favourite_tags = list( CG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
+        
+        to_add = set( selected_actual_tags ).difference( favourite_tags )
+        to_remove = set( selected_actual_tags ).intersection( favourite_tags )
+        
+        if len( to_add ) + len( to_remove ) > 0:
+            
+            favourites_menu = ClientGUIMenus.GenerateMenu( menu )
+            
+            if len( to_add ) > 0:
+                
+                if len( to_add ) == 1:
+                    
+                    tag = list( to_add )[0]
+                    
+                    label = f'Add "{tag}" to favourites'
                     
                 else:
                     
-                    favourite_tags.append( tag )
+                    label = f'Add {HydrusData.ToHumanInt( len( to_add ) )} selected tags to favourites'
                     
                 
-                HG.client_controller.new_options.SetStringList( 'favourite_tags', favourite_tags )
+                description = 'Add these tags to the favourites list.'
                 
-                HG.client_controller.pub( 'notify_new_favourite_tags' )
-                
-            
-            favourite_tags = list( HG.client_controller.new_options.GetStringList( 'favourite_tags' ) )
-            
-            if selected_tag in favourite_tags:
-                
-                label = 'remove "{}" from favourites'.format( selected_tag )
-                description = 'Remove this tag from your favourites'
-                
-            else:
-                
-                label = 'add "{}" to favourites'.format( selected_tag )
-                description = 'Add this tag from your favourites'
+                ClientGUIMenus.AppendMenuItem( favourites_menu, label, description, add_favourite_tags, to_add )
                 
             
-            favourites_menu = QW.QMenu( menu )
+            if len( to_remove ) > 0:
+                
+                if len( to_remove ) == 1:
+                    
+                    tag = list( to_remove )[0]
+                    
+                    label = f'Remove "{tag}" from favourites'
+                    
+                else:
+                    
+                    label = f'Remove {HydrusData.ToHumanInt( len( to_remove ) )} selected tags from favourites'
+                    
+                
+                description = 'Add these tags to the favourites list.'
+                
+                ClientGUIMenus.AppendMenuItem( favourites_menu, label, description, remove_favourite_tags, to_remove )
+                
             
-            ClientGUIMenus.AppendMenuItem( favourites_menu, label, description, set_favourite_tags, selected_tag )
+            ClientGUIMenus.AppendMenu( menu, favourites_menu, 'favourites' )
             
-            m = ClientGUIMenus.AppendMenu( menu, favourites_menu, 'favourites' )
-            
+        
+        #
         
         self.AddAdditionalMenuItems( menu )
         
@@ -3241,7 +3429,7 @@ class ListBoxTags( ListBox ):
     
 class ListBoxTagsPredicates( ListBoxTags ):
     
-    def __init__( self, *args, tag_display_type = ClientTags.TAG_DISPLAY_ACTUAL, **kwargs ):
+    def __init__( self, *args, tag_display_type = ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, **kwargs ):
         
         ListBoxTags.__init__( self, *args, tag_display_type = tag_display_type, **kwargs )
         
@@ -3497,7 +3685,7 @@ class ListBoxTagsFilter( ListBoxTags ):
     
 class ListBoxTagsDisplayCapable( ListBoxTags ):
     
-    def __init__( self, parent, service_key = None, tag_display_type = ClientTags.TAG_DISPLAY_ACTUAL, **kwargs ):
+    def __init__( self, parent, service_key = None, tag_display_type = ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, **kwargs ):
         
         if service_key is None:
             
@@ -3569,13 +3757,13 @@ class ListBoxTagsDisplayCapable( ListBoxTags ):
             
             terms_to_info = { term : None for term in to_lookup }
             
-            for batch_to_lookup in HydrusData.SplitListIntoChunks( to_lookup, 500 ):
+            for batch_to_lookup in HydrusLists.SplitListIntoChunks( to_lookup, 500 ):
                 
                 tags_to_terms = { term.GetTag() : term for term in batch_to_lookup }
                 
                 tags_to_lookup = set( tags_to_terms.keys() )
                 
-                db_tags_to_ideals_and_parents = HG.client_controller.Read( 'tag_display_decorators', service_key, tags_to_lookup )
+                db_tags_to_ideals_and_parents = CG.client_controller.Read( 'tag_display_decorators', service_key, tags_to_lookup )
                 
                 terms_to_info.update( { tags_to_terms[ tag ] : info for ( tag, info ) in db_tags_to_ideals_and_parents.items() } )
                 
@@ -3592,7 +3780,7 @@ class ListBoxTagsDisplayCapable( ListBoxTags ):
             
             selected_actual_tags = self._GetTagsFromTerms( self._selected_terms )
             
-            HG.client_controller.pub( 'select_files_with_tags', self._page_key, self._service_key, and_or_or, set( selected_actual_tags ) )
+            CG.client_controller.pub( 'select_files_with_tags', self._page_key, self._service_key, and_or_or, set( selected_actual_tags ) )
             
         
     
@@ -3793,7 +3981,7 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
         
         ListBoxTagsDisplayCapable.__init__( self, parent, service_key = service_key, tag_display_type = tag_display_type, height_num_chars = 24 )
         
-        self._tag_sort = HG.client_controller.new_options.GetDefaultTagSort()
+        self._tag_sort = CG.client_controller.new_options.GetDefaultTagSort()
         
         self._last_media_results = set()
         
@@ -3838,8 +4026,6 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
         
         if limit_to_these_tags is None:
             
-            self._Clear()
-            
             nonzero_tags = set()
             
             if self._show_current: nonzero_tags.update( ( tag for ( tag, count ) in self._current_tags_to_count.items() if count > 0 ) )
@@ -3847,16 +4033,19 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
             if self._show_pending: nonzero_tags.update( ( tag for ( tag, count ) in self._pending_tags_to_count.items() if count > 0 ) )
             if self._show_petitioned: nonzero_tags.update( ( tag for ( tag, count ) in self._petitioned_tags_to_count.items() if count > 0 ) )
             
+            zero_tags = { tag for tag in ( term.GetTag() for term in self._ordered_terms ) if tag not in nonzero_tags }
+            
         else:
+            
+            if len( limit_to_these_tags ) == 0:
+                
+                return
+                
             
             if not isinstance( limit_to_these_tags, set ):
                 
                 limit_to_these_tags = set( limit_to_these_tags )
                 
-            
-            clear_terms = [ self._GenerateTermFromTag( tag ) for tag in limit_to_these_tags ]
-            
-            self._RemoveTerms( clear_terms )
             
             nonzero_tags = set()
             
@@ -3865,10 +4054,58 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
             if self._show_pending: nonzero_tags.update( ( tag for ( tag, count ) in self._pending_tags_to_count.items() if count > 0 and tag in limit_to_these_tags ) )
             if self._show_petitioned: nonzero_tags.update( ( tag for ( tag, count ) in self._petitioned_tags_to_count.items() if count > 0 and tag in limit_to_these_tags ) )
             
+            zero_tags = { tag for tag in limit_to_these_tags if tag not in nonzero_tags }
+            
+        
+        if len( zero_tags ) + len( nonzero_tags ) == 0:
+            
+            return
+            
+        
+        removee_terms = [ self._GenerateTermFromTag( tag ) for tag in zero_tags ]
         
         nonzero_terms = [ self._GenerateTermFromTag( tag ) for tag in nonzero_tags ]
         
-        self._AppendTerms( nonzero_terms )
+        if len( removee_terms ) > len( self._selected_terms ) ** 0.5:
+            
+            self._Clear()
+            
+            removee_terms = []
+            altered_terms = []
+            new_terms = nonzero_terms
+            
+        else:
+            
+            if len( removee_terms ) > 0:
+                
+                self._RemoveTerms( removee_terms )
+                
+            
+            exists_tuple = [ ( term in self._terms_to_logical_indices, term ) for term in nonzero_terms ]
+            
+            altered_terms = [ term for ( exists, term ) in exists_tuple if exists ]
+            
+            new_terms = [ term for ( exists, term ) in exists_tuple if not exists ]
+            
+        
+        if len( altered_terms ) > 0:
+            
+            for term in altered_terms:
+                
+                actual_term = self._positional_indices_to_terms[ self._terms_to_positional_indices[ term ] ]
+                
+                actual_term.UpdateFromOtherTerm( term )
+                
+            
+        
+        sort_needed = self._tag_sort.AffectedByCount()
+        
+        if len( new_terms ) > 0:
+            
+            self._AppendTerms( new_terms )
+            
+            sort_needed = True
+            
         
         for term in previous_selected_terms:
             
@@ -3878,10 +4115,16 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
                 
             
         
-        self._Sort()
+        if sort_needed:
+            
+            self._Sort()
+            
         
     
     def _Sort( self ):
+        
+        # TODO: hey, rejigger this to cleverly and neatly not need to count tags if the sort doesn't care about counts at all!
+        # probably means converting .SortTags later into cleaner subcalls and then calling them directly here or something
         
         # I do this weird terms to count instead of tags to count because of tag vs ideal tag gubbins later on in sort
         
@@ -3894,15 +4137,34 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
             ( self._show_petitioned, self._petitioned_tags_to_count )
         ]
         
-        counts_to_include = [ c for ( show, c ) in jobs if show ]
+        counts_to_include = [ c for ( show, c ) in jobs if show and len( c ) > 0 ]
         
-        for term in self._ordered_terms:
+        # this is a CPU sensitive area, so let's compress and hardcode the faster branches
+        if len( counts_to_include ) == 1:
             
-            tag = term.GetTag()
+            ( c, ) = counts_to_include
             
-            count = sum( ( c[ tag ] for c in counts_to_include if tag in c ) )
+            terms_to_count = collections.Counter(
+                { term : c[ term.GetTag() ] for term in self._ordered_terms }
+            )
             
-            terms_to_count[ term ] = count
+        elif len( counts_to_include ) == 2:
+            
+            ( c1, c2 ) = counts_to_include
+            
+            tt_iter = ( ( term, term.GetTag() ) for term in self._ordered_terms )
+            
+            terms_to_count = collections.Counter(
+                { term : c1[ tag ] + c2[ tag ] for ( term, tag ) in tt_iter }
+            )
+            
+        else:
+            
+            tt_iter = ( ( term, term.GetTag() ) for term in self._ordered_terms )
+            
+            terms_to_count = collections.Counter(
+                { term : sum( ( c[ tag ] for c in counts_to_include ) ) for ( term, tag ) in tt_iter }
+            )
             
         
         item_to_tag_key_wrapper = lambda term: term.GetTag()
@@ -3922,11 +4184,11 @@ class ListBoxTagsMedia( ListBoxTagsDisplayCapable ):
         
         ListBoxTagsDisplayCapable.AddAdditionalMenuItems( self, menu )
         
-        if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
-            submenu = QW.QMenu( menu )
+            submenu = ClientGUIMenus.GenerateMenu( menu )
             
-            for tag_display_type in ( ClientTags.TAG_DISPLAY_SELECTION_LIST, ClientTags.TAG_DISPLAY_ACTUAL, ClientTags.TAG_DISPLAY_STORAGE ):
+            for tag_display_type in ( ClientTags.TAG_DISPLAY_SELECTION_LIST, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, ClientTags.TAG_DISPLAY_STORAGE ):
                 
                 if tag_display_type == self._tag_display_type:
                     
@@ -4144,7 +4406,7 @@ class StaticBoxSorterForListBoxTags( ClientGUICommon.StaticBox ):
         self._tags_box = None
         
         # make this its own panel
-        self._tag_sort = ClientGUITagSorting.TagSortControl( self, HG.client_controller.new_options.GetDefaultTagSort(), show_siblings = show_siblings_sort )
+        self._tag_sort = ClientGUITagSorting.TagSortControl( self, CG.client_controller.new_options.GetDefaultTagSort(), show_siblings = show_siblings_sort )
         
         self._tag_sort.valueChanged.connect( self.EventSort )
         
@@ -4164,7 +4426,7 @@ class StaticBoxSorterForListBoxTags( ClientGUICommon.StaticBox ):
         
         if service_key != CC.COMBINED_TAG_SERVICE_KEY:
             
-            title = '{} for {}'.format( title, HG.client_controller.services_manager.GetName( service_key ) )
+            title = '{} for {}'.format( title, CG.client_controller.services_manager.GetName( service_key ) )
             
         
         self.SetTitle( title )
@@ -4210,7 +4472,7 @@ class ListBoxTagsMediaHoverFrame( ListBoxTagsMedia ):
     
     def _Activate( self, ctrl_down, shift_down ) -> bool:
         
-        HG.client_controller.pub( 'canvas_manage_tags', self._canvas_key )
+        CG.client_controller.pub( 'canvas_manage_tags', self._canvas_key )
         
         return True
         

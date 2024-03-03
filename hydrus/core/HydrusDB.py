@@ -1,5 +1,4 @@
 import collections
-import distutils.version
 import os
 import queue
 import sqlite3
@@ -13,6 +12,9 @@ from hydrus.core import HydrusEncryption
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusProfiling
+from hydrus.core import HydrusTime
+from hydrus.core.interfaces import HydrusControllerInterface
 
 def CheckCanVacuum( db_path, stop_time = None ):
     
@@ -40,9 +42,9 @@ def CheckCanVacuumData( db_path, page_size, page_count, freelist_count, stop_tim
         
         time_i_will_have_to_start = stop_time - approx_vacuum_duration
         
-        if HydrusData.TimeHasPassed( time_i_will_have_to_start ):
+        if HydrusTime.TimeHasPassed( time_i_will_have_to_start ):
             
-            raise Exception( 'I believe you need about ' + HydrusData.TimeDeltaToPrettyTimeDelta( approx_vacuum_duration ) + ' to vacuum, but there is not enough time allotted.' )
+            raise Exception( 'I believe you need about ' + HydrusTime.TimeDeltaToPrettyTimeDelta( approx_vacuum_duration ) + ' to vacuum, but there is not enough time allotted.' )
             
         
     
@@ -50,6 +52,7 @@ def CheckCanVacuumData( db_path, page_size, page_count, freelist_count, stop_tim
     
     HydrusDBBase.CheckHasSpaceForDBTransaction( db_dir, db_size )
     
+
 def GetApproxVacuumDuration( db_size ):
     
     vacuum_estimate = int( db_size * 1.2 )
@@ -60,38 +63,7 @@ def GetApproxVacuumDuration( db_size ):
     
     return approx_vacuum_duration
     
-def ReadFromCancellableCursor( cursor, largest_group_size, cancelled_hook = None ):
-    
-    if cancelled_hook is None:
-        
-        return cursor.fetchall()
-        
-    
-    NUM_TO_GET = 1
-    
-    results = []
-    
-    group_of_results = cursor.fetchmany( NUM_TO_GET )
-    
-    while len( group_of_results ) > 0:
-        
-        results.extend( group_of_results )
-        
-        if cancelled_hook():
-            
-            break
-            
-        
-        if NUM_TO_GET < largest_group_size:
-            
-            NUM_TO_GET *= 2
-            
-        
-        group_of_results = cursor.fetchmany( NUM_TO_GET )
-        
-    
-    return results
-    
+
 def ReadLargeIdQueryInSeparateChunks( cursor, select_statement, chunk_size ):
     
     table_name = 'tempbigread' + os.urandom( 32 ).hex()
@@ -107,26 +79,27 @@ def ReadLargeIdQueryInSeparateChunks( cursor, select_statement, chunk_size ):
         num_to_do = 0
         
     
-    i = 0
+    num_done = 0
     
-    while i < num_to_do:
+    while num_done < num_to_do:
         
-        chunk = [ temp_id for ( temp_id, ) in cursor.execute( 'SELECT temp_id FROM ' + table_name + ' WHERE job_id BETWEEN ? AND ?;', ( i, i + chunk_size - 1 ) ) ]
+        chunk = [ temp_id for ( temp_id, ) in cursor.execute( 'SELECT temp_id FROM ' + table_name + ' WHERE job_id BETWEEN ? AND ?;', ( num_done, num_done + chunk_size - 1 ) ) ]
         
-        i += len( chunk )
+        num_done += len( chunk )
         
-        yield ( chunk, i, num_to_do )
+        yield ( chunk, num_done, num_to_do )
         
     
     cursor.execute( 'DROP TABLE ' + table_name + ';' )
     
+
 def VacuumDB( db_path ):
     
     db = sqlite3.connect( db_path, isolation_level = None, detect_types = sqlite3.PARSE_DECLTYPES )
     
     c = db.cursor()
     
-    fast_big_transaction_wal = not distutils.version.LooseVersion( sqlite3.sqlite_version ) < distutils.version.LooseVersion( '3.11.0' )
+    fast_big_transaction_wal = not sqlite3.sqlite_version_info < ( 3, 11, 0 )
     
     if HG.db_journal_mode == 'WAL' and not fast_big_transaction_wal:
         
@@ -161,12 +134,7 @@ class HydrusDB( HydrusDBBase.DBBase ):
     READ_WRITE_ACTIONS = []
     UPDATE_WAIT = 2
     
-    def __init__( self, controller, db_dir, db_name ):
-        
-        if HydrusPaths.GetFreeSpace( db_dir ) < 500 * 1048576:
-            
-            raise Exception( 'Sorry, it looks like the db partition has less than 500MB, please free up some space.' )
-            
+    def __init__( self, controller: HydrusControllerInterface.HydrusControllerInterface, db_dir, db_name ):
         
         HydrusDBBase.DBBase.__init__( self )
         
@@ -249,6 +217,17 @@ class HydrusDB( HydrusDBBase.DBBase ):
             self._CloseDBConnection()
             
         
+        total_db_size = self.GetApproxTotalFileSize()
+        
+        size_check = min( int( total_db_size * 0.5 ), 500 * 1048576 )
+        
+        size_check = max( size_check, 64 * 1048576 )
+        
+        if HydrusPaths.GetFreeSpace( db_dir ) < size_check:
+            
+            raise HydrusExceptions.DBAccessException( 'Sorry, it looks like the database drive partition has less than {} free space. It needs this for database transactions, so please free up some space.'.format( HydrusData.ToHumanBytes( size_check ) ) )
+            
+        
         self._InitDB()
         
         ( version, ) = self._Execute( 'SELECT version FROM version;' ).fetchone()
@@ -258,14 +237,26 @@ class HydrusDB( HydrusDBBase.DBBase ):
             self._ReportOverupdatedDB( version )
             
         
+        if version < HC.SOFTWARE_VERSION - 50:
+            
+            raise HydrusExceptions.DBVersionException( 'Your current database version of hydrus ' + str( version ) + ' is too old for this software version ' + str( HC.SOFTWARE_VERSION ) + ' to update. Please try updating with version ' + str( version + 45 ) + ' or earlier first.' )
+            
+        
+        bitrot_rows = [
+            ( 'client', 551, 558, 'millisecond timestamp conversion' )
+        ]
+        
+        for ( bitrot_db_name, latest_affected_version, safe_update_version, reason ) in bitrot_rows:
+            
+            if self._db_name == bitrot_db_name and version <= latest_affected_version:
+                
+                raise HydrusExceptions.DBVersionException( f'Sorry, due to a bitrot issue ({reason}), you cannot update to this software version (v{HC.SOFTWARE_VERSION}) if your database is on v{latest_affected_version} or earlier (you are on v{version}). Please download and update to v{safe_update_version} first!' )
+                
+            
+        
         if version < ( HC.SOFTWARE_VERSION - 15 ):
             
             self._ReportUnderupdatedDB( version )
-            
-        
-        if version < HC.SOFTWARE_VERSION - 50:
-            
-            raise Exception( 'Your current database version of hydrus ' + str( version ) + ' is too old for this software version ' + str( HC.SOFTWARE_VERSION ) + ' to update. Please try updating with version ' + str( version + 45 ) + ' or earlier first.' )
             
         
         self._RepairDB( version )
@@ -419,23 +410,34 @@ class HydrusDB( HydrusDBBase.DBBase ):
     
     def _InitDB( self ):
         
-        create_db = False
+        main_database_is_missing = False
         
-        db_path = os.path.join( self._db_dir, self._db_filenames[ 'main' ] )
+        main_db_path = os.path.join( self._db_dir, self._db_filenames[ 'main' ] )
         
-        if not os.path.exists( db_path ):
+        external_db_paths = [ os.path.join( self._db_dir, self._db_filenames[ db_name ] ) for db_name in self._db_filenames if db_name != 'main' ]
+        
+        existing_external_db_paths = [ external_db_path for external_db_path in external_db_paths if os.path.exists( external_db_path ) ]
+        
+        if os.path.exists( main_db_path ):
             
-            create_db = True
+            if len( existing_external_db_paths ) < len( external_db_paths ):
+                
+                external_paths_summary = '"{}"'.format( '", "'.join( [ path for path in external_db_paths if path not in existing_external_db_paths ] ) )
+                
+                message = f'While the main database file, "{main_db_path}", exists, the external files {external_paths_summary} do not!\n\nIf this is a surprise to you, you have probably had a hard drive failure. You must close this process immediately and diagnose what has happened. Check the "help my db is broke.txt" document in the install_dir/db directory for additional help.\n\nIf this is not a surprise, then you may continue if you wish, and hydrus will do its best to reconstruct the missing files. You will see more error prompts.'
+                
+                self._controller.BlockingSafeShowCriticalMessage( 'missing database file!', message )
+                
             
-            external_db_paths = [ os.path.join( self._db_dir, self._db_filenames[ db_name ] ) for db_name in self._db_filenames if db_name != 'main' ]
+        else:
             
-            existing_external_db_paths = [ external_db_path for external_db_path in external_db_paths if os.path.exists( external_db_path ) ]
+            main_database_is_missing = True
             
             if len( existing_external_db_paths ) > 0:
                 
-                message = 'Although the external files, "{}" do exist, the main database file, "{}", does not! This makes for an invalid database, and the program will now quit. Please contact hydrus_dev if you do not know how this happened or need help recovering from hard drive failure.'
+                external_paths_summary = '"{}"'.format( '", "'.join( existing_external_db_paths ) )
                 
-                message = message.format( ', '.join( existing_external_db_paths ), db_path )
+                message = f'Although the external files, {external_paths_summary} do exist, the main database file, "{main_db_path}", does not!\n\nThis makes for an invalid database, and the program will now quit. Please contact hydrus_dev if you do not know how this happened or need help recovering from hard drive failure.'
                 
                 raise HydrusExceptions.DBAccessException( message )
                 
@@ -443,14 +445,23 @@ class HydrusDB( HydrusDBBase.DBBase ):
         
         self._InitDBConnection()
         
+        version_is_missing = False
+        
         result = self._Execute( 'SELECT 1 FROM sqlite_master WHERE type = ? AND name = ?;', ( 'table', 'version' ) ).fetchone()
         
         if result is None:
             
-            create_db = True
+            if not main_database_is_missing:
+                
+                message = f'The "version" table in your {main_db_path} database was missing.\n\nIf you have used this database many times before, then you have probably had a hard drive failure. You must close this process immediately and diagnose what has happened. Check the "help my db is broke.txt" document in the install_dir/db directory for additional help.\n\nIf this database is new, and you recently attempted to boot it for the first time, but it failed, then this is less of a worrying situation, and you can continue.'
+                
+                self._controller.BlockingSafeShowCriticalMessage( 'missing critical database table!', message )
+                
+            
+            version_is_missing = True
             
         
-        if create_db:
+        if main_database_is_missing or version_is_missing:
             
             self._is_first_start = True
             
@@ -676,11 +687,6 @@ class HydrusDB( HydrusDBBase.DBBase ):
         pass
         
     
-    def _ReportStatus( self, text ):
-        
-        HydrusData.Print( text )
-        
-    
     def _ShrinkMemory( self ):
         
         self._Execute( 'PRAGMA shrink_memory;' )
@@ -719,7 +725,10 @@ class HydrusDB( HydrusDBBase.DBBase ):
             
             path = os.path.join( self._db_dir, filename )
             
-            total += os.path.getsize( path )
+            if os.path.exists( path ):
+                
+                total += os.path.getsize( path )
+                
             
         
         return total
@@ -826,7 +835,7 @@ class HydrusDB( HydrusDBBase.DBBase ):
                         
                         summary = 'Profiling db job: ' + job.ToString()
                         
-                        HydrusData.Profile( summary, 'self._ProcessJob( job )', globals(), locals(), min_duration_ms = HG.db_profile_min_job_time_ms )
+                        HydrusProfiling.Profile( summary, 'self._ProcessJob( job )', globals(), locals(), min_duration_ms = HG.db_profile_min_job_time_ms )
                         
                     else:
                         

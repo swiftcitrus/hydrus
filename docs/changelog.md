@@ -7,388 +7,458 @@ title: Changelog
 !!! note
     This is the new changelog, only the most recent builds. For all versions, see the [old changelog](old_changelog.html).
 
-## [Version 522](https://github.com/hydrusnetwork/hydrus/releases/tag/v522)
+## [Version 564](https://github.com/hydrusnetwork/hydrus/releases/tag/v564)
 
-### notes in sidecars
+### more macOS work
 
-* the sidecars system now supports notes!
-* my sidecars only support univariate rows atm (a list of strings, rather than, say, a list of pairs of strings), so I had to make a decision how to handle note names. if I reworked the pipeline to handle multivariate data, it would take weeks; if I incorporated explicit names into the sidecar object, it would have made 'get/export all my notes' awkward or impossible and not solved the storage problem; so I have compromised in this first version by choosing to import/export everything and merging the name and text into the same row. it expects/says 'name: text' for input and output. let me know what you think. I may revisit this, depending on how it goes
-* I added a note to the sidecars help about this special 'name: text' rule along with a couple ideas for tricky situations
+### thanks to a user, we have more macOS features
 
-### misc
+* macOS users get a new shortcut action, default Space, that uses Quick Look to preview a thumbnail like you can in Finder. **all existing users will get the new shortcut!**
+* the hydrus .app now has the version number in Get Info
+* **macOS users who run from source should rebuild their venvs this week!** if you don't, then trying this new Quick Look feature will just give you an error notification
 
-* added 'system:framerate' and 'system:number of frames' to the system predicate parser!
-* I am undoing two changes to tag logic from last week: you can now have as many colons at the start of a tag as you like, and the content parser no longer tries to stop double-stacked namespaces. both of these were more trouble than they were worth. in related news, '::' is now a valid tag again, displaying as ':', and you can create ':blush:'-style tags by typing '::blush:'. I'm pretty sure these tags will autocomplete search awfully, so if you end up using something like this legit, let me know how it goes
-* if you change the 'media/preview viewer uses its own volume' setting, the client now updates the UI sliders for this immediately, it doesn't need a client restart. the actual volume on the video also changes immediately
-* when an mpv window is called to play media that has 'no audio', the mpv window is now explicitly muted. we'll see if this fixes an interesting issue where on one system, videos that have an audio channel with no sound, which hydrus detects as 'no audio', were causing cracks and pops and bursts of hellnoise in mpv (we suspect some sort of normalisation gain error)
+### new fuzzy operator math in system predicates
 
-### file safety with duplicate symlinked directory entries
-
-* the main hydrus function that merges/mirrors files and directories now checks if the source and destination are the same location but with two different representations (e.g. a mapped drive and its network location). if so, to act as a final safety backstop, the mirror skips work and the merge throws an error. previously, if you wangled two entries for the same location into 'migrate database' and started a migration, it could cause file deletions!
-* I've also updated my database migration routines to recognise and handle this situation explicitly. it now skips all file operations and just updates the location record instantly. it is now safe to have the same location twice in the dialog using different names, and to migrate from one to the other. the only bizzaro thing is if you look in the directory, it of course has boths' contents. as always though, I'll say make backups regularly, and sync them before you do any big changes like a migration--then if something goes wrong, you always have an up-to-date backup to roll back to
-* the 'migrate database' dialog no longer chases the real path of what you give it. if you want to give it the mapped drive Z:, it'll take and remember it
-* some related 'this is in the wrong place' recovery code handles these symlink situations better as well
-
-### advanced new parsing tricks
-
-* thanks to a clever user doing the heavy lifting, there are two neat but advanced additions to the downloader system
-* first, the parsing system has a new content parser type, 'http headers', which lets you parse http headers to be used on subsequent downloads created by the parsing downloader object (e.g. next gallery page urls, file downloads from post pages, multi-file posts that split off to single post page urls). should be possible to wangle tokenized gallery searches and file downloads and some hacky login systems
-* second, the string converter system now lets you calculate the normal hydrus hashes--md5, sha1, sha256, sha512--of any string (decoding it by utf-8), outputting hexadecimal
-
-### http headers on the client api
-
-* the client api now lets you see and edit the http headers (as under _network->data->review http headers_) for the global network context and specific domains. the commands are `/manage_headers/get_headers` and `/manage_headers/set_headers`
-* if you have the 'Make a short-lived popup on cookie updates through the Client API' option set (under 'popups' options page), this now applies to these header changes too
-* also debuting on the side is a 'network context' object in the `get_headers` response, confirming the domain you set for. this is an internal object that does domain location stuff all over. it isn't important here, but as we do more network domain setting editing, I expect we'll see more of this guy
-* I added some some documentation for all this, as normal, to the client api help
-* the labels and help around 'manage cookies' permission are now 'manage cookies and headers'
-* the client api version is now 43
-* the old `/manage_headers/set_user_agent` still works. ideally, please move to `set_headers`, since it isn't that complex, but no rush. I've made a job to delete it in a year
-* while I was doing this, I realised get/set_cookies is pretty bad. I hate their old 'just spam tuples' approach. I've slowly been replacing this stuff with nicer named JSON Objects as is more typical in APIs and is easier to update, so I expect I'll overhaul them at some point
-
-### boring cleanup
-
-* gave the about window a pass. it now runs on the newer scrolling panel system using my hydrus UI objects (so e.g. the hyperlink now opens on a custom browser command, if you need it), says what platform you are on and whether you are source/build/app, and the version info lines are cleaned a little
-* fixed/cleaned some bad code all around http header management
-* wrote some unit tests for http headers in the client api
-* wrote some unit tests for notes in sidecars
-
-## [Version 521](https://github.com/hydrusnetwork/hydrus/releases/tag/v521)
-
-### some tag presentation
-
-* building on last week's custom sibling connector, if you don't like the fade you can now override the 'namespace' colour of the sibling connector if you like
-* you can also set the ' OR ' connector text
-* and you can set the OR connector's 'namespace' colour. it was 'system' before
-* also turned off the new namespace colour fading for OR predicates, where it was unintentionally kicking in and looking horrible lol
+* the system predicates for width, height, num_notes, num_words, num_urls, num_frames, duration, and framerate now support two different kinds of approximate equals, ≈: absolute (±x), and percentage (±x%). previously, the ≈ secretly just did ±15% in all cases (issue #1468)
+* all `system:framerate=x` searches are now converted to `±5%`, which is what they were behind the scenes. `!=` framerate stuff is no longer supported, so if you happened to use it, it is now converted to `<` just as a valid fallback
+* `system:duration` gets the same thing, `±5%`. it wasn't doing this behind the scenes before, but it should have been!
+* `system:duration` also now allows hours and minutes input, if you need longer!
+* for now, the parsing system is not updated to specify the % or absolute ± values. it will remain the same as the old system, with ±15% as the default for a `~=` input
+* there's still a little borked logic in these combined types. if you search `< 3 URLs`, that will return files with 0 URLs, and same for `num_notes`, but if you search `< 200px width` or any of the others I changed this week, that won't return a PDF that has no width (although it will return a damaged file that reports 0 width specifically). I am going to think about this, since there isn't an easy one-size-fits-all-solution to marry what is technically correct with what is actually convenient. I'll probably add a checkbox that says whether to include 'Null' values or not and default that True/False depending on the situation; let me know what you think!
 
 ### misc
 
-* added a checkbox to 'file viewing statistcs' to turn off tracking for the archive/delete filter, if you don't like that
-* file viewing statistics now maxes out at five times a duration-having media's duration, if that is more than your max view time
-* the simple version of the file delete dialog will now never overwrite a file deletion reason if all of the to-be-deleted files already have deletion reasons (e.g. when physically deleting trash)	
-* the advanced version of the dialog now always selects 'keep existing reason' or 'do not alter existing reasons' when they exist, regardless of your 'remember previous reason' action. also, the 'remember previous reason' saved reason no longer updates if 'keep existing reason' or 'do not alter existing reasons' is set--it will stick on whatever it was before
-* I might have fixed a height-layout bug in the petition management page
-
-### advanced change to unnamespaced tags and their parsing
-
-* the rule that allows ':p' as a tag (by secretly storing it as '::p') has been expanded--now any unnamespaced tag can include a colon as long as it starts with an explicit colon, which in hydrus rendering contexts is usually hidden. you can now type these in simply by beginning your tag with ':'--the secret character will be quickly swallowed
-* for the parsing system, content parsers that get tags can now decide whether to set an explicit namespace or not. from now on, content parsers that are set to get unnamespaced tags will force all tags they get to be unnamespaced! this stops some site that has incidental colons in their 'subtags' from spamming twenty different new namespaces to hydrus. to preserve old parser behaviour, all existing content parsers that were left blank (no namespace) will be updated to not set an explicit namespace. if you are a parser maker, please consider whether you want to go with 'unnamespaced' or 'any namespace' going forward in your parsers--since most places don't use the hydrus 'namespace:subtag' format, I suspect when we want to make the decision, we'll want 'unnamespaced'
-* I updated the pixiv parser to specifically ask for unnamespaced tags when parsing regular user tags, since it has some of these colon-having tags
-* as a side thing, extra colons are now collapsed at the start of a tag--anything that starts with four colons will be collapsed down to two, with one displaying to humans
-* also, during parsing, if a content parser gets a tag and the subtag already starts with its namespace, it will no longer double the namespace. parse 'character:dave' with namespace set to 'character', it will no longer produce 'character:character:dave'
-
-### advanced file domain and file import options stuff
-
-* all import pages that need to consult their file domain now do so on a 'realised' version of 'default file import options', so if you are set to import to 'my imports', and you open a new page from a tag or some thumbs on that import page, the new file page will be set to 'my imports', not some weird 'my files' stub value (in clients that deleted 'my files', this would be 'initialising...' forever)
-* more stages of the file import process 'realise' default file import options stubs, just in case more of these problems slip through in future (e.g. in my file import unit tests, which I just discovered were all broken)
-* the 'default' file import options stub is now initialised with your first local file domain rather than 'my files', so if this thing is ever still consulted anywhere, it should serve as a better last resort
-* also fixed the file domain button getting stuck on 'initialising' if it starts with an empty file domain
-* when you open the edit file import options dialog on a 'default' FIO and switch to a non-default, it now fills in all the details with the current LOUD FIO
-
-### boring cleanup
-
-* extracted the master file search method (~1800 lines of code) from the monolithic database object and into its own module. then broke several sub-pieces like rating or note searching code out into that module and cleaned misc stuff along the way. not done by any means, but this was a big db-cleanup hump
-* reshuffled all the page management objects so they no longer keep an explicit copy of their current file domain--now they always consult their respective sub-objects, whether that is a file search or an importer or what. any time a page needs to consult its file domain, it'll always get the live and sensible version. as above, they also 'realise' default file import options stubs
-* broke the 'getting started with tags' help page into two and straddled the 'getting started with searching' page with them. the intention is to get users typing a few tags into their first import pages, just that, and then playing around with them in search, before moving on to more complicated tag subjects
-* split the 'autocomplete' section of the 'search' options into two, for read/write a/c contexts, and the default file and tag domain options have been moved there from 'files and trash' and 'tags'
-
-## [Version 520](https://github.com/hydrusnetwork/hydrus/releases/tag/v520)
-
-### autocomplete
-
-* in autocomplete dropdowns, the advanced 'all known files' file domain now generally appears as 'all known files with tags'. the way file+tag search works here has been obscure and confusing for a long time; now the label specifically says what's going on
-* to complement 'all known files with tags', all users now see a new 'all files ever imported/deleted', which is what most people actually want when they try 'all known files'. this quick-select entry for 'currently in or deleted from all my files' will run super quick in almost all cases and allows 'all known tags'!
-* the new 'preserve selection between prefetch and full results' behaviour in tag autocomplete no longer applies if you have 'select the first item with count' turned on. these things just don't play well together
-* that 'select the first item with count' option is now available in the manage tags dialog's cog icon too
-* the 'edit' autocomplete tag search should be better about shuffling the top results. it now tries to put 'ideal of what you entered' at the very top (if that differs from what you typed), then what you actually typed (with or without count), and no longer shuffles other siblings to the top--while they are still included in the results, they weren't so helpful being spammed to the top every time!
-* any search predicate that has a wildcard asterisk in its namespace is now coloured by default as the 'namespaced tags' fallback colour. this includes the somewhat new (any namespace) search tags. behind the scenes, the colour I assign is for a namespace of just '\*', so you can set your own colour if you like
-* the different 'edit tags' autocomplete panels that have paste buttons--in manage siblings, manage parents, filename tagging, tag import options, and favourite tag management--are now all 'add only'. if any of the tags you are pasting already exist in the list, they now won't be removed
-
-### misc
-
-* the '(displays as xxx)' sibling suffix is shortened to a simpler unicode arrow, " → ". if you don't like it, you can edit it under _options->tag presentation_!
-* I also went full meme and made the sibling connecting block's background colour a gradient on Qt6 (and lol the unselected text is a gradient too, but you need to alter it to something longer to really see). if you don't like it, you can turn it off in the same place! I also tweaked some of the padding sizes here so the different text blocks line up a little nicer
-* thanks to a user's continued good work, I am rolling in another update to the Deviant Art file downloader that can grab the 'original quality' file from the logged-in-only download button that some artists turn on. furthermore, there are five new 'File URL' classes for the different qualities the file urls represent, which will propagate to all of your existing DA files, be searchable with system:known url, and hence allow you to find the medium/original/whatever quality versions that you have. now, not every 'medium quality' post on the site has the 'original' download button, but if you are an advanced user with a long DA download history, then with a bit of magic wand waving with your file import options, you can set up an url downloader for a one-time rescan that'll check and redownload your favourite mediums' URLs, or the mediums you know will have 'original quality', for that better version--try it in a small batch first, and let me know what you discover!
-* fixed note content update pipeline so it can handle various instances of multiple notes with the same name coming in at once. previously it would pseudorandomly pick one and discard the others, now it does all the normal '(1)' renaming rules (and even note text extension merging, and hopefully in a good reliable order) as it goes through them
-* if you are a madlad, you can now boost the 'prefetch previous/next' options under 'speed and memory' up to 50 either way. a new label complains if you set them too high given your current image cache size
-* the file maintenance system now catches serious IOErrors, which usually suggest big deal hard drive problems, give the user a special popup message, and stops all future file maintenance work that boot
-* the file maintenance system is better at stopping work for program shutdown while in the midst of a larger batch job
-* fixed the second 'current and pending' label on 'migrate tags'--the new action was 'pending only' as intended, the bad label was just a stupid copy/paste typo
-* thanks to a detailed user report, fixed multiple broken internal #anchor links in the help
-
-### repository
-
-* (both server and client need to be updated to get this)
-* last week's 'delete all content' command failed IRL. it locked up the PTR for six hours and then appeared to fail (rollback) on a seemingly normal account. I am not sure what the inefficiency was here, but this job obviously has to be re-thought for real world use, so this week I am altering the command to break the job up into smaller pieces and stop safely after twenty seconds of work. the janitor client will receive a message on whether everything was deleted or not
-* this is not a total solution or a nice solution, but it should be a stopgap that still allows deletion of small accounts' content while not breaking for big accounts. the ultimate answer here is going to look like proper account content-count caching (rather than the '5000 mappings' limit), and an asynchronous 'purge' maintenance system that runs in the background that janitor clients can check up on and even cancel
-
-## [Version 519](https://github.com/hydrusnetwork/hydrus/releases/tag/v519)
-
-### inc/dec ratings service
-
-* I have written a new number 'rating' service type, called 'inc/dec'. it is simply a no-upper-limit positive integer--you left-click to increment, right to decrement. middle-click to edit directly
-* it appears and works like other ratings in the top-right media viewer hover and the manage ratings dialog. there's a section under system:ratings too. the main logical difference is every file is always rated in this system--the default for all files is 0--so there's no searching for 'unrated'
-* the duplicate merge options support this new inc/dec rating by adding/summing in one or both directions. its action labels in the dialog are a little different because of this
-
-### misc
-
-* the manage tag siblings dialog now shows all members of a chain when it filters the current in-view pairs according to the current pertinent tags. previously, it just showed the pairs that included your entered tags; now it chases everything
-* the same is also now broadly true of manage tag parents, but there's a checkbox that sets how crazy it goes. by default it won't pursue 'cousins', since that can make a really overwhelming list (imagine seeing every character nintendo ever created, including every pokemon, when you just wanted to add a samus costume variant). more work can and will be done here, also with sibling-cross referencing
-* the system:ratings panel now lists the groups of rating services in alphabetical order
-* fixed an issue where the hydrus native animation renderer was drawing animations at small size in the top-left with garbled surrounds when the monitor UI scale was >100% (issue #1334)
-* I think I have hacked an ugly fix for the 'this window keeps growing horizontally until it reaches the width of the screen' bug that hits some people. the sizing code is now supposed to recognise when this happens and stop it in place. if you get this problem, let me know if it is fixed or what! (issue #1331)
-* if a file in the duplicate filter (or any other media viewer, if you can wangle it) has a 'show action' of 'do not show in the media viewer' or 'do not show, open externally on thumbnail activate', the media viewer now falls back to 'show open externally button'. previously, it was halting in an ugly state and no longer able to proceed (issue #1329)
-* if repository processing runs into any missing/invalid file trouble, it now queues up a wider array of potential file maintenance jobs, assuming there may be a problem with the file records themselves
-* if, during repository processing, an update file is missing, the error note now asks users to run _database->maintenance->clear orphan file records_. might be that the above fix helps here too, but this will be the sledgehammer solution on top, clearing up unusual cases where one service thinks the files exist when actually they don't
-* fixed the recent 'when ffmpeg can't generate a video thumb, use hydrus thumb' routine to cover more situations
-* thanks to a user, fixed a bunch of unit tests for python 3.11
-
-### misc cleanup
-
-* updated my async updater object to handle some pre-call UI-side argument-construction and cleaned up some related garbage shared memory hacks I had before
-* in a step towards less laggy sibling/parents dialogs, I have moved the 'manage tag siblings' dialog's list-filtering routine to a thread. I'll do parents too, sometime, and plan to eventually move to very fast on-demand existing-pair fetching based on the above lookup rule improvements rather than the super laggy 'load everything on dialog boot' current system. a next big step would obviously be visual graph representation of sibling and parent chains
-* cleaned some ratings code and fixed some weird little bugs like numerical rating tooltips not updating properly after a click
-* added some unit tests for inc/dec ratings
-
-### server admin
-
-* (the server and client both need to be updated to get this)
-* I updated and reinstated the old 'superban' function for janitors! it is now just 'delete all account content' on the account modification dialog, separate from the banning process. note that since the server only remembers account ownership of content through the anonymisation period, it cannot auto-remove content older than that date!
-* the account info you see in the modify account dialog now only shows file count/bytes for file repositories and tag counts for tag repositories. to improve readability, it also shows every key/value pair on a separate line, sorted by keys
-* that account info now shows, for tag repositories, number of current, pending, and petitioned sibling and parent rows, and it shows number of petitioned mapping rows. all this stuff obviously goes to 0 if you hit 'delete all account content'--let me know if any of it doesn't!
-* the modify accounts dialog no longer shows the 'null' account type as a choice to set things to. duh! its yes/no also now confirms the account type you are settting
-* all the commands in the modify accounts dialog now have nicer yes/no dialogs that say the number of accounts being affected and talk more about what is happening
-* fixed up some logical jank in the dialog. adding time to expires no longer tells you about 0 accounts having no expiry, and if circumstances mean 0 accounts are selected/valid for an operation, it no longer says 'want to set expiry for 0 accounts?' etc...
-* when modifying multiple accounts, the current account focus/selection is now preserved through list refreshes after jobs go through
-
-## [Version 518](https://github.com/hydrusnetwork/hydrus/releases/tag/v518)
-
-### autocomplete improvements
-
-* tl;dr: I went through the whole tag autocomplete search pipeline, cleaned out the cruft, and made the pre-fetch results more sensible. searching for tags on thumbnails isn't horrible any more!
-* -
-* when you type a tag search, either in search or edit autocomplete contexts, and it needs to spend some time reading from the database, the search now always does the 'exact match' search first on what you typed. if you type in 'cat', it will show 'cat' and 'species:cat' and 'character:cat' and anything else that matches 'cat' exactly, with counts, and easy to select, while you are waiting for the full autocomplete results to come back
-* in edit contexts, this exact-matching pre-fetch results here now include sibling suggestions, even if the results have no count
-* in edit contexts, the full results should more reliably include sibling suggestions, including those with no count. in some situations ('all known tags'), there may be too many siblings, so let me know!
-* the main predicate sorting method now sorts by string secondarily, stabilising the sort between same-count preds
-* when the results list transitions from pre-fetch results to full results, your current selection is now preserved!!! selecting and then hitting enter right when the full results come in should be safe now!
-* when you type on a set of full results and it quickly filters down on the results cache to a smaller result, it now preserves selection. I'm not sure how totally useful this will be, but I did it anyway. hitting backspace and filtering 'up' will reset selection
-* when you search for tags on a page of thumbnails, you should now get some early results super fast! these results are lacking sibling data and will be replaced with the better answer soon after, but if you want something simple, they'll work! no more waiting ages for anything on thumbnail tag searches!
-* fixed an issue where the edit autocomplete was not caching results properly when you had the 'unnamespaced input gives (any namespace) wildcard results' option on
-* the different loading states of autocomplete all now have clear 'loading...' labels, and each label is a little different based on what it is doing, like 'loading sibling data...'
-* I generally cleared out jank. as the results move from one type to another, or as they filter down as you type, they _should_ flicker less
-* added a new gui debug mode to force a three second delay on all autocomplete database jobs, to help simulate slow searches and play with the above
-* NOTE: autocomplete has a heap of weird options under _tags->manage tag display and search_. I'm really happy with the above changes, but I messed around with the result injection rules, so I may have broken one of the combinations of wildcard rules here. let me know how you get on and I'll fix anything that I busted.
-
-### pympler
-
-* hydrus now optionally uses 'pympler', a python memory profiling library. for now, it replaces my old python gc (garbage collection) summarising commands under _help->debug->memory actions_, and gives much nicer formatting and now various estimates of actual memory use. this is a first version that mostly just replicates old behaviour, but I added a 'spam a more accurate total mem size of all the Qt widgets' in there too. I will keep developing this in future. we should be able to track some memory leaks better in future
-* pympler is now in all the requirements.txts, so if you run from source and want to play with it, please reinstall your venv and you'll be sorted. _help->about_ says whether you have it or not
-
-### misc
-
-* the system:time predicates now allow you to specify the hh:mm time on the calendar control. if needed, you can now easily search for files viewed between 10pm-11:30pm yesterday. all existing 'date' system predicates will update to midnight. if you are a time-search nerd, note this changes the precision of existing time predicates--previously they searched _before/after_ the given date, but now they search including the given date, pivoting around the minute (default: 0:00am) rather than the integer calendar day! 'same day as' remains the same, though--midnight to midnight of the given calendar day
-* if hydrus has previously initial-booted without mpv available and so set the media view options for video/animations/audio to 'show with native viewer', and you then boot with mpv available, hydrus now sets your view options to use mpv and gives a popup saying so. trying to get mpv to work should be a bit easier to test now, since it'll popup and fix itself as soon as you get it working, and people who never realised it was missing and fix it accidentally will now get sorted without having to do anything extra
-* made some small speed and memory optimisations to content processing for busy clients with large sessions, particularly those with large collect-by'd pages
-* also boosted the speed of the content update pipeline as it consults which files are affected by which update object
-* the migrate tags dialog now lets you filter the tag source by pending only on tag repositories
-* cleaned up some calendar/time code
-* updated the Client API help on how Hydrus-Client-API-Access-Key works in GET vs POST arguments
-* patched the legacy use of 'service_names_to_tags' in `/add_urls/add_url` in the client api. this parameter is more obsolete than the other legacy names (it got renamed a while ago to 'service_names_to_additional_tags'), but I'm supporting it again, just for a bit, for Hydrus Companion users stuck on an older version. sorry for the trouble here, this missed my legacy checks!
-
-### windows mpv test
-
-* hey, if you are an advanced windows user and want to run a test for me, please rename your mpv-2.dll to .old and then get this https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20230212-git-a40958c.7z/download . extract the libmpv-2.dll and rename it to mpv-2.dll. does it work for you, showing api v2.1 in _help->about_? are you running the built windows release, or from source? it runs great for me from source, but I'd like to get a wider canvas before I update it for everyone. if it doesn't work, then delete the new dll and rename the .old back, and then let me know your windows version etc.., thank you!
-
-## [Version 517](https://github.com/hydrusnetwork/hydrus/releases/tag/v517)
-
-### misc
-
-* thanks to a user, export folders finally support exporting to symlinks!
-* if a symlink export-create fails on Windows, the error now tells you to try again in 'run as Admin' mode--seems like this is needed in Win 10+ unless you mess with Group Policy Editor
-* 'related tags' should no longer suggest sibling ideals or parents of existing tags! I think!
-* when a thumbnail fails to load, the error popup now has a button to open the specific problem-causing file in a new page
-* generation of video thumbnails is faster, should fail less in odd cases, and when it completely fails, it now gives the hydrus icon as a final fallback
-* generation of image thumbnails now falls back to the hydrus icon as a final fallback
-* I think I fixed a focus logic problem where the autocomplete dropdowns on the duplicate filter page would hide if you clicked a results/favourites tab or greyspace
-* fixed an error when seeking an mpv video while the video was loading or unloading
-* the max 'nullification period' (after which uploads to a hydrus repository are anonymised) is raised from 1 year to 5 (needs server and client update to work)
-
-### transparency and duplicate filter
-
-* two new options, under _media_ and _duplicates_, now control if you would like transpararency-having images to have a checkerboard background rather than the normal media canvas background! you can have it on all the time or just under the duplicate filter. it uses the same style of grid as MPV
-* I have a plan for proper native (non-MPV) transparency for gifs and apng, but I think I'll wait for an imagemagick plugin I am planning first
-* if you have a white/black media viewer background and prefer not to use the checkerboard, the duplicate filter can now adjust the background colour, either lighter or darker, for both A and B of the pair. altering A as well exposes truly transparent-having images vs ones with opaque white/black fill, which will otherwise blend into a purely white/black background colour. these options are available in the options dialog and the duplicate filter right-hand hover window cog button
-* the native image window, embed button, and animation window (with PIL gif rendering) now all adjust their background colour to any odd changes like the duplicate filter's A/B lighten/darken adjustment
-
-### boring cleanup
-
-* cleaned up how popup file buttons are set and cleared
-* cleaned up how popup main and secondary texts are set and cleared
-* misc linting cleanup
-
-## [Version 516](https://github.com/hydrusnetwork/hydrus/releases/tag/v516)
-
-### misc
-
-* the 'manage sidecar routers' control, which is on manage import folders, manage export folders, path-tagging-before-manual-import, and manual export files, now has import/export/duplicate buttons. you can save and transfer your work now! if you try to import 'export to sidecar' routers to an 'import from sidecar' context or _vice versa_, it should give you a nicely worded error
-* fixed the error that was raising when you turn related tags off with the suggestions set to side-by-side layout. very sorry for the trouble!
-* apngs that are set to 'loop x times' (usually once) now only loop that many times, on both mpv and my native renderer! like gifs, the 'always loop animations' setting under _options->media_ overrides it!
-* fixed an issue with my native renderer not updating on scanbar scrubs very well. should be back to nice smooth instant draw as you scrub
-* thanks to a user, folded in another deviant art parser update to the defaults
-* updated the setuptools version in the requirements.txt due to a security note--I don't think the problem (which was about some vulnerable regex when fetching malicious package info) applies to us, but running from source users might like to run setup_venv again this week anyway
-
-### related tags
-
-* a new 'concurrence threshold' setting under _options->tag suggestions_ allows you to set how 'strict' the related tags search is. a higher percentage causes fewer but more relevant results. I'm increasing the default this week from 4% to 6%
-* two new 'namespace to weight' settings under _options->tag suggestions_ now manage how much weight the 'search' and 'suggestion' sides of related tags have. you can say 'rank the suggestions from character tags highly' or 'rank unnamespaced suggestions lower', and 'do not search x tags' and 'do not suggest y tags'. I have prepped it with some 'creator/character/series namespaces are better than unnamespaced, and title/filename/page/chapter/volume are useless' defaults, but feel free to play around with it
-* the related tags algorithm takes a larger sample now, resulting in a _little_ less ranking-variability
+* I have taken out Space as the default for archive/delete filter 'keep' and duplicate filter 'this is better, delete other'. Space is now exclusively, by default, media pause/play. **I am going to set this to existing users too, deleting/overwriting what Space does for you, if you are still set to the defaults**
+* integer percentages are now rendered without the trailing `.0`. `15%`, not `15.0%`
+* when you 'open externally', 'open in web browser', or 'open path' from a thumbnail, the preview viewer now pauses rather than clears completely
+* fixed the edit shortcut panel ALWAYS showing the new (home/end/left/right/to focus) dropdown for thumbnail dropdown, arrgh
+* I fixed a stupid typo that was breaking file repository file deletes
+* `help->about` now shows the Qt platformName
+* added a note about bad Wayland support to the Linux 'installing' help document
+* the guy who wrote the `Fixing_Hydrus_Random_Crashes_Under_Linux` document has updated it with new information, particularly related to running hydrus fast using virtual memory on small, underpowered computers
 
 ### client api
 
-* changed and fixed an issue in the client api's new `get_file_relationships` call. previously, I said 'king' would be null if it was not on the given file domain, but this was not working correctly--it was giving pseudorandom 'fallback' kings. now it always gives the king, no matter what! a new param, `king_is_on_file_domain` says whether the king is on the given domain. `king_is_local` says whether the king is available on disk
-* added some discussion and a list of the 8 possible 'better than' and 'same quality' logical combinations to the `set_file_relationships` help so you can see how group merge involving non-kings works
-* client api is now version 42
+* thanks to a user, the undocumented API call that returns info on importer pages now includes the sha256 file hash in each import object Object
+* although it is a tiny change, let's nonetheless update the Client API version to 61
 
-## [Version 515](https://github.com/hydrusnetwork/hydrus/releases/tag/v515)
+### boring predicate overhaul work
 
-### related tags
+* updated the `NumberTest` object to hold specific percentage and absolute ± values
+* updated the `NumberTest` object to render itself to any number format, for instance pixels vs kilobytes vs a time delta
+* updated the `Predicate` object for system preds width, height, num_notes, num_words, num_urls, num_frames, duration, and framerate to store their operator and value as a `NumberTest`, and updated predicate string rendering, parsing, editing, database-level predicate handling
+* wrote new widgets to edit `NumberTest`s of various sorts and spammed them to these (operator, value) system predicate UI panels. we are finally clearing out some 8+-year-old jank here
+* rewrote the `num_notes` database search logic to use `NumberTest`s
+* the system preds for height, width, and framerate now say 'has x' and 'no x' when set to `>0` or `=0`, although what these really mean is not perfectly defined
 
-* I worked on last week's related tags algorithm test, bringing it up to usable standard. the old buttons now use the new algorithm exclusively. all users now get 'related tags' showing in manage tags by default (if you don't like it, you can turn it off under _options->tag suggestions_)
-* the new algorithm has new cancel tech and does a 'work for 600ms' kind of deal, like the old system, and the last-minute blocks from last week are gone--it will search as much as it has time for, including partial results. it also won't lag you out for thirty seconds (unless you tell it to in the options). it searches tags with low count first, so don't worry if it doesn't get to everything--'1girl' usually doesn't have a huge amount extra to offer once everything else has run
-* it also uses 'hydev actually thought about this' statistical sampling tech to work massively faster on larger-count tags at the cost of some variance in rank and the odd false positive (considered sufficiently related when it actually shouldn't meet the threshold) nearer the bottom end of the tags result list
-* rather than 'new 1' and 'new 2', there is now an on/off button for searching your local files or all known files on tag repositories. 'all known files' = great results, but very slow, which the tooltip explains
-* there's also a new status label that will tell you when it is searching and how well the search went (e.g. '12/51 tags searched fully in 459ms')
-* I also added the 'quick' search button back in, since we can now repeat searches for just selections of tags
-* I fixed a couple typos in the algorthim that were messing some results
-* in the manage tags dialog, if you have the suggested tag panels 'side-to-side', they now go in named boxes
-* in the manage tags dialog, if you have suggested tag panels in a notebook, 'related tags' will only refresh its search on a media change event (including dialog initialisation) when it is the selected page. it won't lag you from the background!
-* options->tag suggestions now lets you pick which notebook'd tag suggestions page you want to show by default. this defaults to 'related'
-* I have more plans here. these related tags results are very cachable, so that's an obvious next step to speed up results, and when I have done some other long-term tag improvements elsewhere in the program, I'll be able to quickly filter out unhelpful sibling and parent suggestions. more immediately, I think we'll want some options for namespace weighting (e.g. 'series:' tags' suggestions could have higher rank than 'smile'), so we can tune things a bit
+## [Version 563](https://github.com/hydrusnetwork/hydrus/releases/tag/v563)
 
-### misc
+### macOS improvements
 
-* the 'open externally' canvas widget, which shows any available thumbnail of the flash or psd or whatever, now sizes itself correctly and draws the thumbnail nicely if you set the new thumbnail supersampling option to >100%. if your thumbnail is the wrong size (and probably in a queue to be regenerated soon), I _think_ it'll still make the window too big/small, but it'll draw the thumbnail to fit
-* if a tag content update comes in with an invalid tag (such as could happen with sidecars recently), the client now heals better. the bad tag is corrected live in more places, and this should be propagated to the UI. if you got a warning about 'you have invalid tags in view' recently but running the routine found no problems, please reboot, and I think you'll be fixed. I'm pretty sure the database wasn't being damaged at all here (it has cleaning safeguards, so it _shouldn't_ be possible to actually save bad tags)--it was just a thing to do with the UI not being told of the cleaned tag, and it shouldn't happen again. thank you for the reports! (issue #1324)
-* export folders and the file maintenance dialog no longer apply the implicit system:limit (defaults to max 10k files) to their searches!
-* old OR predicates that you load with saved searches and similar should now always have alphebetised components, and if you double-click them to remove them, they will now clear correctly (previously, they were doing something similar to the recent filetype problem, where instead of recognising themselves and deleting, they would instead duplicate a normalised (sorted) copy of themselves)
-* thanks to a user, updated the recently note-and-ai-updated pixiv parser again to grab the canonical pixiv URL and translated tags, if present
-* thanks to a user, updated the sankaku parser to grab some more tags
-* the file location context and tag context buttons under tag autocompletes now put menu separators between each type of file/tag service in their menus. for basic users, this'll be a separator for every row, but for advanced users with multiple local domains, it will help categorise the list a bit
+* Thanks to a user, we have multiple improvements for macOS!
+* There is a new icon for the macOS .app build of hydrus
+* The macOS app will now appear as "Hydrus" in the menu bar instead of "Hydrus Network"
+* - Use the native global menu bar on macOS and some Linux desktop environments
+* - "options" will now appear as "Preferences..." and be under the Hydrus menu on macOS
+* - "exit" will now appear as "Quit Hydrus" and be under the Hydrus menu on macOS
+* "exit and force shutdown maintenance", "restart", and "shortcuts" will now be under the Hydrus menu on macOS
+* The hydrus system tray icon is now enabled for macOS and "minimise to system tray" will be in the Hydrus menu when in advanced mode
+* macOS debug dialog menus are now disabled by default
+* The macOS build of hydrus now uses pyoxidizer 0.24.0 and Python 3.10
+* The command palette and hyperlinks colors in the default Qt stylesheet now use palette based colors that should change based on the Qt style
+* one thing hydev did: on macOS, Cmd+W _should_ now close any dialog or non-main-gui window, just like the Escape key
 
-## [Version 514](https://github.com/hydrusnetwork/hydrus/releases/tag/v514)
+### shortcuts
 
-### downloaders
+* by default, Alt+Home/End/Left/Right now does the new thumbnail rearranging. **assuming they do not conflict with an existing mapping, all users will recieve this on update**
+* by default, the shortcuts system now converts all non-number 'numpad' inputs (e.g. 'numpad Home', 'numpad Return', 'numpad Left') to just be normal inputs. a bunch of different keyboards have whack numpad assignments for non-numpad keys, so if it isn't a number, let's not, by default, make a fuss over the distinction. you can return to the old behaviour by unchecking the new checkbox under _file->shortcuts_
+* the default shortcuts now no longer spam numpad variants anywhere. existing users can delete the surplus mappings (under 'thumbnails' and maybe some of the 'media' sets) if they like
 
-* twitter took down the API we were using, breaking all our nice twitter downloaders! argh!
-* a user has figured out a basic new downloader that grabs the tweets amongst the first twenty tweets-and-retweets of an account. yes, only the first twenty max, and usually fewer. because this is a big change, the client will ask about it when you update. if you have some complicated situation where you are working on the old default twitter downloaders and don't want them deleted, you can select 'no' on the dialog it throws up, but everyone else wants to say 'yes'. then check your twitter subs: make sure they moved to the new downloader, and you probably want to make them check more frequently too.
-* given the rate of changes at twitter, I think we can expect more changes and blocks in future. I don't know whether nitter will be viable alternative, so if the artists you like end up on a nice simple booru _anywhere_, I strongly recommend just moving there. twitter appears to be explicitly moving to non-third-party-friendly
-* thanks to a user's work, the 'danbooru - get webm ugoira' parser is fixed!
-* thanks to a user's work, the deviant art parser is updated to get the highest res image in more situations!
-* thanks to a user's work, the pixiv downloader now gets the artist note, in japanese (and translated, if there is one), and a 'medium:ai generated' tag!
+### some UI QoL
 
-### sidecars
-
-* I wrote some sidecar help here! https://hydrusnetwork.github.io/hydrus/advanced_sidecars.html
-* when the client parses files for import, the 'does this look like a sidecar?' test now also checks that the base component of the base filename (e.g. 'Image123' from 'Image123.jpg.txt') actually appears in the list of non-txt/json/xml ext files. a random yo.txt file out of nowhere will now be inspected in case it is secretly a jpeg again, for good or ill
-* when you drop some files on the client, the number of files skipped because they looked like sidecars is now stated in the status label
-* fixed a typo bug that meant tags imported from sidecars were not being properly cleaned, despite preview appearance otherwise, for instance ':)', which in hydrus needs to be secretly stored as '::)' was being imported as ')'
-* as a special case, tags that in hydrus are secretly '::)' will be converted to ':)' on export to sidecar too, the inverse of the above problem. there may be some other tag cleaning quirks to undo here, so let me know what you run into
-
-### related tags overhaul
-
-* the 'related tags' suggestion system, turned on under _options->tag suggestions_, has several changes, including some prototype tech I'd love feedback on
-* first off, there are two new search buttons, 'new 1' and 'new 2' ('2' is available on repositories only).. these use an upgraded statistical search and scoring system that a user worked on and sent in. I have butchered his specific namespace searching system to something more general/flexible and easy for me to maintain, but it works better and more comprehensibly than my old method! give it a go and let me know how each button does--the first one will be fast but less useful on the PTR, the second will be slower but generally give richer results (although it cannot do tags with too-high count)
-* the new search routine works on multiple files, so 'related tags' now shows on tag dialogs launched from a selection of thumbnails!
-* also, all the related search buttons now search any selection of tags you make!!! so if you can't remember that character's name, just click on the series or another character they are often with and hit the search, and you should get a whole bunch appear
-* I am going to keep working on this in the future. the new buttons will become the only buttons, I'll try and mitigate the prototype search limitations, add some cancel tech, move to a time-based search length like the current buttons, and I'll add more settings, including for filtering so we aren't looking up related tags for 'page:x' and so on. I'm interested in knowing how you get on with IRL data. are there too many recommendations (is the tolerance too high?)? is the sorting good (is the stuff at the top relevant or often just noise?)?
+* the _tag service_ menu button that appears in the autocomplete panel and sometimes some other places in advanced mode now shows a proper check mark in its menu beside its current value
+* the _location context_ menu button on the other side of an autocomplete panel and some other places also now shows a check mark in its menu beside its current value
+* the `OR` button on search autocomplete that creates new OR predicates now inherits the current file search domain. it was previously defaulting at all times to the fallback file domain and 'all known tags'
+* the current search predicates list also now inherits the file search domain when you edit an OR predicate currently in use, same deal
+* removed the 'favourites' submenu from the taglist menu when no tags are selected
+* in any import context, the file log's arrow menu now supports deleting all the 'unknown' (outstanding, unstarted) items or setting them all to 'skipped'. the 'abort imports' button (with the stop icon) in HDD and urls import pages is removed
 
 ### misc
 
-* all users can now copy their service keys (which are a technical non-changing hex identifier for your client's services) from the review services window--advanced mode is no longer needed. this may be useful as the client api transitions to service keys
-* when a job in the downloader search log generates new jobs (e.g. fetches the next page), the new job(s) are now inserted after the parent. previously, they were appended to the end of the list. this changes how ngugs operate, converting their searches from interleaved to sequential!
-* restarting search log jobs now also places the new job after the restarted job
-* when you create a new export folder, if you have default metadata export sidecar settings from a previous manual file export, the program now asks if you want those for the new export folder or an empty list. previously, it just assigned the saved default, which could be jarring if it was saved from ages ago
-* added a migration guide to the running from source help. also brushed up some language and fixed a bunch of borked title weights in that document
-* the max initial and periodic file limits in subscriptions is now 50k when in advanced mode. I can't promise that would be nice though!
-* the file history chart no longer says that inbox and delete time tracking are new
+* fixed yet another dumb problem with the datetime control's paste button--although the paste was now 'working' on the UI side, the control wasn't saving that result on dialog ok. the fixes both the datetime button and the modified/file service time multi-column list editing
+* a core asynchronous thread-checking timer in the program has been rewritten from a 20ms-resolution busy-wait to a <1ms proper wait/notify system. a bunch of stuff that works in a thread is now much faster to recognise that blocking UI work is done, and it is more thread-polite about how it does it!
+* in the `setup_venv` scripts, if it needs to delete an old venv directory but fails to do so, the script now dumps out with an error saying 'hey, you probably have it open in a terminal/IDE, please close that and try again'. previously, it would just charge on and produce an odd file permission error as, e.g., the new venv setup tried to overwrite the in-use python exe
+* added a `help->debug->gui->isolate existing mpv widgets` command to force regeneration of mpv windows and help test-out/hack-fix various 'every other of my mpv views has no audio' and 'my mpv loses xxx property after a system sleep/wake cycle' problems. if I've been working with you on this stuff, please give it a go and let me know if new mpv window creation is good or what!
+* added a `BUGFIX: Disable off-screen window rescue` checkbox to `options->gui` that stops windows that think they are spawning off-screen from repositioning to a known safe screen. several Qt versions have had trouble with enumerating all the screens in a multiple monitor setup and thus the safe coordinate space, so if you have been hit by false positives here, you can now turn it off! (issue #1511)
+* fixed another couple instances of error texts with empty formatting braces `{}`
 
-### misc fixes
+### tag repository
 
-* fixed a cursor type detection test that was stopping the cursor from hiding immediately when you do a media viewer drag in Qt6
-* fixed an issue where 'clear deletion record' calls were not deleting from the newer 'all my files' domain. the erroneous extra records will be searched for and scrubbed on update
-* fixed the issue where if you had the new 'unnamespaced input gives (any namespace) wildcard results' search option on, you couldn't add any novel tags in WRITE autocomplete contexts like 'manage tags'!!! it could only offer the automatically converted wildcard tags as suggested input, which of course aren't appropriate for a WRITE context. the way I ultimately fixed this was horrible; the whole thing needs more work to deal with clever logic like this better, so let me know if you get any more trouble here
-* I think I fixed an infinite hang when trying to add certain siblings in manage tag siblings. I believe this was occuring when the dialog was testing if the new pair would create a loop when the sibling structure already contains a loop. now it throws up a message and breaks the test
-* fixed an issue where certain system:filetype predicates would spawn apparent duplicates of themselves instead of removing on double-click. images+audio+video+swf+pdf was one example. it was a 'all the image types' vs 'list of (all the) image types' conversion/comparison/sorting issue
+* mapping petitions fetched from the server will now max out at 500k mapping rows or 10k unique tags or ten seconds of construction time. we had a 250k-unique-tag petition this last week and it broke something, so I'm slapping a bunch of safety rails on. let me know if these are too strict, too liberal, or if it messes with the fetch workflow at all--I don't _think_ it will, but we'll see
 
-### client api
+### build stuff
 
-* **this is later than I expected, but as was planned last year, I am clearing up several obsolete parameters and data structures this week. mostly it is bad service name-identification that seemed simple or flexible to support but just added maintenance debt, induced bad implementation practises, and hindered future expansions. if you have a custom api script, please read on--and if you have not yet moved to the alternatives, do so before updating!**
-* **all `...service_name...` parameters are officially obsolete! they will still work via some legacy hacks, so old scripts shouldn't break, but they are no longer documented. please move to the `...service_key...` alternates as soon as reasonably possible (check out `/get_services` if you need to learn about service keys)**
-* **`/add_tags/get_tag_services` is removed! use `/get_services` instead!**
-* **`hide_service_names_tags`, previously made default true, is removed and its data structures `service_names_to_statuses_to_...` are also gone! move to the new `tags` structure.**
-* **`hide_service_keys_tags` is now default true. it will be removed in 4 weeks or so. same deal as with `service_names_to_statuses_to_...`--move to `tags`**
-* **`system_inbox` and `system_archive` are removed from `/get_files/search_files`! just use 'system:inbox/archive' in the tags list**
-* **the 'set_file_relationships' command from last week has been reworked to have a nicer Object parameter with a new name. please check the updated help!** normally I wouldn't change something so quick, but we are still in early prototype, so I'm ok shifting it (and the old method still works lmao, but I'll clear that code out in a few weeks, so please move over--the Object will be much nicer to expand in future, which I forgot about in v513)
-* many Client API commands now support modern file domain objects, meaning you can search a UNION of file services and 'deleted-from' file services. affected commands are
-* * /add_files/delete_files
-* * /add_files/undelete_files
-* * /add_tags/search_tags
-* * /get_files/search_files
-* * /manage_file_relationships/get_everything
-* a new `/get_service` call now lets you ask about an individual service by service name or service key, basically a parameterised /get_services
-* the `/manage_pages/get_pages` and `/manage_pages/get_page_info` calls now give the `page_state`, a new enum that says if the page is ready, initialised, searching, or search-cancelled
-* to reduce duplicate argument spam, the client api help now specifies the complicated 'these files' and now 'this file domain' arguments into sub-sections, and the commands that use them just point to the subsections. check it out--it makes sense when you look at it.
-* `/add_tags/add_tags` now raises 400 if you give an invalid content action (e.g. pending to a local tag service). previously it skipped these rows silently
-* added and updated unit tests and help for the above changes
-* client api version is now 41
+* now they have had time to breathe, I optimised the recently split Github build scripts. the 'send to an ubuntu runner and then upload' step is now removed from all three, so they are natively uploaded in the first runner step. it works just a little nicer and faster now, although it did require learning how to truncate and export a variable to the Github Environment Variables file in Powershell, aiiieeeee
+* also, Github is moving from Node 16 to Node 20 soon, and I have moved two of the four actions we rely on to their newer v20 versions. a third action should be ready to update next week, and another, a general download file function, I have replaced with curl (for macOS) and Powershell's magical Invoke-WebRequest adventure
 
-### boring optimisation
+## [Version 562](https://github.com/hydrusnetwork/hydrus/releases/tag/v562)
 
-* when you are looking at a search log or file log, if entries are added, removed, or moved around, all the log entries that have changed row # now update (previously it just sent a redraw signal for the new rows, not the second-order affected rows that were shuffled up/down. many access routines for these logs are sped up
-* file log status checking is completely rewritten. the ways it searches, caches and optimises the 'which is the next item with x status' queues is faster and requires far less maintenance. large import queues have less overhead, so the in and outs of general download work should scale up much better now
-* the main data cache that stores rendered images, image tiles, and thumbnails now maintains itself far more efficiently. there was a hellish O(n) overhead when adding or removing an item which has been reduced to constant time. this gonk was being spammed every few minutes during normal memory maintenance, when hundreds of thumbs can be purged at once. clients with tens of thousands of thumbnails in memory will maintain that list far more smoothly
-* physical file delete is now more efficient, requiring far fewer hard drive hits to delete a media file. it is also far less aggressive, with a new setting in _options->files and trash_ that sets how long to wait between individual file deletes, default 250ms. before, it was full LFG mode with minor delays every hundred/thousand jobs, and since it takes a write lock, it was lagging out thumbnail load when hitting a lot of work. the daemon here also shuts down faster if caught working during program shut down
+### misc
+
+* page tab drag and drops will now not start unless the click has lasted more than 100ms
+* same for thumbnail drag and drop--it perviously did a 20 pixel deadzone, but time checks detect accidental/spastic clicks better and stops false negatives when you start dragging on certain edges
+* added a 'BUGFIX: disable page tab drag and drop' setting to _options->gui pages_. while adding this, I may have accidentally fixed the issue I wanted to investigate (rare hangs on page DnD)
+* the manage tags dialog now shows the current count of tags for each page tab, and, if there are outstanding changes, shows an asterisk
+* the `migrate database` dialog is renamed `move media files`
+
+### fixes
+
+* fixed the basic copy/paste in the single 'edit datetime' panel, wich was often raising a dumb error. this thing also now exports millisecond data (issue #1520)
+* I am pretty sure I fixed the column-resizing problem in the very new PySide6 (Qt) 6.6.1, which it seems AUR users were recently updated to in an automatic OS update. all columns were setting to 100px width on initialisation. I think it is now safe to try out 6.6.1. I am still not sure why it was doing this, but some extra safeguards seem to have fixed it and also not broken things for <=6.6.0, so let me know what you run into! if you were affected by this, recall that you can right-click on any multi-column list header and say 'reset widths' to get something sensible back here
+* when exporting files, the max size is now clipped another 84 characters (64 + 20 more, which usually ends up about 150 characters max for the output filename), in order to give padding for longer sidecar suffixes and also avoid going right to the filesystem limit, which broadly isn't sensible
+* I think I fixed an issue where the mouse could stay hidden, perhaps, just on Wayland, after closing the media viewer with your keyboard (issue #1518)
+* fixed inc/dec ratings in the media viewer not updating their tooltips on new media correctly
+* if you hit 'open this location' on the export files window and the location does not exist, you now get a nice messagebox rather than a semi-silent error
+
+### analyze
+
+* background: some databases that process the PTR superfast or otherwise import a lot of data to a new file domain sometimes encounter massively massively slow tag update actions (typically tag-delete when the tags involved have siblings/parents), so I want to make the critical 'ANALYZE' call more timely
+* the 'analyze' database maintenance call will be soft-called far more regularly during normal repository processing, not just on first sync
+* sped up how some pre-analyze calculation is done
+* the size limit for automatic database analyze maintenance is raised from 100k rows to 10M
+* I hope to do more work here in future, probably making a review panel like we did for vacuum
+* if your repository processing sometimes hangs your whole damn client for 10-15 minutes, hit _database->db maintenance->analyze->full_! this job may take 30-60 minutes to finish
 
 ### boring code cleanup
 
-* refactored some parsing routines to be more flexible
-* added some more dictionary and enum type testing to the client api parameter parsing routines. error messages should be better!
-* improved how `/add_tags/add_tags` parsing works. ensuring both access methods check all types and report nicer errors
-* cleaned up the `/search_files/file_metadata` call's parsing, moving to the new generalised method and smoothing out some old code flow. it now checks hashes against the last search, too
-* cleaned up `/manage_pages/add_files` similarly
-* cleaned up how tag services are parsed and their errors reported in the client api
-* the client api is better about processing the file identifiers you give it in the same order you gave
-* fixed bad 'potentials_search_type'/'search_type' inconsistency in the client api help examples
-* obviously a bunch of client api unit test and help cleanup to account for the obsolete stuff and various other changes here
-* updated a bunch of the client api unit tests to handle some of the new parsing
-* fixed the remaining 'randomly fail due to complex counting logic' potential count unit tests. turns out there were like seven more of them
+* finished the HG->CG.client_controller refactor I started last week. this was a thousand lines changed from one braindead format to another, but it will be a useful step towards untangling the hell-nest import hierarchy
+* did a scattering of the clientinterface typing, getting a feel for where I want to take this
+* deleted the old in-client server-test's 'boot' variant; this is no longer used and was always super hacky to maintain
+* I removed an old basic error raising routine that would sometimes kick in when a hash definition is missing. this routine now always fills in the missing data with garbage and does its best to recover the invalid situation automatically, with decent logging, while still informing the user that things are well busted m8. it isn't the user's job to fix this, and there is no good fix anyway, so no point halting work and giving it to the user to figure out!
 
-## [Version 513](https://github.com/hydrusnetwork/hydrus/releases/tag/v513)
+## [Version 561](https://github.com/hydrusnetwork/hydrus/releases/tag/v561)
+
+### rearranging thumbnails
+
+* on the thumbnail menu, there is a new 'move' submenu. you can move the current selection of files to the start or end of the media list, or to one before or after the earliest selected file, or to the file you right-clicked on to create the menu, or to the first file's position if the selection is not contiguous. if the selection is non-contiguous, it will be made so in the move
+* added these rearrange commands to the shortcuts system, as 'move thumbnails' under the 'thumbnails' set. I wasn't sure whether to add some default shortcuts, like ctrl+numpad 7/3/4/6 for home/end/left/right or something--let me know what you think
+
+### misc
+
+* thanks to user help, fixed a stupid typo from last week that caused some bad errors (including crashes, in some cases) when doing non-simple duplicate filtering (issue #1514). this is the issue the v560a hotfix was made for
+* fixed another stupid content update typo that was causing 'already in db' results to not get metadata updates
+* as a hardcoded shortcut, Ctrl+C or Ctrl+Insert now copies the currently selected tags in any taglist. it'll output the full tag/predicate text, with namespace, no counts
+* I've shortened some thumbnail/media-viewer menu labels, made the 'delete' line into a submenu, and ensured the top info line is always a short variant, with detailed info bumped off to the submenu off the top line. I hate how these menus are often super-wide and thus a pain to navigate to the submenus, so let me know what situations still make them wide
+* the file log arrow button menu now has entries for 'delete already in db' and 'delete everything'
+* the 'add these tags to the favourites list?' yes/no now only fires if you try to add more than five tags ot once
+* the various dialogs in the client that auto-yes or auto-no now show a live countdown in their title string
+* the window position saving system is now stricter about what it records. maximised and fullscreen state is only saved if 'remember size' is false, and the last size/position is not saved at all if 'remember size/position' is false (previously, it would save these values but not restore them, but let's try being more precise here)
+* fixed a 'omg what happened, closing the window now' error in the duplicate filter if you try to 'go back' while it is loading a new set of pairs to show
+* fixed the 'vacuum db' command to correctly save 'last vacuumed time' for all files vacuumed in a job, not just the last!
+* whenever a `copy2` file copy (which includes copying file times and permission bits) fails for permission reasons, hydrus now falls back to a normal `copy` and logs the failure, including the modified time that failed to copy (which is the bit we actually care about here)
+
+### db update stuff
+
+* if there is a known bitrot issue on update, you now get a nicer error message. rather than the actual error, you are now told which version is safe to update to. to christen this system, I've added a check for the recent millisecond timestamp conversion, which caused some issues for users updating older clients. **if your client is v551 or older and you try to update to v561 or later, you will be told to update to v558 first.** sorry for the inconvenience here, and thank you for the reports (issue #1512)
+* if you try to boot a database more than 50 versions earlier than the code, the client-based version popups now happen in the correct order, with the >50 exception firing before the >15 warning
+* when an update asks a not-super-important yes/no question, I will now make it auto-yes or auto-no after ten minutes with the recommended value. this will ensure that automatic updaters will still progress (previously, they were hanging forever!)
+
+### some downloader stuff
+
+* thanks to a user, the derpibooru now fetches the post description as a note and the source as an associable URL. I tweaked the submitted stuff a bit, simplifying the parsing and discluding 'No description provided.' notes
+* thanks to a user, the e621 parser can now grab files from posts where the (spicy, I think) content is normally not shown due to a guest login. the posts still won't show up in guest-login gallery searches, so this won't alter your normal results, but if you run into a post like this in your browser and drag-and-drop it onto the client, it now works
+* I tried to improve the parsing system's de-newlining. this thing is a long-time hack--I've never liked it and I want to replace it with proper multi-line support--but for now I've made sure the de-newliner strips each line of leading/trailing whitespace and discards empty lines. the mode that _doesn't_ collapse newlines (note parsing, for the most part) now _does_ strip leading/trailing newlines along with other whitespace, meaning you no longer have to try and strip extra `<p>` and `<br>` tags and stuff yourself when grabbing notes. also, the formula UI where it says 'Newlines are collapsed before...' now says when it won't be collapsing newlines due to it being a note parser
+* the String Match processing step now explicitly removes newlines before it runs, meaning it can still catch multi-line notes properly. you can now run a proper regex on a multi-line note
+
+### boring cleanup
+
+* optimised some thumbnail handling code, stuff like fetching the current list of sorted selected media
+* large collections will be a little faster to select and otherwise do operations on
+* sketched out a new `ClientGlobals` and client controller interface and started refactoring various HG.client_controller to the new CG. this makes no important running changes, but it cleans the messy HG file and will help future coding and type checking in the IDE as it is fleshed out
+* added some help text to the edit file maintenance panel and fixed some gonk layout in the 'add new work' panel
+* fixed some instances of the 'unknown' import status showing as a blank string
+* fixed an error message in the export folder export job that fired when a file to be exported is missing--it was just giving blank instead of the file hash, and its direction to file maintenance was old and unclear
+
+## [Version 560](https://github.com/hydrusnetwork/hydrus/releases/tag/v560)
+
+### editing times for multiple files
+
+* the 'edit times' dialog is now available when you select multiple files. it will show and apply time data for all of those files at once. when the files have different times, the various widgets and panels will show ranges and a count of how many files do and don't have that particular time type
+* when you open the edit times dialog on more than one file, every time control now has a 'cascade step' section, where you can set a time delta, e.g. 100 milliseconds, and then, on dialog ok, each file in the selection that launched the dialog will be set that much successively later than the previous, obviously in the order they are currently in. this is a way of forcing/normalising file sorts based on time. negative values are allowed!
+* when the edit times dialog is set to change more than 100 total times, it now verifies with the user that this is correct on dialog ok
+* when the edit times dialog sets a lot of modified dates to files (i.e. actually writing them to your file system), this now happens in a non-gui thread and now makes a cancellable progress popup after a few seconds
+
+### misc
+
+* fixed the 'imported to' timestamp for files migrated to other local file domains, which were one of the ones incorrectly set, as expected, to 54 years ago. in the database update, I also fix all the wrongly saved ones from v559
+* mr bones and the file history chart are now under the 'database' menu
+* fixed an issue with the file history chart not maintaining the `show_deleted = False` state through search refreshes
+* there's a new checkbox under `files and trash`, `Remove files from view when they are moved to another local file domain`. this re-introduces the unintended behaviour that I fixed recently when 'remove when trashed' was set, but now targeted specifically for that situation. if you use multiple local file domans a bunch and want files to disappear when you shoot them to a place you aren't looking at, give it a go and let me know how it works for you
+* fixed a regression from my 'remove when trashed' fix where deleting collections with this option on would leave crazy ghost thumbnails behind. collections that are completely emptied should now properly remove themselves in all content update situations
+* the gallery downloader page 'cog' icon now has a 'do not allow new duplicates' option, which will discard any (query_text,source) pairs you try to enter if they already exist in the list. this option is remembered through restarts
+* added 'sort by pixel hash' to the file sort menu. it isn't super helpful, but it'll show pairs of exact-matching files next to each other amongst a sea of noise. I may expose perceptual hashes in a similar way in future, which would be more useful, but thumbnails don't have their phashes quickly available atm, so maybe only when there are other reasons to add that overhead
+* fixed the `setup_venv.sh` and `setup_venv.command` files' custom qtpy and PySide6 (Qt stuff) version installer! there was a dumb typo, sorry for the trouble
+* thanks to a user, the derpibooru parser now grabs `fanfic`, `spoiler`, and `error` tags
+
+### boring cleanup
+
+* neatened up how non-thumbnail-generatable files (e.g. rtf) present their default thumbs and refactored the code a little
+* when a file's thumbnail is unavailable but the filetype is known (e.g. you are looking at records of deleted files that have no blurhash), hydrus should now deliver that file's default thumb instead
+* unified this thumbnail-defaulting code a little more, fixing fetching for some weirder files and deduplicating some messy areas. the client thumbnail cache should be better about delivering the right unusual thumbnail now and as future filetypes are added
+* added an 'image.png' to serve as a nicer fallback for various thumbnail-undeliverable but known-image files
+* fixed rtf files not providing their rtf thumbnail in the Client API
+* fixed up some ancient local booru thumbnail fetching code
+* cleaned up some messy dialog launches that were having to navigate single/collected media in an awkward way
+* removed the TestFunctions unit test stub, which was of diminishing use
+
+### boring cleanup, time code
+
+* updated the DateTime control and button to handle multiple times at once, and updated the edit timestamps dialog itself similarly throughout (this took a day and a half lol)
+* rejiggered the DateTime widgets to handle a nice new object to hold the multiple times' range, since it was all getting messy
+* rejiggered the time content update pipeline from top to bottom to take multiple hashes per content update, so applying the same timestamp to a thousand files should still be pretty quick
+* fixed up various timestamp_ms->QtDateTime conversions so they all include local timezone info. also fixed the datetime widget so it returns properly local-timezone'd datetimes. I can no longer easily reproduce a particular time that jumps an hour every time you open it (due to retroactive summer-time fun)
+* harmonised some older datestring conversions to come out 2023-06-30 instead of 2023/06/30
+* fixed some time string calculations to handle our new sub-second times better
+* updated the time delta widget to handle negative numbers
+
+### boring cleanup, content updates
+
+* moved all `ContentUpdate` gubbins out of the hydrus module scope; it is now client only
+* made a new `ClientContentUpdates.py` to collect all content update code and refactored stuff there
+* wrote a new `ContentUpdatePackage` to replace the ancient `service_keys_to_content_updates` structure. various hacky or ad-hoc processing and presentation is now gathered under this new object, and I refactor-spammed it across the program, with too many individual changes to talk about in detail
 
 ### client api
 
-* the Client API now supports the duplicates system! this is early stages, and what I've exposed is ugly and technical, but if you want to try out some external dupe processing, give it a go and let me know what you think! (issue #347)
-* a new 'manage file relationships' permission gives your api keys access
-* the new GET commands are:
-* - `/manage_file_relationships/get_file_relationships`, which fetches potential dupes, dupes, alternates, false positives, and dupe kings
-* - `/manage_file_relationships/get_potentials_count`, which can take two file searches, a potential dupes search type, a pixel match type, and max hamming distance, and will give the number of potential pairs in that domain
-* - `/manage_file_relationships/get_potential_pairs`, which takes the same params as count and a `max_num_pairs` and gives you a batch of pairs to process, just like the dupe filter
-* - `/manage_file_relationships/get_random_potentials`, which takes the same params as count and gives you some hashes just like the 'show some random potential pairs' button
-* the new POST commands are:
-* - `/manage_file_relationships/set_file_relationships`, which sets potential/dupe/alternate/false positive relationships between file pairs with some optional content merge and file deletes
-* - `/manage_file_relationships/set_kings`, which sets duplicate group kings
-* more commands will be written in the future for various remove/dissolve actions
-* wrote unit tests for all the commands!
-* wrote help for all the commands!
-* fixed an issue in the '/manage_pages/get_pages' call where the response data structure was saying 'focused' instead of 'selected' for 'page of pages'
-* cilent api version is now 40
+* the new `set_time` call has some additional safety rails. you can add (or delete) 'web domain' timestamps any time, but you now cannot add or delete any of the others, only edit when they already exist
+* updated the client api unit tests and help to account for this
+* the client api is now version 60
 
-### boring misc cleanup and refactoring
+## [Version 559](https://github.com/hydrusnetwork/hydrus/releases/tag/v559)
 
-* cleaned and wrote some more parsing methods for the api to support duplicate search tech and reduce copypasted parsing code
-* renamed the client api permission labels a little, just making it all clearer and line up better. also, the 'edit client permissions' dialog now sorts the permissions
-* reordered and renamed the dev help headers in the same way
-* simple but significant rename-refactoring in file duplicates database module, tearing off the old 'Duplicates' prefixes to every method ha ha
-* updated the advanced Windows 'running from source' help to talk more about VC build tools. some old scripts don't seem to work any more in Win 11, but you also don't really need it any more (I moved to a new dev machine this week so had to set everything up again)
+### millisecond timestamps
+
+* since the program started, the database and code has generally handled timestamps as an integer (i.e. whole number, no fractions) count of the number of seconds since 1970. this is a very common system, but one drawback is it cannot track any amount of time less than a second. when a very fast import in hydrus imports two files in the same second, they then get the exact same import time and thus when you sort by import time, the two files don't know which should be truly first and they may sort either way. this week I have moved the database to store all file timestamps (archived time, imported time, etc...) with millisecond resolution. you do not have to do anything, and very little actually changes frontend, but your update may take a minute or two
+* whenever you sort by 'import time' now, we shouldn't get anymore switcheroos
+* the 'manage times' dialog now has millisecond display and edit widgets to reflect this, but in most places across the client, you'll see the same time labels as before
+* I changed a **ton** of code this week. all simple changes, but I'm sure a typo has slipped through somewhere. if you see a file with a 'last viewed time' of '54 years ago', let me know!
+
+### time details
+
+* this section is just a big list so I have somewhat of a record of what I did. you can broadly ignore it
+* updated `vacuum_timestamps` to `timestamp_ms` and adjusted read/write and the dialog handling to ms
+* updated `analyse_timestamps` to `timestamp_ms` and adjusted read/write to ms
+* updated `json_dumps_named` to `timestamp_ms` and adjusted read/write and some UI-level gubbins around session loading and saving to ms
+* updated `recent_tags` to `timestamp_ms` and adjusted the whole system to ms
+* updated `file_viewing_stats` to `last_viewed_timestamp_ms` and adjusted read/write to ms
+* updated `file_modified_timestamps` to `file_modified_timestamp_ms` and adjusted read/write to ms, including to and from the disk
+* updated `file_domain_modified_timestamps` to `file_modified_timestamp_ms` and adjusted read/write to ms
+* updated `archive_timestamps` to `archived_timestamp_ms` and adjusted read/write to ms
+* updated all the current- and deleted-file tables for all file services to use ms (`timestamp_ms`, `timestamp_ms`, and `original_timestamp_ms`) and adjusted _all_ database file storage, search, and update to work in ms
+* updated the `ClientDBFilesTimestamps` db module to use ms timestamps throughout
+* updated the `ClientDBFilesViewingStats` db module to use ms timestamps throughout
+* updated the `ClientDBFilesStorage` db module to use ms timestamps throughout
+* updated the controller timestamp tracker and all callers to use ms timestamps throughout
+* renamed `TimestampsManager` to `TimesManager` and `times_manager` across the program
+* updated the `TimesManager` and all of its calls and callers in general to work in ms. too much stuff to list here
+* the `TimestampData` object is now converted to ms, and since it does other jobs than a raw number, the various calls it is involved in are generally renamed from 'timestamp' to 'time'
+* the file viewing stats manager now tracks 'last viewed time' as ms, and the update pipeline is also updated
+* the locations manager now handles all file times in ms, and all the archive/add/delete pipelines are also updated
+* wrote some MS-based variants of the core time functions for spamming around here, including for both Qt `QDateTime` and python `datetime`
+* updated the main datetime edit panel, button, and widget to handle millisecond display and editing
+* fleshed out a ton of ambiguous variable names to the new strict time/timestamp/timestamp_ms system
+* wrote a clean transition method between ms<->s that accounts for various None situations and spammed it everywhere
+* fixed up some ill-advised timestamp data juggling in the time edit UI
+
+### what still has second-resolution
+
+* the parsing system (and hence downloaded files' source times)
+* the sidecar system's time stuff, both import and export
+* the server and the hydrus network protocol in general
+* Mr. Bones and the File History chart
+* almost all the actual UI labels. I'm not going to spam milliseconds at you outside of the time edit UI
+* almost all the general maintenance timers, sleepers, and grunt-work code across the program
+
+### client api
+
+* the `file_metadata` call has a new parameter, `include_milliseconds`, which turns the integer `1704419632` timestamps into floats with three sig figs `1704419632.154`, representing all the changes this week
+* a new permission, `edit file times` is added, with value `11`
+* a new command, `/edit_times/set_time` now lets you set any of the file times you see in the _manage times_ dialog. you can send it second- or millisecond-based timestamps
+* the client api help is updated for all this, particularly the new section here https://hydrusnetwork.github.io/hydrus/developer_api.html#edit_times_set_time  
+* added unit tests for this
+* the client api version is now 59
+
+### misc
+
+* the sankaku parsers, GUGs, and custom header/bandwidth rules are removed from the defaults, so new users will not see them. none of this stuff works well/at all any more, especially in recent weeks. for sites that are so difficult to download from, if there isn't a nice solution on the shared downloader repo, https://github.com/CuddleBear92/Hydrus-Presets-and-Scripts, I recommend going with a more robust solution like gallery-dl or just finding the content elsewhere
+* when there are multiple 'system:known url' predicates in a search, I now ensure the faster types run first, reducing the search domain for the slower, later ones. if you have a 'regex' 'known url' predicate, try tossing in a matching 'domain' one--it should accelerate it hugely, every time
+* fixed a bug in the autocomplete dropdown where it was not removing no-longer-valid file services from the location button after their deletion from _manage services_ until program restart (which was causing some harmless but unwelcome database errors). it should now remove them instantly, and may even end up on the rare 'nothing' domain
+* the duplicate filter will no longer mention pixel-perfect pngs being a waste of space against static gifs--this isn't necessarily true
+* the default height of the 'read' autocomplete result list is now 21 rows, so `system:time` and `system:urls` are no longer subtly obscured by default. for existing users, that's under _options->search_
+* in the 'running from source' requirements.txts, I bumped the 'new' and 'test' versions for python-mpv to 1.0.4/1.0.5. the newest python-mpv does not need you to rename libmpv-2.dll to mpv-2.dll, which will be one less annoying thing to do in future. I've also been testing this extremely new dll this week and ran into no problems, if you are also a Windows source user and would like to try it too: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/mpv-dev-x86_64-20231231-git-abc2a74.7z . I also tried out Qt 6.6.1, but I just discovered a column-sizing bug I want to sort out before I roll it out to the wider community
+* updated the sqlite dll that gets bundled into the windows release to 3.44.2. the sqlite3.exe is updated too
+
+## [Version 558](https://github.com/hydrusnetwork/hydrus/releases/tag/v558)
+
+### user contributions
+
+* thanks to a user, we now have rtf support! no word count yet, but it should be doable in future.
+* thanks to a user, ctrl+p and ctrl+n now move the tag listbox selection up and down, in case the arrow keys aren't what you want. it also works on the tag autocomplete results from the text input
+* added a link to 'Hydra Vista', https://github.com/konkrotte/hydravista, a macOS booru-like browser that talks to a hydrus client, to the main Client API help
+
+### misc
+
+* if you right-click on a selection of multiple tags, you can now hide them or their namespaces en masse
+* if you right-click on a selection of multiple tags, you can now add or remove them from the favourites list en masse. if you select a mix of tags that are part-in, part-out of the list, you'll get both add and remove menu entries summarising what's going on. also, this command is now wrapped in a yes/no confirmation with full summary of what's being added/removed
+* the 'favourites' "tag suggestions" section is renamed to 'most used'. this was often confused with the favourites that sit under a tag autocomplete, and these tags aren't really 'favourite' anyway, just most-used, so they are renamed
+* if you have 'remove files from view when they are sent to the trash' set, then moving a file from one local file domain to another or removing one of multiple local file domains will no longer trigger a 'remove media'! sorry for the trouble, it was dumb logic on my part
+* fixed the 'known urls' menu's url class section ('open all blahbooru urls' etc...) not appearing when right-clicking a single 'collection' thumbnail
+* fixed the 'known urls' menu's open/copy specific urls not appearing when right-clicking any collection. it now shows the front 'display media's' urls
+* if you change the darkmode in _options->colours_, the _help->darkmode_ menu item now updates correctly. just a side note: I hate much of this system and will eventually unify it with the style system
+* fixed a bunch of 'number of x' tests at the database level when the operator is `≠`
+
+### system:number of urls
+
+* added `system:number of urls`! note this counts raw URLs at the moment--I just don't have fast database filtering of post urls vs file urls or url-classless urls or whatever. it does a raw count.
+* `system:known urls` is now tucked with this new `system:number of urls` under a new stub predicate called `system:urls`
+* a variety of 'system:number of words: has/no words' predicates now parse correctly when typed
+* wrote some new system predicate parsing tests
+
+### more cbz rules
+
+* cbzs' non-image files must now have an appropriate extension like .txt, .nfo, or .xml
+* the test regarding the count of non-image files (typically allowing up to 5 non-image files per directory) is more precise with regards to subdirectories, meaning a cbz with a single subdirectory and three non-image files now counts as a cbz
+* every cbz must now have at least two image files that contain a number of some sort
+
+### cleanup and boring stuff
+
+* I split the github workflow build file into three, so the windows, linux, and macOS builds now all happen and upload in parallel. previously, the upload step was blocked on the slowest of the three, which was typically the macOS build by about ten minutes; now they all upload whenever they are ready. this will also help some future testing situations. the newly split scripts are a little unclean/inefficient, so there is also more work to do here
+* I think I fixed the non-Windows executable permission bits for the various .sh and .command files in the base directory, which were lacking them, and I removed it from a couple dozen pngs across the docs and static directories, which somehow had them. let me know if I missed anything or messed anything up!
+* if you click one of the static system predicate buttons that appear in the system pred edit UI, for instance 'system:has duration', this no longer gets promoted to the 'recent' predicates list the next time you open the panel
+* some sytem predicate edit panels should stretch vertically a bit better
+* some 'number of tags' queries should be a little faster
+* the 'tag suggestions' options page has a bit of brushed up UI and some new explanation labels
+* unified the various thumbnail generation error reporting for all the different filetypes. it should also print the file's hash, too, since most of these error contexts only have a temporary path to talk about at this stage, which isn't useful after the fact
+
+## [Version 557](https://github.com/hydrusnetwork/hydrus/releases/tag/v557)
+
+### misc
+
+* optimised large tag filter edit UI. you can now paste 5,000 items into an empty tag filter blacklist in less than a second, and if you have a big tag filter, removing or adding one thing is now instant (previously, this stuff would lag 4 seconds or more, sometimes multiple minutes!!)
+* the ugoira 'num frames' counting method now discludes files ending in .js/.json, to catch future bundling of frame timings
+* the cbz scanning tech should now recognise cbzs with four or fewer pages
+* a legacy 'is this image all good?' check that happens on PIL-loading is now gone. this improves rendering for a variety of truncated files and clarifies some error messages (previously, this thing was just failing silently)
+* fixed the delete file pre-flight logic so users on the non-advanced delete dialog can now delete repository updates. previously, they saw the menu entry, but hitting it was a no-op
+
+### better hash predicate parsing
+
+* `system:hash` labels are a little different now. they'll say `system:hash (md5) is abcd...`, with the algorithm after the "hash". hash is omitted for sha256 (the hydrus default). this eases parsing
+* `system:similar to data` labels are a little different. they'll say 'distance' instead of 'max hamming', and the number and type of hashes they hold, and if they hold only pixel hashes, the distance is not stated
+* `system:hash` predicate parsing is now more flexible. you can put the hash type pretty much anywhere now.
+* `system:similar to` and `system:similar to data` predicate parsing is now more flexible. more combinations are allowed, and you can not include distance and it'll be fine
+* these three hash predicates now copy to clipboard with all their hashes explicitly enumerated, making strings that are fully parsable! this is a big step forward in a completely sealed import-export predicate parsing loop; now I have the tech set up to export a different phrase to clipboard than what you see in the label, I just need the examples of where it goes wrong. if there is a system predicate that copies to clipboard in a way that won't parse back, let me know and I'll see if I can fix it.
+* added more unit tests for this parsing
+
+### documentation and cleanup
+
+* wrote a guide on how to install 'Git for Windows' for the 'running from source' help. although most of the settings in its marathon 12-page install wizard can be left as default, the technical questions can be intimidating, so I've written them all out for a nice simple install. also brushed up some of the surrounding help here
+* added a warning to the regular 'installing and updating' help regarding the danger of test-running extract releases before updating (you can overwrite your database by accident)
+* thanks to a user, the filetypes help document is updated with Ugoira and CBZ info
+* all the 'HydrusFiletypeHandling' files are refactored to a new 'files' module. there's a bunch of them these days!
+* the hydrus.core.images module is moved beneath this 'files' module too
+* the file log list panel right-click menu now says 'open URLs'/'open files' locations' depending on whether you are looking at a URL import log or local HDD import log
+
+### client api
+
+* the `file_metadata` call now returns `filetype_forced` and, if so, also `original_mime` to talk about the new forced filetype system
+* the client api help and unit tests are updated to test this is working ok
+* fixed a typo that was causing too much work in the updated file info manager call (and was often returning 'null' results for half-cached `file_metadata` requests with `only_return_basic_information=true`)
+* thanks to a user, the `/add_urls/get_url_info` Client API call now has a cache timeout of ten minutes, and the `/add_urls/get_url_files` call now has a timeout of 30 seconds if all the files are 'already in db'. this should automatically reduce some overhead for several programs that talk to the Client API a lot about URLs
+* the client api version is now 58
+
+## [Version 556](https://github.com/hydrusnetwork/hydrus/releases/tag/v556)
+
+### misc
+
+* fixed, on a file drag and drop, the new export path eliding code from raising an error when the default export phrase would give an empty filename. e.g. if you set the export phrase as `[title]` and the file has no title. this no longer raises an error, and the fallback export phrase `{hash}` is again used instead. broadly speaking, most errors here are now handled better
+* also, export folders will now fallback to using `{hash}` if their normal export filename raises an error
+* holding down ctrl+shift+ while selecting thumbnails now does the same thing as a bare shift+ select. previously, it was unhelpfully interpreting this as a bare ctrl+ click
+* I may have improved the stability of 'minimise to system tray'. this thing still hangs the UI for some users on a delayed restore, I do not for certain know why
+* thanks to a user who figured out the new build script, the Docker package is now on Alpine 3.19, with more and newer python library support along with it
+
+### forced filetypes
+
+* you can now force files' filetypes. hit _right-click->manage->force filetype_ on thumbnails or the media viewer, and you'll get a new dialog that lets you force-reassign those files to be considered something else. changes take place immediately, and files are renamed on disk with their new file extensions, making 'open externally' work nicely. the original filetype is remembered, so this can be undone easily through the same dialog
+* this is happening because of the cbz/zip/Ugoira work, where the distinction between one format and another is not always perfect. the tech will also be useful for 'arbitrary file import' support. in any case, if there is something you want to force one way or another, it should now be easy
+* searching for system:filetype will recognise the forced filetypes, but there may be other, more advanced areas of the program that should but do not. please let me know how you get on!
+* there is a new system predicate, `system:has/no forced filetype`, that lets you further filter for the files that have this set or not. it is under `system:file properties`. it is also parsable if you ever need to type it
+* if a file gets a metadata rescan and becomes a different filetype, this affects the original filetype and not the forced. if they are now both the same, no big problem
+* as a side thing, I cleaned up how file metadata is put together in the database during file search. we were in a limbo state a little while ago, with an api call that just needed limited data, but I was never comfortable with it. now everything goes through the same routine, and every 'file info manager' is fully fleshed out, no matter the caller
+* _yes, if you set a zip as a jpeg, you are going to get weird errors when you click on them. I'll iron these things out a bit--and have already added several quick safety checks for apparent image files without resolution and so on--and I am interested in reports, but for the most part, don't be stupid here and you won't end up in a bad place_
+
+### filetypes
+
+* **you will be asked on update if you would like to regenerate all your animated GIF and APNG thumbnails. The new x%-in and transparency tech seems to be working well, so I'm rolling out the full regen to everyone**
+* before verifying a zip is an Ugoira or a cbz, the client now test-reads the cover page it will use as a thumbnail just to make sure it isn't passworded or corrupt or whatever
+* thanks to a user, the test for whether a a zip is encrypted is much faster and neater now
+* if there is an obvious video in a zip file, this is now dispositive to it not being considered a cbz
+* all cbz and Ugoira are going to get a metadata scan again to account for these stricter rules
+
+### Mr. Bones/file history chart
+
+* **if you have had some dodgy inbox/archive numbers in your file history chart, please check again and let me know what you see. if the numbers are still bad, try changing the search from the 'all my files'/'system:everything' default--any better?**
+* fixed Mr. Bones undercounting deleted files on some very old clients (i.e. mine)
+* improved accuracy of some archive/inbox time calculations for the file history chart by adjusting archive times to the file service removal time of that file, if it is earlier
+* included some additional de-inbox events that were being missed in the file history chart by recognising that files in the inbox but removed from a domain are nonetheless a decrement to the inbox count
+* on update, some old invalid archive records will be deleted, which will also help the file history chart
+
+### boot error handling
+
+* if you start the program with client.db/server.db but missing any of the auxiliary databases, the program now stops you before the new file creation starts with a blocking message saying what has happened. it advises whether you should quit the process now to diagnose the hard drive fault or attempt to continue with reconstruction
+* if you start the program with client.db/server.db but the 'version' table is missing, you now get a special blocking message before the main db creation routine starts saying what has happened. it advises whether you should quit the process now to diagnose the hard drive fault or attempt to continue with initial creation
+* the server gets a bit of 'safe blocking show message' tech this week, which prints this info to the console and asks for the user to hit enter to continue
+
+## [Version 555](https://github.com/hydrusnetwork/hydrus/releases/tag/v555)
+
+### Ugoira/CBZ/Zip
+
+* the Ugoira/CBZ conversion last week went ok! we found too many false-positive Ugoiras, however, so I have decided to make that test stricter. Ugoiras now have to have zero-indexed filesnames, and always zero-filled to six digits. all your Ugoiras will get scanned again to see if they should better be CBZ
+* all zip files that are not openable (passworded, corrupt) are now detected early and just set as 'zip'
+
+### OpenCV
+
+* after discussing it with users, I have made the decision to slowly remove the image library OpenCV from the program. it has served us well, but it has always been a difficult-to-install bloat, and the super-compatible PIL actually does the job better these days. we'll simplify our rendering pipeline while also, with luck, improving HDR format support in future
+* thanks to a user, a critical OpenCV call involved in generating similar-files search metadata (perceptual hashes DCT) is now replaced with non-OpenCV tech
+* PIL can now load images in int32 or float32 greyscale, with or without ICC Profiles, and it shouldn't look too crazy (OpenCV was handling these before)
+* deleted all the old OpenCV gif rendering and metadata scanning tech
+* **if you would like to help test, please turn on `options->media->IN TESTING: Load images with PIL`. this used to be just a BUGFIX thing, but now it emulates where we actually want to end up. please send me any image files that render weird**
+
+### better boot error handling
+
+* if an error happens very early during boot, before the main Application event loop and splash screen are started, hydrus will now try and spin up a very small App and text dialog to show you the error visually! of course, if the error is Qt-related, then this won't work, ha ha ha, but you'll still always get the crash log
+* the client will now boot if the 'already-running' file exists but is incomprehensible--it'll just log that it was. also, if any other problem occurs during the 'already-running' check, hydrus assumes it is not already running and prints the error to the log
+* improved the 'can we write to the database folder?' test a little more. previously, if the db directory on boot was both missing and its parent was read-only, it would raise an error. now we correctly recognise that state as 'not writeable'
+* also, the fallback to the userpath db directory now only happens if you do not set a `-d/--db_dir` launch parameter. if you specifically set a launch path and that place is missing or read only, the program will not boot! I am more comfortable doing this now that we have the dialog to better display what happened
+* unified the 'what db dir are we using?' tests to one place
+* also cleaned up some of the boot failure code, which was spamming things haphazardly
+
+### string splitting and joining
+
+* the String Splitter and Joiner now interpret `\n` in their splitter/joiner text as newline (and other replacements like `\t` for tab; anything python supports). in order to not break existing parsers, the old splitter and joiner strings will be encoded on update (any `\` will become `\\`)
+* added some unit tests to test this behaviour for both String Processor types
+
+### misc
+
+* the system predicate parser is now plugged into the excellent `dateparser` library that we already use in downloader parsing. this thing can eat pretty much any date string you can throw at it, so if you type "system:archived time: since 01/05/2011" or "system:archived time: before 30 hours ago", it'll all work for almost any combination you can think of. it'll probably even work in your native language! the one big caveat is if you give a longer duration timestamp in the form 'x time units( ago)', rather than a specific date, it'll convert it to days/hours, ignoring years and months. since this stuff causes a ton of headaches, I am likely going to switch all the time-delta time predicates here to work on days/hours/seconds, and if you want to put 60 or 365 days, knowing what inaccuracy that implies means, then you can, rather than have me continually fret over and fail to deliver various leap year calculation problems. _calendarium delenda est_
+* fixed some thumbnail rendering for another class of damaged gif--this time, gifs that are so garbagified that they change their resolution from one frame to the next and/or produce a sizeless, shapeless frame of a handful of bytes. this is now detected and the bad data discarded!
+* if a video seems to have 0/None duration, the main native ffmpeg renderer (which is also used for thumbnail generation) can now handle it. the 'start x% in' value will be crazy, but it'll work
+* fixed an error with mpv trying to inspect the duration of null media during various states of media viewer transition
+
+### boring cleanup
+
+* gave a quick pass over the ~250 small 'just show some text and a system icon' dialogs work across the program. unified all calls through one location, improved some strings and string formatting, added more exception logging, unified the dialog titles, differentiated information/warning/critical flags better, made 'critical' messages log their titles and text, and made it all thread safe in a nice invisible way to callers
+* fixed some borked page/popup permission checks in the client api
+* if a file transitions from 'no transparency' to 'has transparency', the client will now queue a thumbnail regen, just in case that tech has been recently added
+* improved the formatting of what the main error-logging method actually prints to the log
+* slimmed down some of the watcher/subscription fixed-checking-time code
+* misc formatting cleanup and surplus import clearout
+* fixed the discord link in the PTR help document

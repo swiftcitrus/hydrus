@@ -7,7 +7,10 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client.gui import ClientGUIDialogsMessage
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIStyle
 from hydrus.client.gui import QtInit
@@ -123,14 +126,18 @@ class ColourPickerButton( QW.QPushButton ):
         
         try:
             
-            import_string = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
+        
+        import_string = raw_text
         
         if import_string.startswith( '#' ):
             
@@ -141,7 +148,7 @@ class ColourPickerButton( QW.QPushButton ):
         
         if len( import_string ) != 7:
             
-            QW.QMessageBox.critical( self, 'Error', 'That did not appear to be a hex string!' )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', f'"{raw_text}" did not appear to be a hex string!' )
             
             return
             
@@ -152,9 +159,7 @@ class ColourPickerButton( QW.QPushButton ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
-            
-            HydrusData.ShowException( e )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'A hex colour like #FF0050', e )
             
             return
             
@@ -182,11 +187,11 @@ class ColourPickerButton( QW.QPushButton ):
     
     def ShowMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         hex_string = self.GetColour().name( QG.QColor.HexRgb )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'copy ' + hex_string + ' to the clipboard', 'Copy the current colour to the clipboard.', HG.client_controller.pub, 'clipboard', 'text', hex_string )
+        ClientGUIMenus.AppendMenuItem( menu, 'copy ' + hex_string + ' to the clipboard', 'Copy the current colour to the clipboard.', CG.client_controller.pub, 'clipboard', 'text', hex_string )
         ClientGUIMenus.AppendMenuItem( menu, 'import a hex colour from the clipboard', 'Look at the clipboard for a colour in the format #FF0000, and set the colour.', self._ImportHexFromClipboard )
         
         CGC.core().PopupMenu( self, menu )

@@ -10,6 +10,7 @@ from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientParsing
 from hydrus.client import ClientStrings
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIStringPanels
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
@@ -449,16 +450,16 @@ class StringToStringDictControl( QW.QWidget ):
                 
                 if key in self._GetExistingKeys():
                     
-                    QW.QMessageBox.warning( self, 'Warning', 'That {} already exists!'.format( self._key_name ) )
+                    ClientGUIDialogsMessage.ShowWarning( self, 'That {} already exists!'.format( self._key_name ) )
                     
                     return
                     
                 
-                with ClientGUIDialogs.DialogTextEntry( self, 'enter the ' + self._value_name, allow_blank = True ) as dlg:
+                with ClientGUIDialogs.DialogTextEntry( self, 'enter the ' + self._value_name, allow_blank = True ) as dlg_2:
                     
-                    if dlg.exec() == QW.QDialog.Accepted:
+                    if dlg_2.exec() == QW.QDialog.Accepted:
                         
-                        value = dlg.GetValue()
+                        value = dlg_2.GetValue()
                         
                         data = ( key, value )
                         
@@ -487,7 +488,7 @@ class StringToStringDictControl( QW.QWidget ):
                         
                         if edited_key != key and edited_key in self._GetExistingKeys():
                             
-                            QW.QMessageBox.warning( self, 'Warning', 'That {} already exists!'.format( self._key_name ) )
+                            ClientGUIDialogsMessage.ShowWarning( self, 'That {} already exists!'.format( self._key_name ) )
                             
                             break
                             
@@ -538,7 +539,7 @@ class StringToStringDictControl( QW.QWidget ):
         
         self.Clear()
         
-        self._listctrl.AddDatas( list( str_to_str_dict.items() ) )
+        self._listctrl.AddDatas( [ ( str( key ), str( value ) ) for ( key, value ) in str_to_str_dict.items() ] )
         
         self._listctrl.Sort()
         
@@ -617,20 +618,20 @@ class StringToStringMatchDictControl( QW.QWidget ):
                 
                 if key in self._GetExistingKeys():
                     
-                    QW.QMessageBox.warning( self, 'Warning', 'That {} already exists!'.format( self._key_name ) )
+                    ClientGUIDialogsMessage.ShowWarning( self, 'That {} already exists!'.format( self._key_name ) )
                     
                     return
                     
                 
-                with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit match' ) as dlg:
+                with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit match' ) as dlg_2:
                     
                     string_match = ClientStrings.StringMatch()
                     
-                    panel = ClientGUIStringPanels.EditStringMatchPanel( dlg, string_match )
+                    panel = ClientGUIStringPanels.EditStringMatchPanel( dlg_2, string_match )
                     
-                    dlg.SetPanel( panel )
+                    dlg_2.SetPanel( panel )
                     
-                    if dlg.exec() == QW.QDialog.Accepted:
+                    if dlg_2.exec() == QW.QDialog.Accepted:
                         
                         string_match = panel.GetValue()
                         
@@ -659,7 +660,7 @@ class StringToStringMatchDictControl( QW.QWidget ):
                     
                     if edited_key != key and edited_key in self._GetExistingKeys():
                         
-                        QW.QMessageBox.warning( self, 'Warning', 'That {} already exists!'.format( self._key_name ) )
+                        ClientGUIDialogsMessage.ShowWarning( self, 'That {} already exists!'.format( self._key_name ) )
                         
                         break
                         

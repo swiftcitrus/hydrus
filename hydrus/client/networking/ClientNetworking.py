@@ -3,9 +3,11 @@ import threading
 import time
 import typing
 
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client.networking import ClientNetworkingBandwidth
 from hydrus.client.networking import ClientNetworkingSessions
@@ -75,6 +77,13 @@ class NetworkEngine( object ):
         self._local_shutdown = False
         
         self.controller.sub( self, 'RefreshOptions', 'notify_new_options' )
+        
+    
+    def _AssignCurrentLoginProcess( self, login_process: typing.Optional[ ClientNetworkingLogin.LoginProcess ] ):
+        
+        self._current_login_process = login_process
+        
+        self.login_manager.SetCurrentLoginProcess( login_process )
         
     
     def AddJob( self, job: ClientNetworkingJobs.NetworkJob ):
@@ -168,11 +177,11 @@ class NetworkEngine( object ):
                         
                         self._current_validation_process = validation_process
                         
-                        job.SetStatus( 'validation presented to user\u2026' )
+                        job.SetStatus( 'validation presented to user' + HC.UNICODE_ELLIPSIS )
                         
                     else:
                         
-                        job.SetStatus( 'waiting in user validation queue\u2026' )
+                        job.SetStatus( 'waiting in user validation queue' + HC.UNICODE_ELLIPSIS )
                         
                         job.Sleep( 5 )
                         
@@ -220,7 +229,7 @@ class NetworkEngine( object ):
             
             elif self._pause_all_new_network_traffic:
                 
-                job.SetStatus( 'all new network traffic is paused\u2026' )
+                job.SetStatus( 'all new network traffic is paused' + HC.UNICODE_ELLIPSIS )
                 
                 job.Sleep( 2 )
                 
@@ -257,7 +266,7 @@ class NetworkEngine( object ):
                 
                 self.controller.CallToThread( login_process.Start )
                 
-                self._current_login_process = login_process
+                self._AssignCurrentLoginProcess( login_process )
                 
             
         
@@ -271,7 +280,7 @@ class NetworkEngine( object ):
                 
                 return True
                 
-            elif job.NeedsLogin():
+            elif job.CurrentlyNeedsLogin():
                 
                 try:
                     
@@ -289,13 +298,15 @@ class NetworkEngine( object ):
                         
                     else:
                         
+                        job_login_network_context = job.GetLoginNetworkContext()
+                        
                         if job.IsHydrusJob():
                             
-                            message = 'This hydrus service (' + job.GetLoginNetworkContext().ToString() + ') could not do work because: {}'.format( str( e ) )
+                            message = f'This hydrus service "{job_login_network_context.ToString()}" could not do work because: {e}'
                             
                         else:
                             
-                            message = 'This job\'s network context (' + job.GetLoginNetworkContext().ToString() + ') seems to have an invalid login. The error was: {}'.format( str( e ) )
+                            message = f'This job\'s network context "{job_login_network_context.ToString()}" seems to have an invalid login. The error was: {e}'
                             
                         
                         job.Cancel( message )
@@ -323,13 +334,13 @@ class NetworkEngine( object ):
                     
                     self.controller.CallToThread( login_process.Start )
                     
-                    self._current_login_process = login_process
+                    self._AssignCurrentLoginProcess( login_process )
                     
-                    job.SetStatus( 'logging in\u2026' )
+                    job.SetStatus( 'logging in' + HC.UNICODE_ELLIPSIS )
                     
                 else:
                     
-                    job.SetStatus( 'waiting in login queue\u2026' )
+                    job.SetStatus( 'waiting in login queue' + HC.UNICODE_ELLIPSIS )
                     
                 
                 return True
@@ -348,7 +359,7 @@ class NetworkEngine( object ):
                 
                 if self._current_login_process.IsDone():
                     
-                    self._current_login_process = None
+                    self._AssignCurrentLoginProcess( None )
                     
                 
             
@@ -367,7 +378,7 @@ class NetworkEngine( object ):
                 
                 if self._pause_all_new_network_traffic:
                     
-                    job.SetStatus( 'all new network traffic is paused\u2026' )
+                    job.SetStatus( 'all new network traffic is paused' + HC.UNICODE_ELLIPSIS )
                     
                     job.Sleep( 2 )
                     
@@ -415,7 +426,7 @@ class NetworkEngine( object ):
                 
             else:
                 
-                job.SetStatus( 'waiting for other jobs to finish\u2026' )
+                job.SetStatus( 'waiting for other jobs to finish' + HC.UNICODE_ELLIPSIS )
                 
                 return True
                 

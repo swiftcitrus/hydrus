@@ -1,4 +1,6 @@
 import collections
+import typing
+
 import psutil
 import sqlite3
 
@@ -6,6 +8,7 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusTemp
+from hydrus.core import HydrusTime
 
 def CheckHasSpaceForDBTransaction( db_dir, num_bytes ):
     
@@ -71,6 +74,45 @@ def CheckHasSpaceForDBTransaction( db_dir, num_bytes ):
             
         
     
+
+def ReadFromCancellableCursor( cursor, largest_group_size, cancelled_hook = None ):
+    
+    if cancelled_hook is None:
+        
+        return cursor.fetchall()
+        
+    
+    results = []
+    
+    if cancelled_hook():
+        
+        return results
+        
+    
+    NUM_TO_GET = 1
+    
+    group_of_results = cursor.fetchmany( NUM_TO_GET )
+    
+    while len( group_of_results ) > 0:
+        
+        results.extend( group_of_results )
+        
+        if cancelled_hook():
+            
+            break
+            
+        
+        if NUM_TO_GET < largest_group_size:
+            
+            NUM_TO_GET *= 2
+            
+        
+        group_of_results = cursor.fetchmany( NUM_TO_GET )
+        
+    
+    return results
+    
+
 class TemporaryIntegerTableNameCache( object ):
     
     my_instance = None
@@ -206,7 +248,18 @@ class DBBase( object ):
             create_phrase = 'CREATE INDEX IF NOT EXISTS'
             
         
-        index_name = self._GenerateIndexName( table_name, columns )
+        ideal_index_name = self._GenerateIdealIndexName( table_name, columns )
+        
+        index_name = ideal_index_name
+        
+        i = 0
+        
+        while self._ActuaIndexExists( index_name ):
+            
+            index_name = f'{ideal_index_name}_{i}'
+            
+            i += 1
+            
         
         if '.' in table_name:
             
@@ -222,18 +275,25 @@ class DBBase( object ):
         self._Execute( statement )
         
     
-    def _Execute( self, query, *args ) -> sqlite3.Cursor:
+    def _Execute( self, query, *query_args ) -> sqlite3.Cursor:
         
         if HG.query_planner_mode and query not in HG.queries_planned:
             
-            plan_lines = self._c.execute( 'EXPLAIN QUERY PLAN {}'.format( query ), *args ).fetchall()
+            plan_lines = self._c.execute( 'EXPLAIN QUERY PLAN {}'.format( query ), *query_args ).fetchall()
             
             HG.query_planner_query_count += 1
             
             HG.controller.PrintQueryPlan( query, plan_lines )
             
         
-        return self._c.execute( query, *args )
+        return self._c.execute( query, *query_args )
+        
+    
+    def _ExecuteCancellable( self, query, query_args, cancelled_hook: typing.Callable[ [], bool ] ):
+        
+        cursor = self._Execute( query, query_args )
+        
+        return ReadFromCancellableCursor( cursor, 1024, cancelled_hook = cancelled_hook )
         
     
     def _ExecuteMany( self, query, args_iterator ):
@@ -255,7 +315,7 @@ class DBBase( object ):
         self._c.executemany( query, args_iterator )
         
     
-    def _GenerateIndexName( self, table_name, columns ):
+    def _GenerateIdealIndexName( self, table_name, columns ):
         
         return '{}_{}_index'.format( table_name, '_'.join( columns ) )
         
@@ -295,11 +355,92 @@ class DBBase( object ):
             
         
     
-    def _IndexExists( self, table_name, columns ):
+    def _GetSumResult( self, result: typing.Optional[ typing.Tuple[ typing.Optional[ int ] ] ] ) -> int:
         
-        index_name = self._GenerateIndexName( table_name, columns )
+        if result is None or result[0] is None:
+            
+            sum_value = 0
+            
+        else:
+            
+            ( sum_value, ) = result
+            
         
-        return self._TableOrIndexExists( index_name, 'index' )
+        return sum_value
+        
+    
+    def _ActuaIndexExists( self, index_name ):
+        
+        if '.' in index_name:
+            
+            ( schema, index_name ) = index_name.split( '.', 1 )
+            
+            search_schemas = [ schema ]
+            
+        else:
+            
+            search_schemas = self._GetAttachedDatabaseNames()
+            
+        
+        for schema in search_schemas:
+            
+            result = self._Execute( f'SELECT 1 FROM {schema}.sqlite_master WHERE name = ? and type = ?;', ( index_name, 'index' ) ).fetchone()
+            
+            if result is not None:
+                
+                return True
+                
+            
+        
+        return False
+        
+    
+    def _IdealIndexExists( self, table_name, columns ):
+        
+        # ok due to deferred delete gubbins, we have overlapping index names. therefore this has to be more flexible than a static name
+        # we'll search based on tbl_name in sqlite_master
+        
+        ideal_index_name = self._GenerateIdealIndexName( table_name, columns )
+        
+        if '.' in ideal_index_name:
+            
+            ( schema, ideal_index_name ) = ideal_index_name.split( '.', 1 )
+            
+            search_schemas = [ schema ]
+            
+        else:
+            
+            search_schemas = self._GetAttachedDatabaseNames()
+            
+        
+        if '.' in table_name:
+            
+            table_name = table_name.split( '.', 1 )[1]
+            
+        
+        for schema in search_schemas:
+            
+            table_result = self._Execute( f'SELECT 1 FROM {schema}.sqlite_master WHERE name = ?;', ( table_name, ) ).fetchone()
+            
+            if table_result is None:
+                
+                continue
+                
+            
+            # ok the table exists on this db, so let's see if it has our index, whatever its actual name
+            
+            all_indices_of_this_table = self._STL( self._Execute( f'SELECT name FROM {schema}.sqlite_master WHERE tbl_name = ? AND type = ?;', ( table_name, 'index' ) ) )
+            
+            for index_name in all_indices_of_this_table:
+                
+                if ideal_index_name in index_name:
+                    
+                    return True
+                    
+                
+            
+        
+        return False
         
     
     def _MakeTemporaryIntegerTable( self, integer_iterable, column_name ):
@@ -335,14 +476,9 @@ class DBBase( object ):
     
     def _TableExists( self, table_name ):
         
-        return self._TableOrIndexExists( table_name, 'table' )
-        
-    
-    def _TableOrIndexExists( self, name, item_type ):
-        
-        if '.' in name:
+        if '.' in table_name:
             
-            ( schema, name ) = name.split( '.', 1 )
+            ( schema, table_name ) = table_name.split( '.', 1 )
             
             search_schemas = [ schema ]
             
@@ -353,7 +489,7 @@ class DBBase( object ):
         
         for schema in search_schemas:
             
-            result = self._Execute( 'SELECT 1 FROM {}.sqlite_master WHERE name = ? AND type = ?;'.format( schema ), ( name, item_type ) ).fetchone()
+            result = self._Execute( f'SELECT 1 FROM {schema}.sqlite_master WHERE name = ? AND type = ?;', ( table_name, 'table' ) ).fetchone()
             
             if result is not None:
                 
@@ -385,10 +521,10 @@ class DBCursorTransactionWrapper( DBBase ):
         self._in_transaction = False
         self._transaction_contains_writes = False
         
-        self._last_mem_refresh_time = HydrusData.GetNow()
-        self._last_wal_passive_checkpoint_time = HydrusData.GetNow()
-        self._last_wal_truncate_checkpoint_time = HydrusData.GetNow()
-        self._last_journal_zero_time = HydrusData.GetNow()
+        self._last_mem_refresh_time = HydrusTime.GetNow()
+        self._last_wal_passive_checkpoint_time = HydrusTime.GetNow()
+        self._last_wal_truncate_checkpoint_time = HydrusTime.GetNow()
+        self._last_journal_zero_time = HydrusTime.GetNow()
         
         self._pubsubs = []
         
@@ -425,7 +561,7 @@ class DBCursorTransactionWrapper( DBBase ):
             self._Execute( 'BEGIN IMMEDIATE;' )
             self._Execute( 'SAVEPOINT hydrus_savepoint;' )
             
-            self._transaction_start_time = HydrusData.GetNow()
+            self._transaction_start_time = HydrusTime.GetNow()
             self._in_transaction = True
             self._transaction_contains_writes = False
             
@@ -449,37 +585,37 @@ class DBCursorTransactionWrapper( DBBase ):
             self._in_transaction = False
             self._transaction_contains_writes = False
             
-            if HG.db_journal_mode == 'WAL' and HydrusData.TimeHasPassed( self._last_wal_passive_checkpoint_time + WAL_PASSIVE_CHECKPOINT_PERIOD ):
+            if HG.db_journal_mode == 'WAL' and HydrusTime.TimeHasPassed( self._last_wal_passive_checkpoint_time + WAL_PASSIVE_CHECKPOINT_PERIOD ):
                 
-                if HydrusData.TimeHasPassed( self._last_wal_truncate_checkpoint_time + WAL_TRUNCATE_CHECKPOINT_PERIOD ):
+                if HydrusTime.TimeHasPassed( self._last_wal_truncate_checkpoint_time + WAL_TRUNCATE_CHECKPOINT_PERIOD ):
                     
                     self._Execute( 'PRAGMA wal_checkpoint(TRUNCATE);' )
                     
-                    self._last_wal_truncate_checkpoint_time = HydrusData.GetNow()
+                    self._last_wal_truncate_checkpoint_time = HydrusTime.GetNow()
                     
                 else:
                     
                     self._Execute( 'PRAGMA wal_checkpoint(PASSIVE);' )
                     
                 
-                self._last_wal_passive_checkpoint_time = HydrusData.GetNow()
+                self._last_wal_passive_checkpoint_time = HydrusTime.GetNow()
                 
             
-            if HydrusData.TimeHasPassed( self._last_mem_refresh_time + MEM_REFRESH_PERIOD ):
+            if HydrusTime.TimeHasPassed( self._last_mem_refresh_time + MEM_REFRESH_PERIOD ):
                 
                 self._Execute( 'DETACH mem;' )
                 self._Execute( 'ATTACH ":memory:" AS mem;' )
                 
                 TemporaryIntegerTableNameCache.instance().Clear()
                 
-                self._last_mem_refresh_time = HydrusData.GetNow()
+                self._last_mem_refresh_time = HydrusTime.GetNow()
                 
             
-            if HG.db_journal_mode == 'PERSIST' and HydrusData.TimeHasPassed( self._last_journal_zero_time + JOURNAL_ZERO_PERIOD ):
+            if HG.db_journal_mode == 'PERSIST' and HydrusTime.TimeHasPassed( self._last_journal_zero_time + JOURNAL_ZERO_PERIOD ):
                 
                 self._ZeroJournal()
                 
-                self._last_journal_zero_time = HydrusData.GetNow()
+                self._last_journal_zero_time = HydrusTime.GetNow()
                 
             
         else:
@@ -570,6 +706,6 @@ class DBCursorTransactionWrapper( DBBase ):
     
     def TimeToCommit( self ):
         
-        return self._in_transaction and self._transaction_contains_writes and HydrusData.TimeHasPassed( self._transaction_start_time + self._transaction_commit_period )
+        return self._in_transaction and self._transaction_contains_writes and HydrusTime.TimeHasPassed( self._transaction_start_time + self._transaction_commit_period )
         
     

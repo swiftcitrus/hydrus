@@ -11,6 +11,7 @@ from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusTemp
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworkVariableHandling
 from hydrus.core.networking import HydrusNetworking
@@ -197,7 +198,7 @@ class HydrusResourceSessionKey( HydrusResourceHydrusNetwork ):
         
         ( session_key, expires ) = HG.server_controller.server_session_manager.AddSession( self._service_key, access_key )
         
-        now = HydrusData.GetNow()
+        now = HydrusTime.GetNow()
         
         max_age = expires - now
         
@@ -409,12 +410,12 @@ class HydrusResourceRestrictedOptionsModifyNullificationPeriod( HydrusResourceRe
         
         if nullification_period < HydrusNetwork.MIN_NULLIFICATION_PERIOD:
             
-            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too low. It needs to be at least {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MIN_NULLIFICATION_PERIOD ) ) )
+            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too low. It needs to be at least {}.'.format( HydrusTime.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MIN_NULLIFICATION_PERIOD ) ) )
             
         
         if nullification_period > HydrusNetwork.MAX_NULLIFICATION_PERIOD:
             
-            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too high. It needs to be lower than {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_NULLIFICATION_PERIOD ) ) )
+            raise HydrusExceptions.BadRequestException( 'The anonymisation period was too high. It needs to be lower than {}.'.format( HydrusTime.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_NULLIFICATION_PERIOD ) ) )
             
         
         old_nullification_period = self._service.GetNullificationPeriod()
@@ -426,8 +427,8 @@ class HydrusResourceRestrictedOptionsModifyNullificationPeriod( HydrusResourceRe
             HydrusData.Print(
                 'Account {} changed the anonymisation period from "{}" to "{}".'.format(
                     request.hydrus_account.GetAccountKey().hex(),
-                    HydrusData.TimeDeltaToPrettyTimeDelta( old_nullification_period ),
-                    HydrusData.TimeDeltaToPrettyTimeDelta( nullification_period )
+                    HydrusTime.TimeDeltaToPrettyTimeDelta( old_nullification_period ),
+                    HydrusTime.TimeDeltaToPrettyTimeDelta( nullification_period )
                 )
             )
             
@@ -446,12 +447,12 @@ class HydrusResourceRestrictedOptionsModifyUpdatePeriod( HydrusResourceRestricte
         
         if update_period < HydrusNetwork.MIN_UPDATE_PERIOD:
             
-            raise HydrusExceptions.BadRequestException( 'The update period was too low. It needs to be at least {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MIN_UPDATE_PERIOD ) ) )
+            raise HydrusExceptions.BadRequestException( 'The update period was too low. It needs to be at least {}.'.format( HydrusTime.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MIN_UPDATE_PERIOD ) ) )
             
         
         if update_period > HydrusNetwork.MAX_UPDATE_PERIOD:
             
-            raise HydrusExceptions.BadRequestException( 'The update period was too high. It needs to be lower than {}.'.format( HydrusData.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_UPDATE_PERIOD ) ) )
+            raise HydrusExceptions.BadRequestException( 'The update period was too high. It needs to be lower than {}.'.format( HydrusTime.TimeDeltaToPrettyTimeDelta( HydrusNetwork.MAX_UPDATE_PERIOD ) ) )
             
         
         old_update_period = self._service.GetUpdatePeriod()
@@ -463,8 +464,8 @@ class HydrusResourceRestrictedOptionsModifyUpdatePeriod( HydrusResourceRestricte
             HydrusData.Print(
                 'Account {} changed the update period from "{}" to "{}".'.format(
                     request.hydrus_account.GetAccountKey().hex(),
-                    HydrusData.TimeDeltaToPrettyTimeDelta( old_update_period ),
-                    HydrusData.TimeDeltaToPrettyTimeDelta( update_period )
+                    HydrusTime.TimeDeltaToPrettyTimeDelta( old_update_period ),
+                    HydrusTime.TimeDeltaToPrettyTimeDelta( update_period )
                 )
             )
             
@@ -916,28 +917,7 @@ class HydrusResourceRestrictedNumPetitions( HydrusResourceRestricted ):
         return response_context
         
     
-class HydrusResourceRestrictedPetitionSummaryList( HydrusResourceRestricted ):
-    
-    def _checkAccountPermissions( self, request: HydrusServerRequest.HydrusRequest ):
-        
-        content_type = request.parsed_request_args[ 'content_type' ]
-        
-        request.hydrus_account.CheckPermission( content_type, HC.PERMISSION_ACTION_MODERATE )
-        
-    
-    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
-        
-        # fetch cached summary list
-        # ( account_key, reason, size of petition )
-        petition_summary_list = []
-        
-        body = HydrusNetworkVariableHandling.DumpHydrusArgsToNetworkBytes( { 'petition_summary_list' : petition_summary_list } )
-        
-        response_context = HydrusServerResources.ResponseContext( 200, body = body )
-        
-        return response_context
-        
-    
+
 class HydrusResourceRestrictedPetition( HydrusResourceRestricted ):
     
     def _checkAccountPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -949,12 +929,38 @@ class HydrusResourceRestrictedPetition( HydrusResourceRestricted ):
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
         
-        subject_account_key = request.parsed_request_args.GetValueOrNone( 'subject_account_key', bytes )
-        # add reason to here some time, for when we eventually select petitions from a summary list of ( account, reason, size ) stuff
         content_type = request.parsed_request_args[ 'content_type' ]
         status = request.parsed_request_args[ 'status' ]
+        subject_account_key = request.parsed_request_args.GetValueOrNone( 'subject_account_key', bytes )
+        reason = request.parsed_request_args.GetValueOrNone( 'reason', str )
         
-        petition = HG.server_controller.Read( 'petition', self._service_key, request.hydrus_account, content_type, status, subject_account_key = subject_account_key )
+        if subject_account_key is None or reason is None:
+            
+            petitions_summary = HG.server_controller.Read( 'petitions_summary', self._service_key, request.hydrus_account, content_type, status, limit = 1, subject_account_key = subject_account_key )
+            
+            if len( petitions_summary ) == 0:
+                
+                if subject_account_key is None and reason is None:
+                    
+                    raise HydrusExceptions.NotFoundException( f'Sorry, no petitions were found!' )
+                    
+                elif subject_account_key is None:
+                    
+                    raise HydrusExceptions.NotFoundException( f'Sorry, no petitions were found for the given reason {reason}!' )
+                    
+                else:
+                    
+                    raise HydrusExceptions.NotFoundException( 'Sorry, no petitions were found for the given account_key {}!'.format( subject_account_key.hex() ) )
+                    
+                
+            
+            petition_header = petitions_summary[0]
+            
+            subject_account_key = petition_header.account_key
+            reason = petition_header.reason
+            
+        
+        petition = HG.server_controller.Read( 'petition', self._service_key, request.hydrus_account, content_type, status, subject_account_key, reason )
         
         body = HydrusNetworkVariableHandling.DumpHydrusArgsToNetworkBytes( { 'petition' : petition } )
         
@@ -963,6 +969,35 @@ class HydrusResourceRestrictedPetition( HydrusResourceRestricted ):
         return response_context
         
     
+
+class HydrusResourceRestrictedPetitionsSummary( HydrusResourceRestricted ):
+    
+    def _checkAccountPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        content_type = request.parsed_request_args[ 'content_type' ]
+        
+        request.hydrus_account.CheckPermission( content_type, HC.PERMISSION_ACTION_MODERATE )
+        
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        content_type = request.parsed_request_args.GetValue( 'content_type', int )
+        status = request.parsed_request_args.GetValue( 'status', int )
+        num = request.parsed_request_args.GetValue( 'num', int )
+        
+        subject_account_key = request.parsed_request_args.GetValueOrNone( 'subject_account_key', bytes )
+        reason = request.parsed_request_args.GetValueOrNone( 'reason', str )
+        
+        petitions_summary = HG.server_controller.Read( 'petitions_summary', self._service_key, request.hydrus_account, content_type, status, num, subject_account_key = subject_account_key, reason = reason )
+        
+        body = HydrusNetworkVariableHandling.DumpHydrusArgsToNetworkBytes( { 'petitions_summary' : petitions_summary } )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, body = body )
+        
+        return response_context
+        
+    
+
 class HydrusResourceRestrictedRegistrationKeys( HydrusResourceRestricted ):
     
     def _checkAccountPermissions( self, request: HydrusServerRequest.HydrusRequest ):

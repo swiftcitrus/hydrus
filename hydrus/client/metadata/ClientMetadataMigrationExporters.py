@@ -8,10 +8,14 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientStrings
+from hydrus.client import ClientTime
 from hydrus.client.importing.options import NoteImportOptions
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientMetadataMigrationCore
 
 class SingleFileMetadataExporter( ClientMetadataMigrationCore.ImporterExporterNode ):
@@ -59,7 +63,7 @@ class SingleFileMetadataExporterSidecar( SingleFileMetadataExporter, ClientMetad
         
     
 
-class SingleFileMetadataExporterMediaNotes( HydrusSerialisable.SerialisableBase, SingleFileMetadataExporterMedia ):
+class SingleFileMetadataExporterMediaNotes( SingleFileMetadataExporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_NOTES
     SERIALISABLE_NAME = 'Metadata Single File Exporter Media Notes'
@@ -109,7 +113,7 @@ class SingleFileMetadataExporterMediaNotes( HydrusSerialisable.SerialisableBase,
             names_and_notes.append( ( name, text ) )
             
         
-        media_result = HG.client_controller.Read( 'media_result', hash )
+        media_result = CG.client_controller.Read( 'media_result', hash )
         
         note_import_options = NoteImportOptions.NoteImportOptions()
         
@@ -117,11 +121,11 @@ class SingleFileMetadataExporterMediaNotes( HydrusSerialisable.SerialisableBase,
         note_import_options.SetExtendExistingNoteIfPossible( True )
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_RENAME )
         
-        service_keys_to_content_updates = note_import_options.GetServiceKeysToContentUpdates( media_result, names_and_notes )
+        content_update_package = note_import_options.GetContentUpdatePackage( media_result, names_and_notes )
         
-        if len( service_keys_to_content_updates ) > 0:
+        if content_update_package.HasContent():
             
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
             
         
     
@@ -143,7 +147,7 @@ class SingleFileMetadataExporterMediaNotes( HydrusSerialisable.SerialisableBase,
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_NOTES ] = SingleFileMetadataExporterMediaNotes
 
-class SingleFileMetadataExporterMediaTags( HydrusSerialisable.SerialisableBase, SingleFileMetadataExporterMedia ):
+class SingleFileMetadataExporterMediaTags( SingleFileMetadataExporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_TAGS
     SERIALISABLE_NAME = 'Metadata Single File Exporter Media Tags'
@@ -200,7 +204,7 @@ class SingleFileMetadataExporterMediaTags( HydrusSerialisable.SerialisableBase, 
             return
             
         
-        if HG.client_controller.services_manager.GetServiceType( self._service_key ) == HC.LOCAL_TAG:
+        if CG.client_controller.services_manager.GetServiceType( self._service_key ) == HC.LOCAL_TAG:
             
             add_content_action = HC.CONTENT_UPDATE_ADD
             
@@ -215,9 +219,9 @@ class SingleFileMetadataExporterMediaTags( HydrusSerialisable.SerialisableBase, 
         
         if len( tags ) > 0:
             
-            content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, hashes ) ) for tag in tags ]
+            content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, hashes ) ) for tag in tags ]
             
-            HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
+            CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._service_key, content_updates ) )
             
         
     
@@ -230,7 +234,7 @@ class SingleFileMetadataExporterMediaTags( HydrusSerialisable.SerialisableBase, 
         
         try:
             
-            name = HG.client_controller.services_manager.GetName( self._service_key )
+            name = CG.client_controller.services_manager.GetName( self._service_key )
             
         except:
             
@@ -243,7 +247,97 @@ class SingleFileMetadataExporterMediaTags( HydrusSerialisable.SerialisableBase, 
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_TAGS ] = SingleFileMetadataExporterMediaTags
 
-class SingleFileMetadataExporterMediaURLs( HydrusSerialisable.SerialisableBase, SingleFileMetadataExporterMedia ):
+class SingleFileMetadataExporterMediaTimestamps( SingleFileMetadataExporterMedia, HydrusSerialisable.SerialisableBase ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_TIMESTAMPS
+    SERIALISABLE_NAME = 'Metadata Single File Exporter Media Timestamps'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, timestamp_data_stub: typing.Optional[ ClientTime.TimestampData ] = None ):
+        
+        HydrusSerialisable.SerialisableBase.__init__( self )
+        SingleFileMetadataExporterMedia.__init__( self )
+        
+        if timestamp_data_stub is None:
+            
+            timestamp_data_stub = ClientTime.TimestampData.STATICSimpleStub( HC.TIMESTAMP_TYPE_ARCHIVED )
+            
+        
+        self._timestamp_data_stub = timestamp_data_stub
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        return self._timestamp_data_stub.GetSerialisableTuple()
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        serialisable_timestamp_data_stub = serialisable_info
+        
+        self._timestamp_data_stub = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_timestamp_data_stub )
+        
+    
+    def Export( self, hash: bytes, rows: typing.Collection[ str ] ):
+        
+        if len( rows ) == 0:
+            
+            return
+            
+        
+        row = list( rows )[ 0 ]
+        
+        try:
+            
+            timestamp = int( row )
+            
+        except ValueError:
+            
+            return
+            
+        
+        if timestamp > HydrusTime.GetNow():
+            
+            return
+            
+        
+        timestamp_data = self._timestamp_data_stub.Duplicate()
+        
+        new_timestamp_data = ClientTime.TimestampData( timestamp_type = timestamp_data.timestamp_type, location = timestamp_data.location, timestamp_ms = HydrusTime.MillisecondiseS( timestamp ) )
+        
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( hash, ), new_timestamp_data ) ) ]
+        
+        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_updates ) )
+        
+    
+    def GetExampleStrings( self ):
+        
+        examples = [
+            '1681682717'
+        ]
+        
+        return examples
+        
+    
+    def GetTimestampDataStub( self ) -> ClientTime.TimestampData:
+        
+        return self._timestamp_data_stub
+        
+    
+    def SetTimestampDataStub( self, timestamp_data_stub: ClientTime.TimestampData ):
+        
+        self._timestamp_data_stub = timestamp_data_stub
+        
+    
+    def ToString( self ) -> str:
+        
+        return '{} to media'.format( self._timestamp_data_stub )
+        
+    
+
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_TIMESTAMPS ] = SingleFileMetadataExporterMediaTimestamps
+
+class SingleFileMetadataExporterMediaURLs( SingleFileMetadataExporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_URLS
     SERIALISABLE_NAME = 'Metadata Single File Exporter Media URLs'
@@ -278,7 +372,7 @@ class SingleFileMetadataExporterMediaURLs( HydrusSerialisable.SerialisableBase, 
             
             try:
                 
-                url = HG.client_controller.network_engine.domain_manager.NormaliseURL( row )
+                url = CG.client_controller.network_engine.domain_manager.NormaliseURL( row )
                 
                 urls.append( url )
                 
@@ -294,9 +388,9 @@ class SingleFileMetadataExporterMediaURLs( HydrusSerialisable.SerialisableBase, 
         
         hashes = { hash }
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls, hashes ) ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls, hashes ) ) ]
         
-        HG.client_controller.WriteSynchronous( 'content_updates', { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : content_updates } )
+        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_updates ) )
         
     
     def GetExampleStrings( self ):
@@ -317,7 +411,7 @@ class SingleFileMetadataExporterMediaURLs( HydrusSerialisable.SerialisableBase, 
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_URLS ] = SingleFileMetadataExporterMediaURLs
 
-class SingleFileMetadataExporterJSON( HydrusSerialisable.SerialisableBase, SingleFileMetadataExporterSidecar ):
+class SingleFileMetadataExporterJSON( SingleFileMetadataExporterSidecar, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_JSON
     SERIALISABLE_NAME = 'Metadata Single File Exporter JSON'
@@ -476,7 +570,7 @@ class SingleFileMetadataExporterJSON( HydrusSerialisable.SerialisableBase, Singl
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_JSON ] = SingleFileMetadataExporterJSON
 
-class SingleFileMetadataExporterTXT( HydrusSerialisable.SerialisableBase, SingleFileMetadataExporterSidecar ):
+class SingleFileMetadataExporterTXT( SingleFileMetadataExporterSidecar, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_TXT
     SERIALISABLE_NAME = 'Metadata Single File Exporter TXT'

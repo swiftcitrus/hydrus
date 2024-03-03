@@ -12,28 +12,52 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
 from hydrus.client import ClientPaths
 from hydrus.client import ClientThreading
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanelsEdit
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
 from hydrus.client.media import ClientMedia
+from hydrus.client.metadata import ClientContentUpdates
 
 def CopyHashesToClipboard( win: QW.QWidget, hash_type: str, medias: typing.Sequence[ ClientMedia.Media ] ):
     
-    sha256_hashes = list( itertools.chain.from_iterable( ( media.GetHashes( ordered = True ) for media in medias ) ) )
+    hex_it = True
     
-    if hash_type == 'sha256':
+    desired_hashes = []
+    
+    flat_media = ClientMedia.FlattenMedia( medias )
+    
+    sha256_hashes = [ media.GetHash() for media in flat_media ]
+    
+    if hash_type in ( 'pixel_hash', 'blurhash' ):
+        
+        file_info_managers = [ media.GetFileInfoManager() for media in flat_media ]
+        
+        if hash_type == 'pixel_hash':
+            
+            desired_hashes = [ fim.pixel_hash for fim in file_info_managers if fim.pixel_hash is not None ]
+            
+        elif hash_type == 'blurhash':
+            
+            desired_hashes = [ fim.blurhash for fim in file_info_managers if fim.blurhash is not None ]
+            
+            hex_it = False
+            
+        
+    elif hash_type == 'sha256':
         
         desired_hashes = sha256_hashes
         
     else:
         
         num_hashes = len( sha256_hashes )
-        num_remote_sha256_hashes = len( [ itertools.chain.from_iterable( ( media.GetHashes( discriminant = CC.DISCRIMINANT_NOT_LOCAL, ordered = True ) for media in medias ) ) ] )
+        num_remote_medias = len( [ not media.GetLocationsManager().IsLocal() for media in flat_media ] )
         
-        source_to_desired = HG.client_controller.Read( 'file_hashes', sha256_hashes, 'sha256', hash_type )
+        source_to_desired = CG.client_controller.Read( 'file_hashes', sha256_hashes, 'sha256', hash_type )
         
         desired_hashes = [ source_to_desired[ source_hash ] for source_hash in sha256_hashes if source_hash in source_to_desired ]
         
@@ -50,40 +74,47 @@ def CopyHashesToClipboard( win: QW.QWidget, hash_type: str, medias: typing.Seque
                 message = 'Unfortunately, {} of the {} hashes could not be found.'.format( HydrusData.ToHumanInt( num_missing ), hash_type )
                 
             
-            if num_remote_sha256_hashes > 0:
+            if num_remote_medias > 0:
                 
-                message += ' {} of the files you wanted are not currently in this client. If they have never visited this client, the lookup is impossible.'.format( HydrusData.ToHumanInt( num_remote_sha256_hashes ) )
+                message += ' {} of the files you wanted are not currently in this client. If they have never visited this client, the lookup is impossible.'.format( HydrusData.ToHumanInt( num_remote_medias ) )
                 
             
-            if num_remote_sha256_hashes < num_hashes:
+            if num_remote_medias < num_hashes:
                 
                 message += ' It could be that some of the local files are currently missing this information in the hydrus database. A file maintenance job (under the database menu) can repopulate this data.'
                 
             
-            QW.QMessageBox.warning( win, 'Warning', message )
+            ClientGUIDialogsMessage.ShowWarning( win, message )
             
         
     
     if len( desired_hashes ) > 0:
         
-        text_lines = [ desired_hash.hex() for desired_hash in desired_hashes ]
+        if hex_it:
+            
+            text_lines = [ desired_hash.hex() for desired_hash in desired_hashes ]
+            
+        else:
+            
+            text_lines = desired_hashes
+            
         
-        if HG.client_controller.new_options.GetBoolean( 'prefix_hash_when_copying' ):
+        if CG.client_controller.new_options.GetBoolean( 'prefix_hash_when_copying' ):
             
             text_lines = [ '{}:{}'.format( hash_type, hex_hash ) for hex_hash in text_lines ]
             
         
         hex_hashes_text = os.linesep.join( text_lines )
         
-        HG.client_controller.pub( 'clipboard', 'text', hex_hashes_text )
+        CG.client_controller.pub( 'clipboard', 'text', hex_hashes_text )
         
-        job_key = ClientThreading.JobKey()
+        job_status = ClientThreading.JobStatus()
         
-        job_key.SetStatusText( '{} {} hashes copied'.format( HydrusData.ToHumanInt( len( desired_hashes ) ), hash_type ) )
+        job_status.SetStatusText( '{} {} hashes copied'.format( HydrusData.ToHumanInt( len( desired_hashes ) ), hash_type ) )
         
-        HG.client_controller.pub( 'message', job_key )
+        CG.client_controller.pub( 'message', job_status )
         
-        job_key.Delete( 2 )
+        job_status.FinishAndDismiss( 2 )
         
     
 def CopyMediaURLs( medias ):
@@ -101,7 +132,7 @@ def CopyMediaURLs( medias ):
     
     urls_string = os.linesep.join( urls )
     
-    HG.client_controller.pub( 'clipboard', 'text', urls_string )
+    CG.client_controller.pub( 'clipboard', 'text', urls_string )
     
 def CopyMediaURLClassURLs( medias, url_class ):
     
@@ -114,7 +145,7 @@ def CopyMediaURLClassURLs( medias, url_class ):
         for url in media_urls:
             
             # can't do 'url_class.matches', as it will match too many
-            if HG.client_controller.network_engine.domain_manager.GetURLClass( url ) == url_class:
+            if CG.client_controller.network_engine.domain_manager.GetURLClass( url ) == url_class:
                 
                 urls.add( url )
                 
@@ -125,7 +156,7 @@ def CopyMediaURLClassURLs( medias, url_class ):
     
     urls_string = os.linesep.join( urls )
     
-    HG.client_controller.pub( 'clipboard', 'text', urls_string )
+    CG.client_controller.pub( 'clipboard', 'text', urls_string )
     
 def DoClearFileViewingStats( win: QW.QWidget, flat_medias: typing.Collection[ ClientMedia.MediaSingleton ] ):
     
@@ -151,9 +182,9 @@ def DoClearFileViewingStats( win: QW.QWidget, flat_medias: typing.Collection[ Cl
         
         hashes = { m.GetHash() for m in flat_medias }
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_DELETE, hashes )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_DELETE, hashes )
         
-        HG.client_controller.Write( 'content_updates', { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] } )
+        CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update ) )
         
     
 def DoOpenKnownURLFromShortcut( win, media ):
@@ -169,7 +200,7 @@ def DoOpenKnownURLFromShortcut( win, media ):
             
             try:
                 
-                url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( url )
+                url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( url )
                 
             except HydrusExceptions.URLClassException:
                 
@@ -219,7 +250,7 @@ def DoOpenKnownURLFromShortcut( win, media ):
 
 def EditDuplicateContentMergeOptions( win: QW.QWidget, duplicate_type: int ):
     
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
     
@@ -243,16 +274,27 @@ def OpenExternally( media ):
     hash = media.GetHash()
     mime = media.GetMime()
     
-    client_files_manager = HG.client_controller.client_files_manager
+    client_files_manager = CG.client_controller.client_files_manager
     
     path = client_files_manager.GetFilePath( hash, mime )
     
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     launch_path = new_options.GetMimeLaunch( mime )
     
     HydrusPaths.LaunchFile( path, launch_path )
     
+
+def OpenFileLocation( media ):
+    
+    hash = media.GetHash()
+    mime = media.GetMime()
+    
+    path = CG.client_controller.client_files_manager.GetFilePath( hash, mime )
+    
+    HydrusPaths.OpenFileLocation( path )
+    
+
 def OpenURLs( urls ):
     
     urls = sorted( urls )
@@ -266,7 +308,7 @@ def OpenURLs( urls ):
             message += ' This will take some time.'
             
         
-        tlw = HG.client_controller.GetMainTLW()
+        tlw = CG.client_controller.GetMainTLW()
         
         result = ClientGUIDialogsQuick.GetYesNo( tlw, message )
         
@@ -278,34 +320,34 @@ def OpenURLs( urls ):
     
     def do_it( urls ):
         
-        job_key = None
+        job_status = None
         
         num_urls = len( urls )
         
         if num_urls > 5:
             
-            job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
+            job_status = ClientThreading.JobStatus( pausable = True, cancellable = True )
             
-            job_key.SetStatusTitle( 'Opening URLs' )
+            job_status.SetStatusTitle( 'Opening URLs' )
             
-            HG.client_controller.pub( 'message', job_key )
+            CG.client_controller.pub( 'message', job_status )
             
         
         try:
             
             for ( i, url ) in enumerate( urls ):
                 
-                if job_key is not None:
+                if job_status is not None:
                     
-                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                     
                     if should_quit:
                         
                         return
                         
                     
-                    job_key.SetStatusText( HydrusData.ConvertValueRangeToPrettyString( i + 1, num_urls ) )
-                    job_key.SetVariable( 'popup_gauge_1', ( i + 1, num_urls ) )
+                    job_status.SetStatusText( HydrusData.ConvertValueRangeToPrettyString( i + 1, num_urls ) )
+                    job_status.SetVariable( 'popup_gauge_1', ( i + 1, num_urls ) )
                     
                 
                 ClientPaths.LaunchURLInWebBrowser( url )
@@ -315,16 +357,14 @@ def OpenURLs( urls ):
             
         finally:
             
-            if job_key is not None:
+            if job_status is not None:
                 
-                job_key.Finish()
-                
-                job_key.Delete( 1 )
+                job_status.FinishAndDismiss( 1 )
                 
             
         
     
-    HG.client_controller.CallToThread( do_it, urls )
+    CG.client_controller.CallToThread( do_it, urls )
     
 def OpenMediaURLs( medias ):
     
@@ -350,7 +390,7 @@ def OpenMediaURLClassURLs( medias, url_class ):
         for url in media_urls:
             
             # can't do 'url_class.matches', as it will match too many
-            if HG.client_controller.network_engine.domain_manager.GetURLClass( url ) == url_class:
+            if CG.client_controller.network_engine.domain_manager.GetURLClass( url ) == url_class:
                 
                 urls.add( url )
                 
@@ -364,10 +404,27 @@ def ShowDuplicatesInNewPage( location_context: ClientLocation.LocationContext, h
     
     # TODO: this can be replaced by a call to the MediaResult when it holds these hashes
     # don't forget to return itself in position 0!
-    hashes = HG.client_controller.Read( 'file_duplicate_hashes', location_context, hash, duplicate_type )
+    hashes = CG.client_controller.Read( 'file_duplicate_hashes', location_context, hash, duplicate_type )
     
     if hashes is not None and len( hashes ) > 1:
         
-        HG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
+        CG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
+        
+    else:
+        
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_FILE_SERVICE_KEY )
+        
+        hashes = CG.client_controller.Read( 'file_duplicate_hashes', location_context, hash, duplicate_type )
+        
+        if hashes is not None and len( hashes ) > 1:
+            
+            HydrusData.ShowText( 'Could not find the members of this group in this location, so searched all known files and found more.' )
+            
+            CG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
+            
+        else:
+            
+            HydrusData.ShowText( 'Sorry, could not find the members of this group either at the given location or in all known files. There may be a problem here, so let hydev know.' )
+            
         
     

@@ -5,22 +5,38 @@ from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 from qtpy import QtGui as QG
 
+try:
+    
+    # this appears to be Python 3.8+ and/or the equivalent Qt versions
+    
+    from qtpy import QtMultimediaWidgets as QMW
+    from qtpy import QtMultimedia as QM
+    
+except:
+    
+    pass
+    
+
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusFileHandling
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusTime
+from hydrus.core.files import HydrusFileHandling
+from hydrus.core.files.images import HydrusImageHandling
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientRendering
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMedia
 from hydrus.client.gui import ClientGUIMediaControls
 from hydrus.client.gui import ClientGUIShortcuts
+from hydrus.client.gui import QtInit
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.canvas import ClientGUIMPV
+from hydrus.client.gui.canvas import ClientGUIMediaVolume
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.media import ClientMedia
 
@@ -39,6 +55,7 @@ zoom_centerpoints_str_lookup[ ZOOM_CENTERPOINT_MOUSE ] = 'mouse (or viewer cente
 zoom_centerpoints_str_lookup[ ZOOM_CENTERPOINT_MEDIA_TOP_LEFT ] = 'media top-left'
 
 OPEN_EXTERNALLY_BUTTON_SIZE = ( 200, 45 )
+OPEN_EXTERNALLY_MAX_THUMBNAIL_SIZE = ( 200, 200 )
 
 def CalculateCanvasMediaSize( media, canvas_size: QC.QSize, show_action ):
     
@@ -47,7 +64,7 @@ def CalculateCanvasMediaSize( media, canvas_size: QC.QSize, show_action ):
     
     '''if ClientGUICanvasMedia.ShouldHaveAnimationBar( media, show_action ):
         
-        animated_scanbar_height = HG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
+        animated_scanbar_height = CG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
         
         canvas_height -= animated_scanbar_height
         '''
@@ -77,7 +94,7 @@ def CalculateCanvasZooms( canvas_size: QC.QSize, canvas_type: int, device_pixel_
         return ( 1.0, 1.0 )
         
     
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     ( canvas_width, canvas_height ) = CalculateCanvasMediaSize( media, canvas_size, show_action )
     
@@ -191,19 +208,19 @@ def CalculateMediaContainerSize( media, device_pixel_ratio: float, zoom, show_ac
         
         ( width, height ) = OPEN_EXTERNALLY_BUTTON_SIZE
         
-        if media.GetMime() in HC.MIMES_WITH_THUMBNAILS:
-            
-            bounding_dimensions = HG.client_controller.options[ 'thumbnail_dimensions' ]
-            thumbnail_scale_type = HG.client_controller.new_options.GetInteger( 'thumbnail_scale_type' )
-            
-            # we want the device independant size here, not actual pixels, so want to keep this 100
-            #thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
-            thumbnail_dpr_percent = 100
-            
-            ( clip_rect, ( thumb_width, thumb_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( media.GetResolution(), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
-            
-            height = height + thumb_height
-            
+        # Note that this handles a zipfile default thumb too. by sending None resolution to GetThumbnailResolution, it falls back to default dimensions
+        # imperfect, but overall fine for most situations
+        
+        bounding_dimensions = CG.client_controller.options[ 'thumbnail_dimensions' ]
+        thumbnail_scale_type = CG.client_controller.new_options.GetInteger( 'thumbnail_scale_type' )
+        
+        # we want the device independant size here, not actual pixels, so want to keep this 100
+        #thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+        thumbnail_dpr_percent = 100
+        
+        ( thumb_width, thumb_height ) = HydrusImageHandling.GetThumbnailResolution( media.GetResolution(), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
+        
+        height = height + min( OPEN_EXTERNALLY_MAX_THUMBNAIL_SIZE[1], thumb_height )
         
         return QC.QSize( width, height )
         
@@ -213,7 +230,7 @@ def CalculateMediaContainerSize( media, device_pixel_ratio: float, zoom, show_ac
         
         '''if ClientGUICanvasMedia.ShouldHaveAnimationBar( media, show_action ):
             
-            animated_scanbar_height = HG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
+            animated_scanbar_height = CG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
             
             media_height += animated_scanbar_height
             '''
@@ -227,7 +244,7 @@ def CalculateMediaContainerSize( media, device_pixel_ratio: float, zoom, show_ac
 
 def CalculateMediaSize( media, zoom ):
     
-    if media.GetMime() in HC.AUDIO:
+    if media.GetMime() in HC.AUDIO or None in media.GetResolution():
         
         ( original_width, original_height ) = ( 360, 240 )
         
@@ -245,61 +262,6 @@ def CalculateMediaSize( media, zoom ):
     return ( media_width, media_height )
     
 
-def CanDisplayMedia( media: ClientMedia.MediaSingleton, canvas_type: int ) -> bool:
-    
-    if media is None:
-        
-        return False
-        
-    
-    media = media.GetDisplayMedia()
-    
-    if media is None:
-        
-        return False
-        
-    
-    locations_manager = media.GetLocationsManager()
-    
-    if not locations_manager.IsLocal():
-        
-        return False
-        
-    
-    return True
-    
-
-def GetShowAction( media: ClientMedia.MediaSingleton, canvas_type: int ):
-    
-    # in the midst of a rewrite, feel free to refactor further
-    
-    start_paused = False
-    start_with_embed = False
-    
-    bad_result = ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW, start_paused, start_with_embed )
-    
-    if media is None:
-        
-        return bad_result
-        
-    
-    mime = media.GetMime()
-    
-    if mime not in HC.ALLOWED_MIMES: # stopgap to catch a collection or application_unknown due to unusual import order/media moving
-        
-        return bad_result
-        
-    
-    if canvas_type == CC.CANVAS_PREVIEW:
-        
-        return HG.client_controller.new_options.GetPreviewShowAction( mime )
-        
-    else:
-        
-        return HG.client_controller.new_options.GetMediaShowAction( mime )
-        
-    
-
 def ShouldHaveAnimationBar( media, show_action ):
     
     if media is None:
@@ -307,29 +269,30 @@ def ShouldHaveAnimationBar( media, show_action ):
         return False
         
     
-    if show_action not in ( CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV ):
+    if show_action not in ( CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ):
         
         return False
         
     
-    is_animated_image = media.GetMime() in HC.ANIMATIONS
+    if not media.HasDuration():
+        
+        return False
+        
+    
+    is_animation = media.GetMime() in HC.VIEWABLE_ANIMATIONS
     is_audio = media.GetMime() in HC.AUDIO
     is_video = media.GetMime() in HC.VIDEO
     
-    if show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV:
+    if show_action in ( CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ):
         
-        if ( is_animated_image or is_audio or is_video ) and media.HasDuration():
+        if is_animation or is_audio or is_video:
             
             return True
             
         
     elif show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE:
         
-        num_frames = media.GetNumFrames()
-        
-        has_some_frames = num_frames is not None and num_frames > 1
-        
-        if ( is_animated_image or is_video ) and has_some_frames:
+        if is_animation or is_video:
             
             return True
             
@@ -338,16 +301,16 @@ def ShouldHaveAnimationBar( media, show_action ):
     return False
     
 
-def UserWantsUsToDisplayMedia( media: ClientMedia.MediaSingleton, canvas_type: int ) -> bool:
+def WeAreExpectingToLoadThisMediaFile( media: ClientMedia.MediaSingleton, canvas_type: int ) -> bool:
     
-    ( media_show_action, media_start_paused, media_start_with_embed ) = GetShowAction( media, canvas_type )
+    ( media_show_action, media_start_paused, media_start_with_embed ) = ClientMedia.GetShowAction( media, canvas_type )
     
-    if media_show_action in ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW ):
+    if media_show_action in ( CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ):
         
-        return False
+        return True
         
     
-    return True
+    return False
     
 
 class Animation( QW.QWidget ):
@@ -378,7 +341,7 @@ class Animation( QW.QWidget ):
         self._current_frame_index = 0
         self._current_frame_drawn = False
         self._current_timestamp_ms = None
-        self._next_frame_due_at = HydrusData.GetNowPrecise()
+        self._next_frame_due_at = HydrusTime.GetNowPrecise()
         self._slow_frame_score = 1.0
         
         self._paused = True
@@ -483,20 +446,15 @@ class Animation( QW.QWidget ):
         
         if self._canvas_qt_pixmap is None:
             
-            self._canvas_qt_pixmap = HG.client_controller.bitmap_manager.GetQtPixmap( my_raw_width, my_raw_height )
+            self._canvas_qt_pixmap = CG.client_controller.bitmap_manager.GetQtPixmap( my_raw_width, my_raw_height )
             
-            self._canvas_qt_pixmap.setDevicePixelRatio( self.devicePixelRatio() )
-            
-            painter = QG.QPainter( self._canvas_qt_pixmap )
-            
-            self._DrawABlankFrame( painter )
-            
-        else:
-            
-            self._canvas_qt_pixmap.setDevicePixelRatio( self.devicePixelRatio() )
-            
-            painter = QG.QPainter( self._canvas_qt_pixmap )
-            
+        
+        self._canvas_qt_pixmap.setDevicePixelRatio( self.devicePixelRatio() )
+        
+        painter = QG.QPainter( self._canvas_qt_pixmap )
+        
+        # this makes transparency work nice, so just force it
+        self._DrawABlankFrame( painter )
         
         current_frame = self._video_container.GetFrame( self._current_frame_index )
         
@@ -511,9 +469,9 @@ class Animation( QW.QWidget ):
         
         next_frame_ideally_due = self._next_frame_due_at + next_frame_time_s
         
-        if HydrusData.TimeHasPassedPrecise( next_frame_ideally_due ):
+        if HydrusTime.TimeHasPassedPrecise( next_frame_ideally_due ):
             
-            self._next_frame_due_at = HydrusData.GetNowPrecise() + next_frame_time_s
+            self._next_frame_due_at = HydrusTime.GetNowPrecise() + next_frame_time_s
             
         else:
             
@@ -523,7 +481,7 @@ class Animation( QW.QWidget ):
     
     def _DrawABlankFrame( self, painter ):
         
-        if self._background_colour_generator.CanDoTransparencyCheckerboard():
+        if self._background_colour_generator.CanDoTransparencyCheckerboard() and self._media is not None and self._media.GetFileInfoManager().has_transparency:
             
             light_grey = QG.QColor( 237, 237, 237 )
             dark_grey = QG.QColor( 222, 222, 222 )
@@ -623,7 +581,7 @@ class Animation( QW.QWidget ):
                 self._current_frame_index = frame_index
                 self._current_timestamp_ms = None
                 
-                self._next_frame_due_at = HydrusData.GetNowPrecise()
+                self._next_frame_due_at = HydrusTime.GetNowPrecise()
                 
                 self._video_container.GetReadyForFrame( self._current_frame_index )
                 
@@ -739,6 +697,15 @@ class Animation( QW.QWidget ):
                     ClientGUIMedia.OpenExternally( self._media )
                     
                 
+            elif action == CAC.SIMPLE_OPEN_FILE_IN_FILE_EXPLORER:
+                
+                if self._media is not None:
+                    
+                    self.Pause()
+                    
+                    ClientGUIMedia.OpenFileLocation( self._media )
+                    
+                
             elif action == CAC.SIMPLE_CLOSE_MEDIA_VIEWER and self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
                 
                 self.window().close()
@@ -815,7 +782,7 @@ class Animation( QW.QWidget ):
         self._current_frame_index = int( ( self._num_frames - 1 ) * HC.options[ 'animation_start_position' ] )
         self._current_frame_drawn = False
         self._current_timestamp_ms = None
-        self._next_frame_due_at = HydrusData.GetNowPrecise()
+        self._next_frame_due_at = HydrusTime.GetNowPrecise()
         self._slow_frame_score = 1.0
         
         self._paused = start_paused
@@ -831,13 +798,13 @@ class Animation( QW.QWidget ):
             
             self._num_frames = 1
             
-            HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+            CG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
             
         else:
             
             self._num_frames = self._media.GetNumFrames()
             
-            HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+            CG.client_controller.gui.RegisterAnimationUpdateWindow( self )
             
             self.update()
             
@@ -856,7 +823,7 @@ class Animation( QW.QWidget ):
                 
                 if self._current_frame_drawn:
                     
-                    if not self._paused and HydrusData.TimeHasPassedPrecise( self._next_frame_due_at ):
+                    if not self._paused and HydrusTime.TimeHasPassedPrecise( self._next_frame_due_at ):
                         
                         num_frames = self._media.GetNumFrames()
                         
@@ -868,7 +835,7 @@ class Animation( QW.QWidget ):
                             
                             do_times_to_play_animation_pause = False
                             
-                            if self._media.GetMime() in HC.ANIMATIONS and not HG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
+                            if self._media.GetMime() in HC.VIEWABLE_ANIMATIONS and not CG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
                                 
                                 times_to_play_animation = self._video_container.GetTimesToPlayAnimation()
                                 
@@ -919,7 +886,7 @@ class Animation( QW.QWidget ):
             
         except:
             
-            HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+            CG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
             
             raise
             
@@ -947,6 +914,7 @@ class AnimationBar( QW.QWidget ):
         self._duration_ms = 1000
         self._num_frames = 1
         self._last_drawn_info = None
+        self._next_draw_info = None
         
         self._show_text = True
         
@@ -958,18 +926,11 @@ class AnimationBar( QW.QWidget ):
         
         self.setProperty( 'playing', False )
         
-        new_options = HG.client_controller.new_options
-        
         background_colour = self._colours[ 'hab_background' ]
         
         painter.setBackground( background_colour )
         
         painter.eraseRect( painter.viewport() )
-        
-    
-    def _GetAnimationBarStatus( self ):
-        
-        return self._media_window.GetAnimationBarStatus() 
         
     
     def _GetXFromFrameIndex( self, index, width_offset = 0 ):
@@ -1010,9 +971,11 @@ class AnimationBar( QW.QWidget ):
     
     def _Redraw( self, painter ):
         
-        self._last_drawn_info = self._GetAnimationBarStatus()
+        # making an extra note here: do not under any circumstances query the mpv window during our paint event
+        # it leads to the QBackingStore::endPaint() errors when mpv is unhappy/unloaded
+        # always fetch that info and handle various error states in the TIMERAnimationUpdate and just draw cached info here
         
-        ( current_frame_index, current_timestamp_ms, paused, buffer_indices )  = self._last_drawn_info
+        ( current_frame_index, current_timestamp_ms, paused, buffer_indices )  = self._next_draw_info
         
         self.setProperty( 'playing', not paused )
         
@@ -1031,8 +994,6 @@ class AnimationBar( QW.QWidget ):
         painter.eraseRect( painter.viewport() )
         
         #
-        
-        my_height = self.height()
         
         if buffer_indices is not None:
             
@@ -1080,7 +1041,7 @@ class AnimationBar( QW.QWidget ):
                 
             
         
-        animated_scanbar_nub_width = HG.client_controller.new_options.GetInteger( 'animated_scanbar_nub_width' )
+        animated_scanbar_nub_width = CG.client_controller.new_options.GetInteger( 'animated_scanbar_nub_width' )
         
         num_frames_are_useful = self._num_frames is not None and self._num_frames > 1
         
@@ -1113,7 +1074,7 @@ class AnimationBar( QW.QWidget ):
             
             if current_timestamp_ms is not None:
                 
-                progress_strings.append( HydrusData.ConvertValueRangeToScanbarTimestampsMS( current_timestamp_ms, self._duration_ms ) )
+                progress_strings.append( HydrusTime.ValueRangeToScanbarTimestampsMS( current_timestamp_ms, self._duration_ms ) )
                 
             
             s = ' - '.join( progress_strings )
@@ -1137,6 +1098,8 @@ class AnimationBar( QW.QWidget ):
         
         painter.drawRect( 0, 0, my_width - 1, my_height - 1 )
         
+        self._last_drawn_info = self._next_draw_info
+        
     
     def _ScanToCurrentMousePos( self ):
         
@@ -1144,7 +1107,7 @@ class AnimationBar( QW.QWidget ):
         
         mouse_pos = self.mapFromGlobal( QG.QCursor.pos() )
         
-        animated_scanbar_nub_width = HG.client_controller.new_options.GetInteger( 'animated_scanbar_nub_width' )
+        animated_scanbar_nub_width = CG.client_controller.new_options.GetInteger( 'animated_scanbar_nub_width' )
         
         compensated_x_position = mouse_pos.x() - ( animated_scanbar_nub_width / 2 )
         
@@ -1161,7 +1124,7 @@ class AnimationBar( QW.QWidget ):
             
             self._media_window.GotoFrame( current_frame_index )
             
-        elif isinstance( self._media_window, ClientGUIMPV.MPVWidget ):
+        elif isinstance( self._media_window, ( ClientGUIMPV.MPVWidget, QtMediaPlayer ) ):
             
             time_index_ms = int( proportion * self._duration_ms )
             
@@ -1173,7 +1136,7 @@ class AnimationBar( QW.QWidget ):
         
         self._media_window = None
         
-        HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+        CG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
         
         self.update()
         
@@ -1248,7 +1211,7 @@ class AnimationBar( QW.QWidget ):
         
         painter = QG.QPainter( self )
         
-        if self._CurrentMediaWindowIsBad():
+        if self._CurrentMediaWindowIsBad() or self._next_draw_info is None:
             
             self._DrawBlank( painter )
             
@@ -1274,12 +1237,12 @@ class AnimationBar( QW.QWidget ):
             self._num_frames = max( num_frames, 1 )
             
         
-        self._last_drawn_info = None
-        
         self._currently_in_a_drag = False
         self._it_was_playing_before_drag = False
         
-        HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+        CG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+        
+        self._next_draw_info = None
         
         self.update()
         
@@ -1303,7 +1266,12 @@ class AnimationBar( QW.QWidget ):
             return
             
         
-        if self._last_drawn_info != self._GetAnimationBarStatus():
+        # we must never call this method in the paintEvent
+        current_animation_bar_status = self._media_window.GetAnimationBarStatus()
+        
+        if self._last_drawn_info != current_animation_bar_status:
+            
+            self._next_draw_info = current_animation_bar_status
             
             self.update()
             
@@ -1440,14 +1408,14 @@ class MediaContainer( QW.QWidget ):
         
         self.hide()
         
-        HG.client_controller.sub( self, 'Pause', 'pause_all_media' )
+        CG.client_controller.sub( self, 'Pause', 'pause_all_media' )
         
     
     def _DestroyOrHideThisMediaWindow( self, media_window ):
         
         if media_window is not None:
             
-            launch_media_viewer_classes = ( Animation, ClientGUIMPV.MPVWidget, StaticImage )
+            launch_media_viewer_classes = ( Animation, ClientGUIMPV.MPVWidget, StaticImage, QtMediaPlayer )
             
             media_window.removeEventFilter( self._additional_event_filter )
             
@@ -1462,9 +1430,6 @@ class MediaContainer( QW.QWidget ):
                     pass # lmao, weird 'Failed to disconnect signal launchMediaViewer()' error I couldn't figure out, I guess some out-of-order deleteLater gubbins
                     
                 
-            
-            if isinstance( media_window, launch_media_viewer_classes ):
-                
                 media_window.ClearMedia()
                 
                 if isinstance( media_window, StaticImage ):
@@ -1476,7 +1441,12 @@ class MediaContainer( QW.QWidget ):
                 
                 if isinstance( media_window, ClientGUIMPV.MPVWidget ):
                     
-                    HG.client_controller.gui.ReleaseMPVWidget( media_window )
+                    CG.client_controller.gui.ReleaseMPVWidget( media_window )
+                    
+                
+                if isinstance( media_window, QtMediaPlayer ):
+                    
+                    CG.client_controller.gui.ReleaseQtMediaPlayer( media_window )
                     
                 
             else:
@@ -1488,7 +1458,7 @@ class MediaContainer( QW.QWidget ):
     
     def _GetMaxZoomDimension( self ):
         
-        if self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV or isinstance( self._media_window, Animation ):
+        if self._show_action in ( CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ) or isinstance( self._media_window, Animation ):
             
             return 8000
             
@@ -1501,7 +1471,6 @@ class MediaContainer( QW.QWidget ):
     def _MakeMediaWindow( self ):
         
         old_media_window = self._media_window
-        destroy_old_media_window = True
         
         do_neighbour_prefetch_emit = True
         
@@ -1512,9 +1481,11 @@ class MediaContainer( QW.QWidget ):
             HydrusData.ShowText( 'MPV is not available!' )
             
         
-        if self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV and self._media.GetMime() == HC.IMAGE_GIF and not self._media.HasDuration():
+        if self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER and QtInit.WE_ARE_QT5:
             
-            self._show_action = CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE
+            self._show_action = CC.MEDIA_VIEWER_ACTION_SHOW_OPEN_EXTERNALLY_BUTTON
+            
+            HydrusData.ShowText( 'Qt Media Player is only available on Qt6!' )
             
         
         if self._show_action in ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW ):
@@ -1528,6 +1499,11 @@ class MediaContainer( QW.QWidget ):
         elif self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE:
             
             if self._media.IsStaticImage():
+                
+                if None in self._media.GetResolution():
+                    
+                    raise Exception( 'This media has no resolution!' )
+                    
                 
                 if isinstance( self._media_window, StaticImage ):
                     
@@ -1564,9 +1540,17 @@ class MediaContainer( QW.QWidget ):
             
         elif self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV:
             
-            self._media_window = HG.client_controller.gui.GetMPVWidget( self )
+            self._media_window = CG.client_controller.gui.GetMPVWidget( self )
             
             self._media_window.SetCanvasType( self._canvas_type )
+            
+            self._media_window.SetMedia( self._media, start_paused = self._start_paused )
+            
+            self._media_window.lower()
+            
+        elif self._show_action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER:
+            
+            self._media_window = QtMediaPlayer( self, self._canvas_type, self._background_colour_generator )
             
             self._media_window.SetMedia( self._media, start_paused = self._start_paused )
             
@@ -1589,7 +1573,7 @@ class MediaContainer( QW.QWidget ):
             
             self._media_window.installEventFilter( self._additional_event_filter )
             
-            launch_media_viewer_classes = ( Animation, ClientGUIMPV.MPVWidget, StaticImage )
+            launch_media_viewer_classes = ( Animation, ClientGUIMPV.MPVWidget, StaticImage, QtMediaPlayer )
             
             if isinstance( self._media_window, launch_media_viewer_classes ):
                 
@@ -1710,7 +1694,7 @@ class MediaContainer( QW.QWidget ):
             
             if zoom_center_type_override is None:
                 
-                zoom_center_type = HG.client_controller.new_options.GetInteger( 'media_viewer_zoom_center' )
+                zoom_center_type = CG.client_controller.new_options.GetInteger( 'media_viewer_zoom_center' )
                 
             else:
                 
@@ -1782,9 +1766,14 @@ class MediaContainer( QW.QWidget ):
         
         self._media_window = None
         
-        HG.client_controller.gui.UnregisterUIUpdateWindow( self )
+        CG.client_controller.gui.UnregisterUIUpdateWindow( self )
         
         self.hide()
+        
+    
+    def CurrentlyPresentingMediaWithDuration( self ):
+        
+        return isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget, QtMediaPlayer ) )
         
     
     def DoEdgePan( self, pan_type: int ):
@@ -1885,11 +1874,11 @@ class MediaContainer( QW.QWidget ):
         
         if full_size:
             
-            animated_scanbar_height = HG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
+            animated_scanbar_height = CG.client_controller.new_options.GetInteger( 'animated_scanbar_height' )
             
         else:
             
-            animated_scanbar_height = HG.client_controller.new_options.GetNoneableInteger( 'animated_scanbar_hide_height' )
+            animated_scanbar_height = CG.client_controller.new_options.GetNoneableInteger( 'animated_scanbar_hide_height' )
             
             if animated_scanbar_height is None:
                 
@@ -1948,9 +1937,19 @@ class MediaContainer( QW.QWidget ):
             
         
     
+    def HasPlayedOnceThrough( self ):
+        
+        if self.CurrentlyPresentingMediaWithDuration():
+            
+            return self._media_window.HasPlayedOnceThrough()
+            
+        
+        return True
+        
+    
     def IsAtMaxZoom( self ):
         
-        possible_zooms = HG.client_controller.new_options.GetMediaZooms()
+        possible_zooms = CG.client_controller.new_options.GetMediaZooms()
         
         max_zoom = max( possible_zooms )
         
@@ -1961,7 +1960,7 @@ class MediaContainer( QW.QWidget ):
     
     def IsPaused( self ):
         
-        if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
+        if self.CurrentlyPresentingMediaWithDuration():
             
             return self._media_window.IsPaused()
             
@@ -2025,7 +2024,7 @@ class MediaContainer( QW.QWidget ):
         
         if self._media is not None:
             
-            if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
+            if self.CurrentlyPresentingMediaWithDuration():
                 
                 self._media_window.Pause()
                 
@@ -2036,38 +2035,10 @@ class MediaContainer( QW.QWidget ):
         
         if self._media is not None:
             
-            if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
+            if self.CurrentlyPresentingMediaWithDuration():
                 
                 self._media_window.PausePlay()
                 
-            
-        
-    
-    def ReadyToSlideshow( self ):
-        
-        if self._media is None:
-            
-            return False
-            
-        else:
-            
-            if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
-                
-                if not self._media_window.HasPlayedOnceThrough():
-                    
-                    return False
-                    
-                
-            
-            if isinstance( self._media_window, StaticImage ):
-                
-                if not self._media_window.IsRendered():
-                    
-                    return False
-                    
-                
-            
-            return True
             
         
     
@@ -2149,7 +2120,7 @@ class MediaContainer( QW.QWidget ):
         
         if self._media is not None:
             
-            if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
+            if self.CurrentlyPresentingMediaWithDuration():
                 
                 self._media_window.SeekDelta( direction, duration_ms )
                 
@@ -2171,7 +2142,7 @@ class MediaContainer( QW.QWidget ):
         
         self._media = media
         
-        ( self._show_action, self._start_paused, self._start_with_embed ) = GetShowAction( self._media, self._canvas_type )
+        ( self._show_action, self._start_paused, self._start_with_embed ) = ClientMedia.GetShowAction( self._media, self._canvas_type )
         
         if self._show_action in ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW ):
             
@@ -2220,7 +2191,7 @@ class MediaContainer( QW.QWidget ):
             self._media_window.show()
             
         
-        HG.client_controller.gui.RegisterUIUpdateWindow( self )
+        CG.client_controller.gui.RegisterUIUpdateWindow( self )
         
         self.show()
         
@@ -2249,7 +2220,7 @@ class MediaContainer( QW.QWidget ):
     
     def StopForSlideshow( self, value ):
         
-        if isinstance( self._media_window, ( Animation, ClientGUIMPV.MPVWidget ) ):
+        if self.CurrentlyPresentingMediaWithDuration():
             
             self._media_window.StopForSlideshow( value )
             
@@ -2262,9 +2233,9 @@ class MediaContainer( QW.QWidget ):
             return
             
         
-        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = HG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
+        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = CG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
         
-        possible_zooms = HG.client_controller.new_options.GetMediaZooms()
+        possible_zooms = CG.client_controller.new_options.GetMediaZooms()
         
         if exact_zooms_only:
             
@@ -2334,7 +2305,7 @@ class MediaContainer( QW.QWidget ):
         
         previous_current_zoom = self._current_zoom
         
-        ( media_show_action, media_start_paused, media_start_with_embed ) = GetShowAction( previous_media, self._canvas_type )
+        ( media_show_action, media_start_paused, media_start_with_embed ) = ClientMedia.GetShowAction( previous_media, self._canvas_type )
         
         if media_show_action in ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW ):
             
@@ -2343,7 +2314,7 @@ class MediaContainer( QW.QWidget ):
         
         ( previous_default_zoom, previous_canvas_zoom ) = CalculateCanvasZooms( canvas_size, self._canvas_type, my_dpr, previous_media, media_show_action )
         
-        ( media_show_action, media_start_paused, media_start_with_embed ) = GetShowAction( self._media, self._canvas_type )
+        ( media_show_action, media_start_paused, media_start_with_embed ) = ClientMedia.GetShowAction( self._media, self._canvas_type )
         
         if media_show_action in ( CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, CC.MEDIA_VIEWER_ACTION_DO_NOT_SHOW ):
             
@@ -2447,11 +2418,11 @@ class MediaContainer( QW.QWidget ):
             return
             
         
-        possible_zooms = HG.client_controller.new_options.GetMediaZooms()
+        possible_zooms = CG.client_controller.new_options.GetMediaZooms()
         
         max_zoom = max( possible_zooms )
         
-        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = HG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
+        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = CG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
         
         if exact_zooms_only:
             
@@ -2480,7 +2451,7 @@ class MediaContainer( QW.QWidget ):
             return
             
         
-        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = HG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
+        ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = CG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
         
         if exact_zooms_only:
             
@@ -2505,7 +2476,7 @@ class MediaContainer( QW.QWidget ):
             
         else:
             
-            possible_zooms = HG.client_controller.new_options.GetMediaZooms()
+            possible_zooms = CG.client_controller.new_options.GetMediaZooms()
             
         
         possible_zooms.append( self._canvas_zoom )
@@ -2583,11 +2554,11 @@ class MediaContainer( QW.QWidget ):
         
         if self._current_zoom == switch_base:
             
-            possible_zooms = HG.client_controller.new_options.GetMediaZooms()
+            possible_zooms = CG.client_controller.new_options.GetMediaZooms()
             
             max_zoom = max( possible_zooms )
             
-            ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = HG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
+            ( media_scale_up, media_scale_down, preview_scale_up, preview_scale_down, exact_zooms_only, scale_up_quality, scale_down_quality ) = CG.client_controller.new_options.GetMediaZoomOptions( self._media.GetMime() )
             
             if exact_zooms_only:
                 
@@ -2629,8 +2600,8 @@ class MediaContainer( QW.QWidget ):
         else:
             
             is_near = self.MouseIsNearAnimationBar()
-            show_small_instead_of_hiding = HG.client_controller.new_options.GetNoneableInteger( 'animated_scanbar_hide_height' ) is not None
-            force_show = self._volume_control.PopupIsVisible() or self._animation_bar.DoingADrag() or HG.client_controller.new_options.GetBoolean( 'force_animation_scanbar_show' )
+            show_small_instead_of_hiding = CG.client_controller.new_options.GetNoneableInteger( 'animated_scanbar_hide_height' ) is not None
+            force_show = self._volume_control.PopupIsVisible() or self._animation_bar.DoingADrag() or CG.client_controller.new_options.GetBoolean( 'force_animation_scanbar_show' )
             
             should_show_controls = is_near or show_small_instead_of_hiding or force_show
             
@@ -2700,7 +2671,7 @@ class EmbedButton( QW.QWidget ):
         
         self.setCursor( QG.QCursor( QC.Qt.PointingHandCursor ) )
         
-        HG.client_controller.sub( self, 'update', 'notify_new_colourset' )
+        CG.client_controller.sub( self, 'update', 'notify_new_colourset' )
         
     
     def _Redraw( self, painter ):
@@ -2714,7 +2685,7 @@ class EmbedButton( QW.QWidget ):
         center_y = my_height // 2
         radius = min( 50, center_x, center_y ) - 5
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         colour = self._background_colour_generator.GetColour()
         
@@ -2800,7 +2771,7 @@ class EmbedButton( QW.QWidget ):
         
         if needs_thumb:
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( self._media )
+            thumbnail_path = CG.client_controller.client_files_manager.GetThumbnailPath( self._media )
             
             thumbnail_mime = HydrusFileHandling.GetThumbnailMime( thumbnail_path )
             
@@ -2820,21 +2791,17 @@ class OpenExternallyPanel( QW.QWidget ):
         
         QW.QWidget.__init__( self, parent )
         
-        self._new_options = HG.client_controller.new_options
+        self._new_options = CG.client_controller.new_options
         
         self._media = media
         
         vbox = QP.VBoxLayout()
         
-        if self._media.GetLocationsManager().IsLocal() and self._media.GetMime() in HC.MIMES_WITH_THUMBNAILS:
+        if self._media.GetLocationsManager().IsLocal():
             
-            thumbnail_path = HG.client_controller.client_files_manager.GetThumbnailPath( self._media )
+            qt_pixmap = CG.client_controller.GetCache( 'thumbnail' ).GetThumbnail( media ).GetQtPixmap()
             
-            thumbnail_mime = HydrusFileHandling.GetThumbnailMime( thumbnail_path )
-            
-            qt_pixmap = ClientRendering.GenerateHydrusBitmap( thumbnail_path, thumbnail_mime ).GetQtPixmap()
-            
-            thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+            thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
             
             if thumbnail_dpr_percent != 100:
                 
@@ -2842,6 +2809,11 @@ class OpenExternallyPanel( QW.QWidget ):
                 
             
             thumbnail_window = ClientGUICommon.BufferedWindowIcon( self, qt_pixmap )
+            
+            thumbnail_window_width = min( thumbnail_window.width(), OPEN_EXTERNALLY_MAX_THUMBNAIL_SIZE[0] )
+            thumbnail_window_height = min( thumbnail_window.height(), OPEN_EXTERNALLY_MAX_THUMBNAIL_SIZE[1] )
+            
+            thumbnail_window.setFixedSize( thumbnail_window_width, thumbnail_window_height )
             
             QP.AddToLayout( vbox, thumbnail_window, CC.FLAGS_CENTER )
             
@@ -2878,7 +2850,7 @@ class OpenExternallyPanel( QW.QWidget ):
         hash = self._media.GetHash()
         mime = self._media.GetMime()
         
-        client_files_manager = HG.client_controller.client_files_manager
+        client_files_manager = CG.client_controller.client_files_manager
         
         path = client_files_manager.GetFilePath( hash, mime )
         
@@ -2887,15 +2859,339 @@ class OpenExternallyPanel( QW.QWidget ):
         HydrusPaths.LaunchFile( path, launch_path )
         
     
-class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
+
+class QtMediaPlayer( QW.QWidget ):
+    
+    launchMediaViewer = QC.Signal()
+    
+    def __init__( self, parent: QW.QWidget, canvas_type, background_colour_generator ):
+        
+        QW.QWidget.__init__( self, parent )
+        
+        self._canvas_type = canvas_type
+        self._background_colour_generator = background_colour_generator
+        
+        self._my_audio_output = QM.QAudioOutput( self )
+        self._my_video_output = QMW.QVideoWidget( self )
+        self._my_audio_placeholder = QW.QWidget( self )
+        
+        QP.SetBackgroundColour( self._my_audio_placeholder, QG.QColor( 0, 0, 0 ) )
+        
+        # perhaps this stops the always on top behaviour, says several places, but it doesn't for me!
+        #self._my_video_output.setAttribute( QC.Qt.WA_TranslucentBackground, False )
+        
+        self._media_player = QM.QMediaPlayer( self )
+        
+        self._media_player.mediaStatusChanged.connect( self._MediaStatusChanged )
+        
+        self._we_are_initialised = True
+        
+        self._stop_for_slideshow = False
+        
+        vbox = QP.VBoxLayout( margin = 0 )
+        
+        QP.AddToLayout( vbox, self._my_video_output, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._my_audio_placeholder, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        
+        self.setLayout( vbox )
+        
+        self._media = None
+        
+        self._playthrough_count = 0
+        
+        if self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
+            
+            shortcut_set = 'media_viewer_media_window'
+            
+        else:
+            
+            shortcut_set = 'preview_media_window'
+            
+        
+        self._my_shortcut_handler = ClientGUIShortcuts.ShortcutsHandler( self, [ shortcut_set ], catch_mouse = True )
+        
+        CG.client_controller.sub( self, 'UpdateAudioMute', 'new_audio_mute' )
+        CG.client_controller.sub( self, 'UpdateAudioVolume', 'new_audio_volume' )
+        
+    
+    def _MediaStatusChanged( self, status ):
+        
+        if status == QM.QMediaPlayer.MediaStatus.EndOfMedia:
+            
+            self._playthrough_count += 1
+            
+            self._media_player.setPosition( 0 )
+            
+            if not self._stop_for_slideshow:
+                
+                self._media_player.play()
+                
+            
+        
+    
+    def GetAnimationBarStatus( self ):
+        
+        buffer_indices = None
+        
+        if self._media is None:
+            
+            current_frame_index = 0
+            current_timestamp_ms = 0
+            paused = True
+            
+        else:
+            
+            current_timestamp_ms = self._media_player.position()
+            
+            num_frames = self._media.GetNumFrames()
+            
+            if num_frames is None or num_frames == 1:
+                
+                current_frame_index = 0
+                
+            else:
+                
+                current_frame_index = int( round( ( current_timestamp_ms / self._media.GetDurationMS() ) * num_frames ) )
+                
+                current_frame_index = min( current_frame_index, num_frames - 1 )
+                
+            
+            current_timestamp_ms = min( current_timestamp_ms, self._media.GetDurationMS() )
+            
+            paused = self.IsPaused()
+            
+        
+        return ( current_frame_index, current_timestamp_ms, paused, buffer_indices )
+        
+    
+    def ClearMedia( self ):
+        
+        if self._media is not None:
+            
+            self._media = None
+            
+            # ok in my experience setting media_player.setSource to anything after a first load is pretty buggy!
+            # it can just straight up hang forever. either to a null QUrl or another file
+            # it seems to be it doesn't like unloading some files
+            # so, let's spawn a new one every time
+            # EDIT: ok going from one vid to another can cause crashes, so we are moving to a system where each QtMediaPlayer just gets one use. we'll make a new one every time
+            
+            self._media_player.stop()
+            
+            #self._media_player.setParent( None )
+            
+            #QP.CallAfter( self._media_player.deleteLater )
+            
+            #self._media_player = QM.QMediaPlayer( self )
+            
+            #self._media_player.mediaStatusChanged.connect( self._MediaStatusChanged )
+            
+        
+    
+    def HasPlayedOnceThrough( self ):
+        
+        return self._playthrough_count > 0
+        
+    
+    def IsCompletelyUnloaded( self ):
+        
+        return self._media_player.mediaStatus() == QM.QMediaPlayer.MediaStatus.NoMedia
+        
+    
+    def IsPaused( self ):
+        
+        # don't use isPlaying(), Qt 6.4.1 doesn't support it lol
+        return self._media_player.playbackState() != QM.QMediaPlayer.PlaybackState.PlayingState
+        
+    
+    def Pause( self ):
+        
+        self._media_player.pause()
+        
+    
+    def PausePlay( self ):
+        
+        if self.IsPaused():
+            
+            self.Play()
+            
+        else:
+            
+            self.Pause()
+            
+        
+    
+    def Play( self ):
+        
+        self._media_player.play()
+        
+    
+    def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
+        
+        command_processed = True
+        
+        if command.IsSimpleCommand():
+            
+            action = command.GetSimpleAction()
+            
+            if action == CAC.SIMPLE_PAUSE_MEDIA:
+                
+                self.Pause()
+                
+            elif action == CAC.SIMPLE_PAUSE_PLAY_MEDIA:
+                
+                self.PausePlay()
+                
+            elif action == CAC.SIMPLE_MEDIA_SEEK_DELTA:
+                
+                ( direction, duration_ms ) = command.GetSimpleData()
+                
+                self.SeekDelta( direction, duration_ms )
+                
+            elif action == CAC.SIMPLE_OPEN_FILE_IN_EXTERNAL_PROGRAM:
+                
+                if self._media is not None:
+                    
+                    self.Pause()
+                    
+                    ClientGUIMedia.OpenExternally( self._media )
+                    
+                
+            elif action == CAC.SIMPLE_OPEN_FILE_IN_FILE_EXPLORER:
+                
+                if self._media is not None:
+                    
+                    self.Pause()
+                    
+                    ClientGUIMedia.OpenFileLocation( self._media )
+                    
+                
+            elif action == CAC.SIMPLE_CLOSE_MEDIA_VIEWER and self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
+                
+                self.window().close()
+                
+            elif action == CAC.SIMPLE_LAUNCH_MEDIA_VIEWER and self._canvas_type == CC.CANVAS_PREVIEW:
+                
+                self.launchMediaViewer.emit()
+                
+            else:
+                
+                command_processed = False
+                
+            
+        else:
+            
+            command_processed = False
+            
+        
+        return command_processed
+        
+    
+    def Seek( self, position_ms ):
+        
+        self._media_player.setPosition( position_ms )
+        
+    
+    def SeekDelta( self, direction, duration_ms ):
+        
+        if self._media is None:
+            
+            return
+            
+        
+        current_timestamp_ms = self._media_player.position()
+        
+        new_timestamp_ms = max( 0, current_timestamp_ms + ( direction * duration_ms ) )
+        
+        if new_timestamp_ms > self._media.GetDurationMS():
+            
+            new_timestamp_ms = 0
+            
+        
+        self.Seek( new_timestamp_ms )
+        
+    
+    def SetBackgroundColourGenerator( self, background_colour_generator ):
+        
+        self._background_colour_generator = background_colour_generator
+        
+    
+    def SetMedia( self, media: ClientMedia.MediaSingleton, start_paused = False ):
+        
+        if media == self._media:
+            
+            return
+            
+        
+        self.ClearMedia()
+        
+        self._media = media
+        
+        self._stop_for_slideshow = False
+        
+        has_audio = self._media.HasAudio()
+        is_audio = self._media.GetMime() in HC.AUDIO
+        
+        if has_audio:
+            
+            self._media_player.setAudioOutput( self._my_audio_output )
+            
+        
+        if not is_audio:
+            
+            self._media_player.setVideoOutput( self._my_video_output )
+            
+        
+        self._my_video_output.setVisible( not is_audio )
+        self._my_audio_placeholder.setVisible( is_audio )
+        
+        path = CG.client_controller.client_files_manager.GetFilePath( self._media.GetHash(), self._media.GetMime() )
+        
+        self._media_player.setSource( QC.QUrl.fromLocalFile( path ) )
+        
+        if not start_paused:
+            
+            self._media_player.play()
+            
+        
+        self._my_audio_output.setVolume( ClientGUIMediaVolume.GetCorrectCurrentVolume( self._canvas_type ) )
+        self._my_audio_output.setMuted( ClientGUIMediaVolume.GetCorrectCurrentMute( self._canvas_type ) )
+        
+    
+    def StopForSlideshow( self, value ):
+        
+        self._stop_for_slideshow = value
+        
+    
+    def TryToUnload( self ):
+        
+        # this call is crashtastic, so don't inject it while the player is buffering or whatever
+        if self._media_player.mediaStatus() in ( QM.QMediaPlayer.MediaStatus.LoadedMedia, QM.QMediaPlayer.MediaStatus.EndOfMedia, QM.QMediaPlayer.MediaStatus.InvalidMedia ):
+            
+            self._media_player.setSource( '' )
+            
+        
+    
+    def UpdateAudioMute( self ):
+        
+        self._my_audio_output.setMuted( ClientGUIMediaVolume.GetCorrectCurrentMute( self._canvas_type ) )
+        
+
+    def UpdateAudioVolume( self ):
+        
+        self._my_audio_output.setVolume( ClientGUIMediaVolume.GetCorrectCurrentVolume( self._canvas_type ) )
+        
+    
+
+class StaticImage( CAC.ApplicationCommandProcessorMixin, QW.QWidget ):
     
     launchMediaViewer = QC.Signal()
     readyForNeighbourPrefetch = QC.Signal()
     
     def __init__( self, parent, canvas_type, background_colour_generator ):
         
-        CAC.ApplicationCommandProcessorMixin.__init__( self )
         QW.QWidget.__init__( self, parent )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         
         self._canvas_type = canvas_type
         self._background_colour_generator = background_colour_generator
@@ -2909,14 +3205,12 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         self.setMouseTracking( True )
         
         self._media = None
-        self._i_know_if_media_has_transparency = False
-        self._media_has_transparency = False
         
         self._image_renderer = None
         
         self._last_device_pixel_ratio = self.devicePixelRatio()
         
-        self._tile_cache = HG.client_controller.GetCache( 'image_tiles' )
+        self._tile_cache = CG.client_controller.GetCache( 'image_tiles' )
         
         self._canvas_tiles = {}
         
@@ -2962,7 +3256,7 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             # the trick of going ( 123456 // 16 ) * 16 to give you a nice multiple of 16 does not work with floats like 1.4 lmao.
             # what we can do instead is phrase 1.4 as 7/5 and use 7 as our int. any number cleanly divisible by 7 is cleanly divisible by 1.4
             
-            ideal_tile_dimension = HG.client_controller.new_options.GetInteger( 'ideal_tile_dimension' )
+            ideal_tile_dimension = CG.client_controller.new_options.GetInteger( 'ideal_tile_dimension' )
             
             nice_number = HydrusData.GetNicelyDivisibleNumberForZoom( self._zoom / self.devicePixelRatio(), ideal_tile_dimension )
             
@@ -3000,16 +3294,7 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def _DrawBackground( self, painter, topLeftOffset = None ):
         
-        if not self._i_know_if_media_has_transparency:
-            
-            if self._image_renderer is not None and self._image_renderer.IsReady():
-                
-                self._media_has_transparency = self._image_renderer.HasTransparency()
-                self._i_know_if_media_has_transparency = True
-                
-            
-        
-        if self._background_colour_generator.CanDoTransparencyCheckerboard() and self._i_know_if_media_has_transparency and self._media_has_transparency:
+        if self._background_colour_generator.CanDoTransparencyCheckerboard() and self._media is not None and self._media.GetFileInfoManager().has_transparency:
             
             light_grey = QG.QColor( 237, 237, 237 )
             dark_grey = QG.QColor( 222, 222, 222 )
@@ -3092,7 +3377,7 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         raw_width = raw_canvas_clip_rect.width()
         raw_height = raw_canvas_clip_rect.height()
         
-        tile_pixmap = HG.client_controller.bitmap_manager.GetQtPixmap( raw_width, raw_height )
+        tile_pixmap = CG.client_controller.bitmap_manager.GetQtPixmap( raw_width, raw_height )
         
         painter = QG.QPainter( tile_pixmap )
         
@@ -3362,6 +3647,13 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                     ClientGUIMedia.OpenExternally( self._media )
                     
                 
+            elif action == CAC.SIMPLE_OPEN_FILE_IN_FILE_EXPLORER:
+                
+                if self._media is not None:
+                    
+                    ClientGUIMedia.OpenFileLocation( self._media )
+                    
+                
             elif action == CAC.SIMPLE_CLOSE_MEDIA_VIEWER and self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
                 
                 self.window().close()
@@ -3398,16 +3690,14 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         self._ClearCanvasTileCache()
         
         self._media = media
-        self._i_know_if_media_has_transparency = False
-        self._media_has_transparency = False
         
-        image_cache = HG.client_controller.GetCache( 'images' )
+        image_cache = CG.client_controller.GetCache( 'images' )
         
         self._image_renderer = image_cache.GetImageRenderer( self._media )
         
         if not self._image_renderer.IsReady():
             
-            HG.client_controller.gui.RegisterAnimationUpdateWindow( self )
+            CG.client_controller.gui.RegisterAnimationUpdateWindow( self )
             
         
         self.update()
@@ -3421,12 +3711,12 @@ class StaticImage( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                 
                 self.update()
                 
-                HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+                CG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
                 
             
         except:
             
-            HG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
+            CG.client_controller.gui.UnregisterAnimationUpdateWindow( self )
             
             raise
             

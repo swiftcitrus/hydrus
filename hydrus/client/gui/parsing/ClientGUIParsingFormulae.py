@@ -10,8 +10,8 @@ from hydrus.core import HydrusExceptions
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientParsing
-from hydrus.client import ClientPaths
 from hydrus.client import ClientStrings
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -48,7 +48,7 @@ class EditCompoundFormulaPanel( EditSpecificFormulaPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_formulae.html#compound_formula' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_COMPOUND_FORMULA )
         
         menu_items.append( ( 'normal', 'open the compound formula help', 'Open the help page for compound formulae in your web browser.', page_func ) )
         
@@ -133,7 +133,17 @@ class EditCompoundFormulaPanel( EditSpecificFormulaPanel ):
         edit_panel.Add( formulae_hbox, CC.FLAGS_EXPAND_BOTH_WAYS )
         edit_panel.Add( ae_button_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         edit_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, 'Newlines are removed from parsed strings right after parsing, before string processing.', ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        if collapse_newlines:
+            
+            label = 'Newlines are removed from parsed strings right after parsing, before string processing.'
+            
+        else:
+            
+            label = 'Newlines are not collapsed here (probably a note parser)'
+            
+        
+        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, label, ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
         edit_panel.Add( self._string_processor_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
@@ -187,7 +197,7 @@ class EditCompoundFormulaPanel( EditSpecificFormulaPanel ):
             
             if self._formulae.count() == 1:
                 
-                QW.QMessageBox.critical( self, 'Error', 'A compound formula needs at least one sub-formula!' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'A compound formula needs at least one sub-formula!' )
                 
             else:
                 
@@ -282,7 +292,7 @@ class EditContextVariableFormulaPanel( EditSpecificFormulaPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_formulae.html#context_variable_formula' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_CONTEXT_VARIABLE_FORMULA )
         
         menu_items.append( ( 'normal', 'open the context variable formula help', 'Open the help page for context variable formulae in your web browser.', page_func ) )
         
@@ -322,7 +332,17 @@ class EditContextVariableFormulaPanel( EditSpecificFormulaPanel ):
         gridbox = ClientGUICommon.WrapInGrid( edit_panel, rows )
         
         edit_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, 'Newlines are removed from parsed strings right after parsing, before string processing.', ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        if collapse_newlines:
+            
+            label = 'Newlines are removed from parsed strings right after parsing, before string processing.'
+            
+        else:
+            
+            label = 'Newlines are not collapsed here (probably a note parser)'
+            
+        
+        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, label, ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
         edit_panel.Add( self._string_processor_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
@@ -573,6 +593,8 @@ class EditHTMLTagRulePanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._rule_type.addItem( 'search descendants', ClientParsing.HTML_RULE_TYPE_DESCENDING )
         self._rule_type.addItem( 'walk back up ancestors', ClientParsing.HTML_RULE_TYPE_ASCENDING )
+        self._rule_type.addItem( 'search previous siblings', ClientParsing.HTML_RULE_TYPE_PREV_SIBLINGS )
+        self._rule_type.addItem( 'search next siblings', ClientParsing.HTML_RULE_TYPE_NEXT_SIBLINGS )
         
         self._tag_name = QW.QLineEdit( self )
         
@@ -662,7 +684,7 @@ class EditHTMLTagRulePanel( ClientGUIScrolledPanels.EditPanel ):
         
         rule_type = self._rule_type.GetValue()
         
-        if rule_type == ClientParsing.HTML_RULE_TYPE_DESCENDING:
+        if rule_type in [ ClientParsing.HTML_RULE_TYPE_DESCENDING, ClientParsing.HTML_RULE_TYPE_NEXT_SIBLINGS, ClientParsing.HTML_RULE_TYPE_PREV_SIBLINGS ]:
             
             self._tag_attributes.setEnabled( True )
             self._tag_index.setEnabled( True )
@@ -718,7 +740,7 @@ class EditHTMLTagRulePanel( ClientGUIScrolledPanels.EditPanel ):
         should_test_tag_string = self._should_test_tag_string.isChecked()
         tag_string_string_match = self._tag_string_string_match.GetValue()
         
-        if rule_type == ClientParsing.HTML_RULE_TYPE_DESCENDING:
+        if rule_type in [ ClientParsing.HTML_RULE_TYPE_DESCENDING, ClientParsing.HTML_RULE_TYPE_NEXT_SIBLINGS, ClientParsing.HTML_RULE_TYPE_PREV_SIBLINGS ]:
             
             tag_attributes = self._tag_attributes.GetValue()
             tag_index = self._tag_index.GetValue()
@@ -745,7 +767,7 @@ class EditHTMLFormulaPanel( EditSpecificFormulaPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_formulae.html#html_formula' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_HTML_FORMULA )
         
         menu_items.append( ( 'normal', 'open the html formula help', 'Open the help page for html formulae in your web browser.', page_func ) )
         
@@ -845,7 +867,17 @@ class EditHTMLFormulaPanel( EditSpecificFormulaPanel ):
         edit_panel.Add( tag_rules_hbox, CC.FLAGS_EXPAND_BOTH_WAYS )
         edit_panel.Add( ae_button_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         edit_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, 'Newlines are removed from parsed strings right after parsing, before string processing.', ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        if collapse_newlines:
+            
+            label = 'Newlines are removed from parsed strings right after parsing, before string processing.'
+            
+        else:
+            
+            label = 'Newlines are not collapsed here (probably a note parser)'
+            
+        
+        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, label, ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
         edit_panel.Add( self._string_processor_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #
@@ -1104,7 +1136,7 @@ class EditJSONFormulaPanel( EditSpecificFormulaPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_formulae.html#json_formula' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_FORMULAE_JSON_FORMULA )
         
         menu_items.append( ( 'normal', 'open the json formula help', 'Open the help page for json formulae in your web browser.', page_func ) )
         
@@ -1193,7 +1225,17 @@ class EditJSONFormulaPanel( EditSpecificFormulaPanel ):
         edit_panel.Add( parse_rules_hbox, CC.FLAGS_EXPAND_BOTH_WAYS )
         edit_panel.Add( ae_button_hbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         edit_panel.Add( gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
-        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, 'Newlines are removed from parsed strings right after parsing, before string processing.', ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        if collapse_newlines:
+            
+            label = 'Newlines are removed from parsed strings right after parsing, before string processing.'
+            
+        else:
+            
+            label = 'Newlines are not collapsed here (probably a note parser)'
+            
+        
+        edit_panel.Add( ClientGUICommon.BetterStaticText( edit_panel, label, ellipsize_end = True ), CC.FLAGS_EXPAND_PERPENDICULAR )
         edit_panel.Add( self._string_processor_button, CC.FLAGS_EXPAND_PERPENDICULAR )
         
         #

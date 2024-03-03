@@ -29,10 +29,12 @@ class HydrusException( Exception ):
         return os.linesep.join( s )
         
     
+
 class UnknownException( HydrusException ): pass
 
 class CantRenderWithCVException( HydrusException ): pass
 class DataMissing( HydrusException ): pass
+class TooComplicatedM8( HydrusException ): pass
 
 class DBException( HydrusException ):
     
@@ -45,6 +47,7 @@ class DBException( HydrusException ):
     
 class DBAccessException( HydrusException ): pass
 class DBCredentialsException( HydrusException ): pass
+class DBVersionException( HydrusException ): pass
 class FileMissingException( HydrusException ): pass
 class DirectoryMissingException( HydrusException ): pass
 class SerialisationException( HydrusException ): pass
@@ -58,6 +61,12 @@ class UnsupportedFileException( HydrusException ): pass
 class ZeroSizeFileException( UnsupportedFileException ): pass
 class DamagedOrUnusualFileException( UnsupportedFileException ): pass
 
+class LimitedSupportFileException( HydrusException ): pass
+
+class EncryptedFileException( LimitedSupportFileException ): pass
+class NoThumbnailFileException( LimitedSupportFileException ): pass
+class NoResolutionFileException( LimitedSupportFileException ): pass
+
 class VetoException( HydrusException ): pass
 
 class CancelledException( VetoException ): pass
@@ -69,6 +78,7 @@ class TagSizeException( VetoException ): pass
 
 class ParseException( HydrusException ): pass
 class StringConvertException( ParseException ): pass
+class StringJoinerException( ParseException ): pass
 class StringMatchException( ParseException ): pass
 class StringSplitterException( ParseException ): pass
 class StringSortException( ParseException ): pass

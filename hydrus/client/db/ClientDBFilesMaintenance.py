@@ -4,8 +4,11 @@ import typing
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientFiles
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientTime
 from hydrus.client.db import ClientDBDefinitionsCache
 from hydrus.client.db import ClientDBFilesMaintenanceQueue
 from hydrus.client.db import ClientDBFilesMetadataBasic
@@ -13,6 +16,7 @@ from hydrus.client.db import ClientDBMaster
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBRepositories
 from hydrus.client.db import ClientDBSimilarFiles
+from hydrus.client.db import ClientDBFilesTimestamps
 from hydrus.client.media import ClientMediaResultCache
 
 class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
@@ -24,6 +28,7 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
         modules_hashes: ClientDBMaster.ClientDBMasterHashes,
         modules_hashes_local_cache: ClientDBDefinitionsCache.ClientDBCacheLocalHashes,
         modules_files_metadata_basic: ClientDBFilesMetadataBasic.ClientDBFilesMetadataBasic,
+        modules_files_timestamps: ClientDBFilesTimestamps.ClientDBFilesTimestamps,
         modules_similar_files: ClientDBSimilarFiles.ClientDBSimilarFiles,
         modules_repositories: ClientDBRepositories.ClientDBRepositories,
         weakref_media_result_cache: ClientMediaResultCache.MediaResultCache
@@ -35,6 +40,7 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
         self.modules_hashes = modules_hashes
         self.modules_hashes_local_cache = modules_hashes_local_cache
         self.modules_files_metadata_basic = modules_files_metadata_basic
+        self.modules_files_timestamps = modules_files_timestamps
         self.modules_similar_files = modules_similar_files
         self.modules_repositories = modules_repositories
         self._weakref_media_result_cache = weakref_media_result_cache
@@ -72,7 +78,7 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                             self.modules_files_maintenance_queue.AddJobs( { hash_id }, ClientFiles.REGENERATE_FILE_DATA_JOB_OTHER_HASHES )
                             
                         
-                        result = self._Execute( 'SELECT 1 FROM file_modified_timestamps WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+                        result = self.modules_files_timestamps.GetTimestampMS( hash_id, ClientTime.TimestampData.STATICSimpleStub( HC.TIMESTAMP_TYPE_MODIFIED_FILE ) )
                         
                         if result is None:
                             
@@ -96,6 +102,24 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                     
                     self.modules_hashes.SetExtraHashes( hash_id, md5, sha1, sha512 )
                     
+                elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_HAS_TRANSPARENCY:
+                    
+                    previous_has_transparency = self.modules_files_metadata_basic.GetHasTransparency( hash_id )
+                    
+                    has_transparency = additional_data
+                    
+                    if previous_has_transparency != has_transparency:
+                        
+                        self.modules_files_metadata_basic.SetHasTransparency( hash_id, has_transparency )
+                        
+                        if has_transparency:
+                            
+                            self.modules_files_maintenance_queue.AddJobs( { hash_id }, ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL )
+                            
+                        
+                    
+                    new_file_info.add( ( hash_id, hash ) )
+                    
                 elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_HAS_EXIF:
                     
                     previous_has_exif = self.modules_files_metadata_basic.GetHasEXIF( hash_id )
@@ -107,6 +131,8 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                         self.modules_files_metadata_basic.SetHasEXIF( hash_id, has_exif )
                         
                     
+                    new_file_info.add( ( hash_id, hash ) )
+                    
                 elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_HAS_HUMAN_READABLE_EMBEDDED_METADATA:
                     
                     previous_has_human_readable_embedded_metadata = self.modules_files_metadata_basic.GetHasHumanReadableEmbeddedMetadata( hash_id )
@@ -117,6 +143,8 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                         
                         self.modules_files_metadata_basic.SetHasHumanReadableEmbeddedMetadata( hash_id, has_human_readable_embedded_metadata )
                         
+                    
+                    new_file_info.add( ( hash_id, hash ) )
                     
                 elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_HAS_ICC_PROFILE:
                     
@@ -134,6 +162,8 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                             
                         
                     
+                    new_file_info.add( ( hash_id, hash ) )
+                    
                 elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_PIXEL_HASH:
                     
                     pixel_hash = additional_data
@@ -142,11 +172,13 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                     
                     self.modules_similar_files.SetPixelHash( hash_id, pixel_hash_id )
                     
+                    new_file_info.add( ( hash_id, hash ) )
+                    
                 elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_MODIFIED_TIMESTAMP:
                     
-                    file_modified_timestamp = additional_data
+                    file_modified_timestamp_ms = additional_data
                     
-                    self._Execute( 'REPLACE INTO file_modified_timestamps ( hash_id, file_modified_timestamp ) VALUES ( ?, ? );', ( hash_id, file_modified_timestamp ) )
+                    self.modules_files_timestamps.SetTime( [ hash_id ], ClientTime.TimestampData.STATICFileModifiedTime( file_modified_timestamp_ms ) )
                     
                     new_file_info.add( ( hash_id, hash ) )
                     
@@ -165,6 +197,7 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                         if not self.modules_similar_files.FileIsInSystem( hash_id ):
                             
                             self.modules_files_maintenance_queue.AddJobs( ( hash_id, ), ClientFiles.REGENERATE_FILE_DATA_JOB_SIMILAR_FILES_METADATA )
+                            self.modules_files_maintenance_queue.AddJobs( ( hash_id, ), ClientFiles.REGENERATE_FILE_DATA_JOB_PIXEL_HASH )
                             
                         
                     else:
@@ -176,6 +209,30 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
                             self.modules_similar_files.StopSearchingFile( hash_id )
                             
                         
+                    
+                elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL or job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_REFIT_THUMBNAIL:
+                    
+                    if job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_FORCE_THUMBNAIL:
+                        
+                        was_regenerated = True
+                        
+                    else:
+                        
+                        was_regenerated = additional_data
+                        
+                    
+                    if was_regenerated:
+                        
+                        self.modules_files_maintenance_queue.AddJobs( ( hash_id, ), ClientFiles.REGENERATE_FILE_DATA_JOB_BLURHASH )
+                        
+                    
+                elif job_type == ClientFiles.REGENERATE_FILE_DATA_JOB_BLURHASH:
+                    
+                    blurhash: str = additional_data
+                    
+                    self.modules_files_metadata_basic.SetBlurhash( hash_id, blurhash )
+                    
+                    new_file_info.add( ( hash_id, hash ) )
                     
                 
             
@@ -204,7 +261,7 @@ class ClientDBFilesMaintenance( ClientDBModule.ClientDBModule ):
             
             if len( hashes_that_need_refresh ) > 0:
                 
-                HG.client_controller.pub( 'new_file_info', hashes_that_need_refresh )
+                CG.client_controller.pub( 'new_file_info', hashes_that_need_refresh )
                 
             
         

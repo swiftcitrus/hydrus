@@ -10,10 +10,12 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusThreading
+from hydrus.core import HydrusTime
 
-from hydrus.client import ClientData
-from hydrus.client import ClientThreading
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientThreading
+from hydrus.client import ClientTime
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportGallerySeeds
 from hydrus.client.importing import ClientImportSubscriptionQuery
@@ -43,7 +45,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         self._query_headers: typing.List[ ClientImportSubscriptionQuery.SubscriptionQueryHeader ] = []
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         self._checker_options = new_options.GetDefaultSubscriptionCheckerOptions()
         
@@ -87,7 +89,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
     
     def _CanDoWorkNow( self ):
         
-        p1 = not ( self._paused or HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or HG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' ) or HG.client_controller.subscriptions_manager.SubscriptionsArePausedForEditing() )
+        p1 = not ( self._paused or CG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or CG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' ) or CG.client_controller.subscriptions_manager.SubscriptionsArePausedForEditing() )
         p2 = not ( HG.started_shutdown or self._stop_work_for_shutdown )
         p3 = self._NoDelays()
         
@@ -95,7 +97,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             message = 'Subscription "{}" CanDoWork check.'.format( self._name )
             message += os.linesep
-            message += 'Paused/Global/Network/Dialog Pause: {}/{}/{}/{}'.format( self._paused, HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ), HG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' ), HG.client_controller.subscriptions_manager.SubscriptionsArePausedForEditing() )
+            message += 'Paused/Global/Network/Dialog Pause: {}/{}/{}/{}'.format( self._paused, CG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ), CG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' ), CG.client_controller.subscriptions_manager.SubscriptionsArePausedForEditing() )
             message += os.linesep
             message += 'Started/Sub shutdown: {}/{}'.format( HG.started_shutdown, self._stop_work_for_shutdown )
             message += os.linesep
@@ -123,7 +125,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             reason = reason.splitlines()[0]
             
         
-        self._no_work_until = HydrusData.GetNow() + time_delta
+        self._no_work_until = HydrusTime.GetNow() + time_delta
         self._no_work_until_reason = reason
         
     
@@ -150,7 +152,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         query_headers = list( self._query_headers )
         
-        if HG.client_controller.new_options.GetBoolean( 'process_subs_in_random_order' ):
+        if CG.client_controller.new_options.GetBoolean( 'process_subs_in_random_order' ):
             
             random.shuffle( query_headers )
             
@@ -233,7 +235,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
     
     def _NoDelays( self ):
         
-        return HydrusData.TimeHasPassed( self._no_work_until )
+        return HydrusTime.TimeHasPassed( self._no_work_until )
         
     
     def _ShowHitPeriodicFileLimitMessage( self, query_name: int, query_text: int, file_limit: int ):
@@ -242,23 +244,23 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         message += os.linesep
         message += 'Either a user uploaded a lot of files to that query in a short period, in which case there is a gap in your subscription you may wish to fill, or the site has just changed its URL format, in which case you may see several of these messages for this site over the coming weeks, and you should ignore them.'
         
-        call = HydrusData.Call( HG.client_controller.pub, 'make_new_subscription_gap_downloader', self._gug_key_and_name, query_text, self._file_import_options.Duplicate(), self._tag_import_options.Duplicate(), self._note_import_options, file_limit * 5 )
+        call = HydrusData.Call( CG.client_controller.pub, 'make_new_subscription_gap_downloader', self._gug_key_and_name, query_text, self._file_import_options.Duplicate(), self._tag_import_options.Duplicate(), self._note_import_options, file_limit * 5 )
         
         call.SetLabel( 'start a new downloader for this to fill in the gap!' )
         
-        job_key = ClientThreading.JobKey()
+        job_status = ClientThreading.JobStatus()
         
-        job_key.SetStatusText( message )
-        job_key.SetUserCallable( call )
+        job_status.SetStatusText( message )
+        job_status.SetUserCallable( call )
         
-        HG.client_controller.pub( 'message', job_key )
+        CG.client_controller.pub( 'message', job_status )
         
     
-    def _SyncQueries( self, job_key ):
+    def _SyncQueries( self, job_status ):
         
         self._have_made_an_initial_sync_bandwidth_notification = False
         
-        gug = HG.client_controller.network_engine.domain_manager.GetGUG( self._gug_key_and_name )
+        gug = CG.client_controller.network_engine.domain_manager.GetGUG( self._gug_key_and_name )
         
         if gug is None:
             
@@ -309,7 +311,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             try:
                 
-                query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
+                query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
                 
             except HydrusExceptions.DBException as e:
                 
@@ -327,7 +329,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             try:
                 
-                self._SyncQuery( job_key, gug, query_header, query_log_container, status_prefix )
+                self._SyncQuery( job_status, gug, query_header, query_log_container, status_prefix )
                 
             except HydrusExceptions.CancelledException:
                 
@@ -335,7 +337,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 
             finally:
                 
-                HG.client_controller.WriteSynchronous( 'serialisable', query_log_container )
+                CG.client_controller.WriteSynchronous( 'serialisable', query_log_container )
                 
             
         
@@ -354,7 +356,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
     
     def _SyncQuery(
         self,
-        job_key: ClientThreading.JobKey,
+        job_status: ClientThreading.JobStatus,
         gug: ClientNetworkingGUG.GalleryURLGenerator, # not actually correct for an ngug, but _whatever_
         query_header: ClientImportSubscriptionQuery.SubscriptionQueryHeader,
         query_log_container: ClientImportSubscriptionQuery.SubscriptionQueryLogContainer,
@@ -388,7 +390,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         stop_reason = 'unknown stop reason'
         
-        job_key.SetStatusText( status_prefix )
+        job_status.SetStatusText( status_prefix )
         
         initial_search_urls = gug.GenerateGalleryURLs( query_text )
         
@@ -410,7 +412,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             while gallery_seed_log.WorkToDo():
                 
                 p1 = not self._CanDoWorkNow()
-                ( login_ok, login_reason ) = query_header.GalleryLoginOK( HG.client_controller.network_engine, self._name )
+                ( login_ok, login_reason ) = query_header.GalleryLoginOK( CG.client_controller.network_engine, self._name )
                 
                 if p1 or not login_ok:
                     
@@ -435,7 +437,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     raise HydrusExceptions.CancelledException( 'A problem, so stopping.' )
                     
                 
-                if job_key.IsCancelled():
+                if job_status.IsCancelled():
                     
                     stop_reason = 'gallery parsing cancelled, likely by user'
                     
@@ -460,7 +462,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                         text = text.splitlines()[0]
                         
                     
-                    job_key.SetStatusText( status_prefix + ': ' + text )
+                    job_status.SetStatusText( status_prefix + ': ' + text )
                     
                 
                 def title_hook( text ):
@@ -614,11 +616,11 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     return ( num_urls_added, num_urls_already_in_file_seed_cache, can_search_for_more_files, stop_reason )
                     
                 
-                job_key.SetStatusText( status_prefix + ': found ' + HydrusData.ToHumanInt( total_new_urls_for_this_sync ) + ' new urls, checking next page' )
+                job_status.SetStatusText( status_prefix + ': found ' + HydrusData.ToHumanInt( total_new_urls_for_this_sync ) + ' new urls, checking next page' )
                 
                 try:
                     
-                    ( num_urls_added, num_urls_already_in_file_seed_cache, num_urls_total, result_404, added_new_gallery_pages, stop_reason ) = gallery_seed.WorkOnURL( 'subscription', gallery_seed_log, file_seeds_callable, status_hook, title_hook, query_header.GenerateNetworkJobFactory( self._name ), ClientImporting.GenerateMultiplePopupNetworkJobPresentationContextFactory( job_key ), self._file_import_options, gallery_urls_seen_before = gallery_urls_seen_this_sync )
+                    ( num_urls_added, num_urls_already_in_file_seed_cache, num_urls_total, result_404, added_new_gallery_pages, stop_reason ) = gallery_seed.WorkOnURL( 'subscription', gallery_seed_log, file_seeds_callable, status_hook, title_hook, query_header.GenerateNetworkJobFactory( self._name ), ClientImporting.GenerateMultiplePopupNetworkJobPresentationContextFactory( job_status ), self._file_import_options, gallery_urls_seen_before = gallery_urls_seen_this_sync )
                     
                 except HydrusExceptions.CancelledException as e:
                     
@@ -701,14 +703,14 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 
                 ( death_files_found, death_time_delta ) = death_file_velocity
                 
-                HydrusData.ShowText( 'The query "{}" for subscription "{}" found fewer than {} files in the last {}, so it appears to be dead!'.format( query_name, self._name, HydrusData.ToHumanInt( death_files_found ), HydrusData.TimeDeltaToPrettyTimeDelta( death_time_delta ) ) )
+                HydrusData.ShowText( 'The query "{}" for subscription "{}" found fewer than {} files in the last {}, so it appears to be dead!'.format( query_name, self._name, HydrusData.ToHumanInt( death_files_found ), HydrusTime.TimeDeltaToPrettyTimeDelta( death_time_delta, no_bigger_than_days = True ) ) )
                 
             
         else:
             
             if this_is_initial_sync:
                 
-                if not query_header.FileBandwidthOK( HG.client_controller.network_engine.bandwidth_manager, self._name ) and not self._have_made_an_initial_sync_bandwidth_notification:
+                if not query_header.FileBandwidthOK( CG.client_controller.network_engine.bandwidth_manager, self._name ) and not self._have_made_an_initial_sync_bandwidth_notification:
                     
                     HydrusData.ShowText( 'FYI: The query "{}" for subscription "{}" performed its initial sync ok, but it is short on bandwidth right now, so no files will be downloaded yet. The subscription will catch up in future as bandwidth becomes available. You can review the estimated time until bandwidth is available under the manage subscriptions dialog. If more queries are performing initial syncs in this run, they may be the same.'.format( query_name, self._name ) )
                     
@@ -734,16 +736,11 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         query_headers_to_do = [ query_header for query_header in self._query_headers if query_header.WantsToResyncWithLogContainer() ]
         
-        for query_header in self._query_headers:
-            
-            if not query_header.WantsToResyncWithLogContainer():
-                
-                continue
-                
+        for query_header in query_headers_to_do:
             
             try:
                 
-                query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
+                query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
                 
             except HydrusExceptions.DBException as e:
                 
@@ -861,7 +858,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
         
     
-    def _WorkOnQueriesFiles( self, job_key ):
+    def _WorkOnQueriesFiles( self, job_status ):
         
         self._file_error_count = 0
         
@@ -886,11 +883,11 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             text_1 += ' (' + HydrusData.ConvertValueRangeToPrettyString( i + 1, num_queries ) + ')'
             
-            job_key.SetStatusText( text_1 )
+            job_status.SetStatusText( text_1 )
             
             try:
                 
-                query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
+                query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
                 
             except HydrusExceptions.DBException as e:
                 
@@ -908,7 +905,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             try:
                 
-                self._WorkOnQueryFiles( job_key, query_header, query_log_container, query_summary_name )
+                self._WorkOnQueryFiles( job_status, query_header, query_log_container, query_summary_name )
                 
             except HydrusExceptions.CancelledException:
                 
@@ -916,14 +913,14 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 
             finally:
                 
-                HG.client_controller.WriteSynchronous( 'serialisable', query_log_container )
+                CG.client_controller.WriteSynchronous( 'serialisable', query_log_container )
                 
             
         
-        job_key.DeleteFiles()
-        job_key.DeleteStatusText()
-        job_key.DeleteStatusText( 2 )
-        job_key.DeleteVariable( 'popup_gauge_2' )
+        job_status.DeleteFiles()
+        job_status.DeleteStatusText()
+        job_status.DeleteStatusText( 2 )
+        job_status.DeleteVariable( 'popup_gauge_2' )
         
     
     def _WorkOnQueriesFilesCanDoWork( self ):
@@ -937,8 +934,8 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
             
             if query_header.HasFileWorkToDo():
                 
-                bandwidth_ok = query_header.FileBandwidthOK( HG.client_controller.network_engine.bandwidth_manager, self._name )
-                domain_ok = query_header.FileDomainOK( HG.client_controller.network_engine.domain_manager )
+                bandwidth_ok = query_header.FileBandwidthOK( CG.client_controller.network_engine.bandwidth_manager, self._name )
+                domain_ok = query_header.FileDomainOK( CG.client_controller.network_engine.domain_manager )
                 
                 if HG.subscription_report_mode:
                     
@@ -967,7 +964,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
     
     def _WorkOnQueryFiles(
         self,
-        job_key: ClientThreading.JobKey,
+        job_status: ClientThreading.JobStatus,
         query_header: ClientImportSubscriptionQuery.SubscriptionQueryHeader,
         query_log_container: ClientImportSubscriptionQuery.SubscriptionQueryLogContainer,
         query_summary_name: str
@@ -1001,7 +998,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     break
                     
                 
-                if job_key.IsCancelled():
+                if job_status.IsCancelled():
                     
                     self._DelayWork( 300, 'recently cancelled' )
                     
@@ -1009,15 +1006,15 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     
                 
                 p1 = not self._CanDoWorkNow()
-                p3 = not query_header.FileDomainOK( HG.client_controller.network_engine.domain_manager )
-                p4 = not query_header.FileBandwidthOK( HG.client_controller.network_engine.bandwidth_manager, self._name )
-                ( login_ok, login_reason ) = query_header.FileLoginOK( HG.client_controller.network_engine, self._name )
+                p3 = not query_header.FileDomainOK( CG.client_controller.network_engine.domain_manager )
+                p4 = not query_header.FileBandwidthOK( CG.client_controller.network_engine.bandwidth_manager, self._name )
+                ( login_ok, login_reason ) = query_header.FileLoginOK( CG.client_controller.network_engine, self._name )
                 
                 if p1 or p4 or not login_ok:
                     
                     if p3 and this_query_has_done_work:
                         
-                        job_key.SetStatusText( 'domain had errors, will try again later', 2 )
+                        job_status.SetStatusText( 'domain had errors, will try again later', 2 )
                         
                         self._DelayWork( 3600, 'domain errors, will try again later' )
                         
@@ -1026,7 +1023,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     
                     if p4 and this_query_has_done_work:
                         
-                        job_key.SetStatusText( 'no more bandwidth to download files, will do some more later', 2 )
+                        job_status.SetStatusText( 'no more bandwidth to download files, will do some more later', 2 )
                         
                         time.sleep( 5 )
                         
@@ -1065,7 +1062,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     
                     x_out_of_y = 'file ' + HydrusData.ConvertValueRangeToPrettyString( human_num_done + 1, human_num_urls ) + ': '
                     
-                    job_key.SetVariable( 'popup_gauge_2', ( human_num_done, human_num_urls ) )
+                    job_status.SetVariable( 'popup_gauge_2', ( human_num_done, human_num_urls ) )
                     
                     def status_hook( text ):
                         
@@ -1074,10 +1071,10 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                             text = text.splitlines()[0]
                             
                         
-                        job_key.SetStatusText( x_out_of_y + text, 2 )
+                        job_status.SetStatusText( x_out_of_y + text, 2 )
                         
                     
-                    file_seed.WorkOnURL( file_seed_cache, status_hook, query_header.GenerateNetworkJobFactory( self._name ), ClientImporting.GenerateMultiplePopupNetworkJobPresentationContextFactory( job_key ), self._file_import_options, FileImportOptions.IMPORT_TYPE_QUIET, self._tag_import_options, self._note_import_options )
+                    file_seed.WorkOnURL( file_seed_cache, status_hook, query_header.GenerateNetworkJobFactory( self._name ), ClientImporting.GenerateMultiplePopupNetworkJobPresentationContextFactory( job_status ), self._file_import_options, FileImportOptions.IMPORT_TYPE_QUIET, self._tag_import_options, self._note_import_options )
                     
                     query_tag_import_options = query_header.GetTagImportOptions()
                     
@@ -1087,15 +1084,15 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                             
                             hash = file_seed.GetHash()
                             
-                            media_result = HG.client_controller.Read( 'media_result', hash )
+                            media_result = CG.client_controller.Read( 'media_result', hash )
                             
                             downloaded_tags = []
                             
-                            service_keys_to_content_updates = query_tag_import_options.GetServiceKeysToContentUpdates( file_seed.status, media_result, downloaded_tags ) # additional tags
+                            content_update_package = query_tag_import_options.GetContentUpdatePackage( file_seed.status, media_result, downloaded_tags ) # additional tags
                             
-                            if len( service_keys_to_content_updates ) > 0:
+                            if content_update_package.HasContent():
                                 
-                                HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+                                CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
                                 
                             
                         
@@ -1140,7 +1137,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                     
                     status = CC.STATUS_ERROR
                     
-                    job_key.SetStatusText( x_out_of_y + 'file failed', 2 )
+                    job_status.SetStatusText( x_out_of_y + 'file failed', 2 )
                     
                     file_seed.SetStatus( status, exception = e )
                     
@@ -1158,7 +1155,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                         time.sleep( 5 )
                         
                     
-                    error_count_threshold = HG.client_controller.new_options.GetNoneableInteger( 'subscription_file_error_cancel_threshold' )
+                    error_count_threshold = CG.client_controller.new_options.GetNoneableInteger( 'subscription_file_error_cancel_threshold' )
                     
                     if error_count_threshold is not None and self._file_error_count >= error_count_threshold:
                         
@@ -1170,17 +1167,17 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 
                 if len( presentation_hashes ) > 0:
                     
-                    job_key.SetFiles( list( presentation_hashes ), query_summary_name )
+                    job_status.SetFiles( presentation_hashes, query_summary_name )
                     
                 else:
                     
                     # although it is nice to have the file popup linger a little once a query is done, if the next query has 15 'already in db', it has outstayed its welcome
-                    job_key.DeleteFiles()
+                    job_status.DeleteFiles()
                     
                 
                 time.sleep( ClientImporting.DID_SUBSTANTIAL_FILE_WORK_MINIMUM_SLEEP_TIME )
                 
-                HG.client_controller.WaitUntilViewFree()
+                CG.client_controller.WaitUntilViewFree()
                 
             
         finally:
@@ -1223,7 +1220,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
     
     def CanScrubDelay( self ):
         
-        return not HydrusData.TimeHasPassed( self._no_work_until )
+        return not HydrusTime.TimeHasPassed( self._no_work_until )
         
     
     def CheckNow( self ):
@@ -1312,7 +1309,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         for query_header in self._query_headers:
             
-            next_work_time = query_header.GetNextWorkTime( HG.client_controller.network_engine.bandwidth_manager, self._name )
+            next_work_time = query_header.GetNextWorkTime( CG.client_controller.network_engine.bandwidth_manager, self._name )
             
             if next_work_time is not None:
                 
@@ -1327,7 +1324,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         best_next_work_time = min( next_work_times )
         
-        if not HydrusData.TimeHasPassed( self._no_work_until ):
+        if not HydrusTime.TimeHasPassed( self._no_work_until ):
             
             best_next_work_time = max( ( best_next_work_time, self._no_work_until ) )
             
@@ -1566,7 +1563,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                         
                     
                 
-                query_header.SetQueryLogContainerStatus( ClientImportSubscriptionQuery.LOG_CONTAINER_UNSYNCED, pretty_velocity_override = 'will recalculate on next run' )
+                query_header.SetQueryLogContainerStatus( ClientImportSubscriptionQuery.LOG_CONTAINER_UNSYNCED, pretty_velocity_override = 'will recalculate when next fully loaded' )
                 
             
         
@@ -1647,7 +1644,7 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 
                 self._paused = True
                 
-                self._DelayWork( 300, 'error: {}'.format( str( e ) ) )
+                self._DelayWork( 300, 'error: {}'.format( repr( e ) ) )
                 
                 return
                 
@@ -1658,38 +1655,38 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
         
         if self._CanDoWorkNow() and ( sync_work_to_do or files_work_to_do ):
             
-            job_key = ClientThreading.JobKey( pausable = False, cancellable = True )
+            job_status = ClientThreading.JobStatus( pausable = False, cancellable = True )
             
             try:
                 
-                job_key.SetStatusTitle( 'subscriptions - ' + self._name )
+                job_status.SetStatusTitle( 'subscriptions - ' + self._name )
                 
                 if self._show_a_popup_while_working:
                     
-                    HG.client_controller.pub( 'message', job_key )
+                    CG.client_controller.pub( 'message', job_status )
                     
                 
                 # it is possible a query becomes due for a check while others are syncing, so we repeat this while watching for a stop signal
                 while self._CanDoWorkNow() and self._SyncQueriesCanDoWork():
                     
-                    self._SyncQueries( job_key )
+                    self._SyncQueries( job_status )
                     
                 
                 real_file_import_options = FileImportOptions.GetRealFileImportOptions( self._file_import_options, FileImportOptions.IMPORT_TYPE_QUIET )
                 
                 real_file_import_options.CheckReadyToImport()
                 
-                self._WorkOnQueriesFiles( job_key )
+                self._WorkOnQueriesFiles( job_status )
                 
             except HydrusExceptions.NetworkException as e:
                 
-                delay = HG.client_controller.new_options.GetInteger( 'subscription_network_error_delay' )
+                delay = CG.client_controller.new_options.GetInteger( 'subscription_network_error_delay' )
                 
                 HydrusData.Print( 'The subscription ' + self._name + ' encountered an exception when trying to sync:' )
                 
                 HydrusData.Print( e )
                 
-                job_key.SetStatusText( 'Encountered a network error, will retry again later' )
+                job_status.SetStatusText( 'Encountered a network error, will retry again later' )
                 
                 self._DelayWork( delay, 'network error: ' + str( e ) )
                 
@@ -1700,22 +1697,22 @@ class Subscription( HydrusSerialisable.SerialisableBaseNamed ):
                 HydrusData.ShowText( 'The subscription ' + self._name + ' encountered an exception when trying to sync:' )
                 HydrusData.ShowException( e )
                 
-                delay = HG.client_controller.new_options.GetInteger( 'subscription_other_error_delay' )
+                delay = CG.client_controller.new_options.GetInteger( 'subscription_other_error_delay' )
                 
                 self._DelayWork( delay, 'error: ' + str( e ) )
                 
             finally:
                 
-                job_key.DeleteNetworkJob()
+                job_status.DeleteNetworkJob()
                 
             
-            if job_key.GetFiles() is not None:
+            if job_status.GetFiles() is not None:
                 
-                job_key.Finish()
+                job_status.Finish()
                 
             else:
                 
-                job_key.Delete()
+                job_status.FinishAndDismiss()
                 
             
         
@@ -1826,7 +1823,7 @@ class SubscriptionsManager( object ):
         
         self._wake_event = threading.Event()
         
-        self._big_pauser = HydrusData.BigJobPauser( wait_time = 0.8 )
+        self._big_pauser = HydrusThreading.BigJobPauser( wait_time = 0.8 )
         
         self._controller.sub( self, 'Shutdown', 'shutdown' )
         self._controller.sub( self, 'Wake', 'notify_network_traffic_unpaused' )
@@ -1877,8 +1874,8 @@ class SubscriptionsManager( object ):
     
     def _GetSubscriptionReadyToGo( self ):
         
-        p1 = HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or self._pause_subscriptions_for_editing
-        p2 = HG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' )
+        p1 = CG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or self._pause_subscriptions_for_editing
+        p2 = CG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' )
         p3 = HG.started_shutdown
         
         if p1 or p2 or p3:
@@ -1886,7 +1883,7 @@ class SubscriptionsManager( object ):
             return None
             
         
-        max_simultaneous_subscriptions = HG.client_controller.new_options.GetInteger( 'max_simultaneous_subscriptions' )
+        max_simultaneous_subscriptions = CG.client_controller.new_options.GetInteger( 'max_simultaneous_subscriptions' )
         
         if len( self._names_to_running_subscription_info ) >= max_simultaneous_subscriptions:
             
@@ -1900,7 +1897,7 @@ class SubscriptionsManager( object ):
         # just a couple of seconds for calculation and human breathing room
         SUB_WORK_DELAY_BUFFER = 3
         
-        names_not_due = { name for ( name, next_work_time ) in self._names_to_next_work_time.items() if not HydrusData.TimeHasPassed( next_work_time + SUB_WORK_DELAY_BUFFER ) }
+        names_not_due = { name for ( name, next_work_time ) in self._names_to_next_work_time.items() if not HydrusTime.TimeHasPassed( next_work_time + SUB_WORK_DELAY_BUFFER ) }
         
         possible_names.difference_update( names_not_due )
         
@@ -1911,7 +1908,7 @@ class SubscriptionsManager( object ):
         
         possible_names = list( possible_names )
         
-        if HG.client_controller.new_options.GetBoolean( 'process_subs_in_random_order' ):
+        if CG.client_controller.new_options.GetBoolean( 'process_subs_in_random_order' ):
             
             subscription_name = random.choice( possible_names )
             
@@ -1958,8 +1955,8 @@ class SubscriptionsManager( object ):
                 
             else:
                 
-                p1 = HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or self._pause_subscriptions_for_editing
-                p2 = HG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' )
+                p1 = CG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ) or self._pause_subscriptions_for_editing
+                p2 = CG.client_controller.new_options.GetBoolean( 'pause_all_new_network_traffic' )
                 
                 stopped_because_pause = p1 or p2
                 
@@ -1969,7 +1966,7 @@ class SubscriptionsManager( object ):
                     # this sets min resolution of a single sub repeat cycle
                     BUFFER_TIME = 120
                     
-                    next_work_time = max( next_work_time, HydrusData.GetNow() + BUFFER_TIME )
+                    next_work_time = max( next_work_time, HydrusTime.GetNow() + BUFFER_TIME )
                     
                 
                 self._names_to_next_work_time[ name ] = next_work_time
@@ -2011,7 +2008,7 @@ class SubscriptionsManager( object ):
                         
                         job = SubscriptionJob( self._controller, subscription )
                         
-                        HG.client_controller.CallToThread( job.Work )
+                        CG.client_controller.CallToThread( job.Work )
                         
                         self._names_to_running_subscription_info[ subscription.GetName() ] = ( job, subscription )
                         
@@ -2111,7 +2108,7 @@ class SubscriptionsManager( object ):
             message += os.linesep * 2
             message += '{} not runnable: {}'.format( HydrusData.ToHumanInt( len( self._names_that_cannot_run ) ), ', '.join( cannot_run ) )
             message += os.linesep * 2
-            message += '{} next times: {}'.format( HydrusData.ToHumanInt( len( self._names_to_next_work_time ) ), ', '.join( ( '{}: {}'.format( name, ClientData.TimestampToPrettyTimeDelta( next_work_time ) ) for ( name, next_work_time ) in next_times ) ) )
+            message += '{} next times: {}'.format( HydrusData.ToHumanInt( len( self._names_to_next_work_time ) ), ', '.join( ( '{}: {}'.format( name, ClientTime.TimestampToPrettyTimeDelta( next_work_time ) ) for ( name, next_work_time ) in next_times ) ) )
             
             HydrusData.ShowText( message )
             

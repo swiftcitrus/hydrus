@@ -10,6 +10,7 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientLocation
@@ -21,6 +22,9 @@ from hydrus.client.importing.options import PresentationImportOptions
 from hydrus.client.importing.options import TagImportOptions
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
+from hydrus.client.metadata import ClientContentUpdates
+
+from hydrus.test import HelperFunctions as HF
 
 class TestCheckerOptions( unittest.TestCase ):
     
@@ -121,7 +125,7 @@ class TestCheckerOptions( unittest.TestCase ):
         
         self.assertEqual( regular_checker_options.GetPrettyCurrentVelocity( empty_file_seed_cache, 0 ), 'no files yet' )
         
-        self.assertEqual( regular_checker_options.GetNextCheckTime( empty_file_seed_cache, 0, 0 ), 0 )
+        self.assertEqual( regular_checker_options.GetNextCheckTime( empty_file_seed_cache, 0 ), 0 )
         
         self.assertTrue( regular_checker_options.IsDead( empty_file_seed_cache, last_check_time ) )
         
@@ -140,9 +144,9 @@ class TestCheckerOptions( unittest.TestCase ):
         self.assertEqual( slow_checker_options.GetPrettyCurrentVelocity( file_seed_cache, last_check_time ), 'at last check, found 50 files in previous 1 day' )
         self.assertEqual( callous_checker_options.GetPrettyCurrentVelocity( file_seed_cache, last_check_time ), 'at last check, found 0 files in previous 1 minute' )
         
-        self.assertEqual( regular_checker_options.GetNextCheckTime( file_seed_cache, last_check_time, 0 ), last_check_time + 8640 )
-        self.assertEqual( fast_checker_options.GetNextCheckTime( file_seed_cache, last_check_time, 0 ), last_check_time + 3456 )
-        self.assertEqual( slow_checker_options.GetNextCheckTime( file_seed_cache, last_check_time, 0 ), last_check_time + 17280 )
+        self.assertEqual( regular_checker_options.GetNextCheckTime( file_seed_cache, last_check_time ), last_check_time + 8640 )
+        self.assertEqual( fast_checker_options.GetNextCheckTime( file_seed_cache, last_check_time ), last_check_time + 3456 )
+        self.assertEqual( slow_checker_options.GetNextCheckTime( file_seed_cache, last_check_time ), last_check_time + 17280 )
         
         # bare
         # 1 files per day
@@ -152,9 +156,9 @@ class TestCheckerOptions( unittest.TestCase ):
         
         self.assertEqual( regular_checker_options.GetPrettyCurrentVelocity( bare_file_seed_cache, last_check_time ), 'at last check, found 1 files in previous 1 day' )
         
-        self.assertEqual( regular_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time, 0 ), last_check_time + 86400 )
-        self.assertEqual( fast_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time, 0 ), last_check_time + 86400 )
-        self.assertEqual( slow_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time, 0 ), last_check_time + 86400 )
+        self.assertEqual( regular_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time ), last_check_time + 86400 )
+        self.assertEqual( fast_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time ), last_check_time + 86400 )
+        self.assertEqual( slow_checker_options.GetNextCheckTime( bare_file_seed_cache, last_check_time ), last_check_time + 86400 )
         
         # busy
         # 8640 files per day, 6 files per minute
@@ -167,10 +171,10 @@ class TestCheckerOptions( unittest.TestCase ):
         self.assertEqual( regular_checker_options.GetPrettyCurrentVelocity( busy_file_seed_cache, last_check_time ), 'at last check, found 8,640 files in previous 1 day' )
         self.assertEqual( callous_checker_options.GetPrettyCurrentVelocity( busy_file_seed_cache, last_check_time ), 'at last check, found 6 files in previous 1 minute' )
         
-        self.assertEqual( regular_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time, 0 ), last_check_time + 50 )
-        self.assertEqual( fast_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time, 0 ), last_check_time + 30 )
-        self.assertEqual( slow_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time, 0 ), last_check_time + 100 )
-        self.assertEqual( callous_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time, 0 ), last_check_time + 50 )
+        self.assertEqual( regular_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time ), last_check_time + 50 )
+        self.assertEqual( fast_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time ), last_check_time + 30 )
+        self.assertEqual( slow_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time ), last_check_time + 100 )
+        self.assertEqual( callous_checker_options.GetNextCheckTime( busy_file_seed_cache, last_check_time ), last_check_time + 50 )
         
         # new thread
         # only had files from ten mins ago, so timings are different
@@ -186,22 +190,25 @@ class TestCheckerOptions( unittest.TestCase ):
         self.assertEqual( callous_checker_options.GetPrettyCurrentVelocity( new_thread_file_seed_cache, last_check_time ), 'at last check, found 0 files in previous 1 minute' )
         
         # these would be 360, 120, 600, but the 'don't check faster the time since last file post' bumps this up
-        self.assertEqual( regular_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time, 0 ), last_check_time + 600 )
-        self.assertEqual( fast_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time, 0 ), last_check_time + 600 )
-        self.assertEqual( slow_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time, 0 ), last_check_time + 600 )
+        self.assertEqual( regular_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time ), last_check_time + 600 )
+        self.assertEqual( fast_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time ), last_check_time + 600 )
+        self.assertEqual( slow_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time ), last_check_time + 600 )
         
-        # Let's test these new static timings, where if faster_than == slower_than, we just add that period to the 'last_next_check_time' (e.g. checking every sunday night)
+        # Let's test the static timings, where if faster_than == slower_than
         
         static_checker_options = ClientImportOptions.CheckerOptions( intended_files_per_check = 5, never_faster_than = 3600, never_slower_than = 3600, death_file_velocity = ( 1, 3600 ) )
         
         self.assertTrue( static_checker_options.IsDead( bare_file_seed_cache, last_check_time ) )
         
-        last_next_check_time = last_check_time - 200
+        # normal situation
+        last_check_time = HydrusTime.GetNow() - 5
         
-        with patch.object( HydrusData, 'GetNow', return_value = last_check_time + 10 ):
-            
-            self.assertEqual( static_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time, last_next_check_time ), last_next_check_time + 3600 )
-            
+        self.assertEqual( static_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time ), last_check_time + 3600 )
+        
+        # after a long pause
+        last_check_time = HydrusTime.GetNow() - 100000
+        
+        self.assertEqual( static_checker_options.GetNextCheckTime( new_thread_file_seed_cache, last_check_time ), last_check_time + 3600 * ( 100000 // 3600 ) )
         
     
 class TestFileImportOptions( unittest.TestCase ):
@@ -310,11 +317,11 @@ class TestFileImportOptions( unittest.TestCase ):
         file_import_options.CheckFileIsValid( 1800, HC.IMAGE_JPEG, 640, 480 )
         file_import_options.CheckFileIsValid( 2200, HC.IMAGE_JPEG, 640, 480 )
         
-        file_import_options.CheckFileIsValid( 1800, HC.IMAGE_GIF, 640, 480 )
+        file_import_options.CheckFileIsValid( 1800, HC.ANIMATION_GIF, 640, 480 )
         
         with self.assertRaises( HydrusExceptions.FileImportRulesException ):
             
-            file_import_options.CheckFileIsValid( 2200, HC.IMAGE_GIF, 640, 480 )
+            file_import_options.CheckFileIsValid( 2200, HC.ANIMATION_GIF, 640, 480 )
             
         
         #
@@ -377,12 +384,14 @@ def GetNotesMediaResult( hash, names_to_notes ):
     
     tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
     
-    locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set(), inbox = True )
+    times_manager = ClientMediaManagers.TimesManager()
+    
+    locations_manager = ClientMediaManagers.LocationsManager( set(), set(), set(), set(), times_manager, inbox = True )
     ratings_manager = ClientMediaManagers.RatingsManager( {} )
     notes_manager = ClientMediaManagers.NotesManager( names_to_notes )
-    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
     
-    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
     
     return media_result
     
@@ -403,22 +412,22 @@ class TestNoteImportOptions( unittest.TestCase ):
         note_import_options.SetExtendExistingNoteIfPossible( True )
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_IGNORE )
         
-        self.assertEqual( note_import_options.GetServiceKeysToContentUpdates( media_result, [] ), {} )
+        HF.compare_content_update_packages( self, note_import_options.GetContentUpdatePackage( media_result, [] ), ClientContentUpdates.ContentUpdatePackage() )
         
         #
         
         names_and_notes = [ ( 'test', 'yes' ) ]
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'test', 'yes' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'test', 'yes' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         note_import_options.SetGetNotes( False )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, names_and_notes )
+        result = note_import_options.GetContentUpdatePackage( media_result, names_and_notes )
         
-        self.assertEqual( result, {} )
+        HF.compare_content_update_packages( self, result, ClientContentUpdates.ContentUpdatePackage() )
         
         note_import_options.SetGetNotes( True )
         
@@ -428,10 +437,10 @@ class TestNoteImportOptions( unittest.TestCase ):
         
         note_import_options.SetNameWhitelist( [ 'artist' ] )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'artist', 'I drew this in two days' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'artist', 'I drew this in two days' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         note_import_options.SetNameWhitelist( [] )
         
@@ -442,16 +451,16 @@ class TestNoteImportOptions( unittest.TestCase ):
         note_import_options.SetExtendExistingNoteIfPossible( True )
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_IGNORE )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, extending_names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'and here is a note that is more interesting' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, extending_names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'and here is a note that is more interesting' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         note_import_options.SetExtendExistingNoteIfPossible( False )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, extending_names_and_notes )
+        result = note_import_options.GetContentUpdatePackage( media_result, extending_names_and_notes )
         
-        self.assertEqual( result, {} )
+        HF.compare_content_update_packages( self, result, ClientContentUpdates.ContentUpdatePackage() )
         
         #
         
@@ -459,30 +468,30 @@ class TestNoteImportOptions( unittest.TestCase ):
         
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_IGNORE )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, conflict_names_and_notes )
+        result = note_import_options.GetContentUpdatePackage( media_result, conflict_names_and_notes )
         
-        self.assertEqual( result, {} )
+        HF.compare_content_update_packages( self, result, ClientContentUpdates.ContentUpdatePackage() )
         
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_REPLACE )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, conflict_names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'other note' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, conflict_names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'other note' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_RENAME )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, conflict_names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes (1)', 'other note' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, conflict_names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes (1)', 'other note' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_APPEND )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, conflict_names_and_notes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'here is a note' + '\n' * 2 + 'other note' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, conflict_names_and_notes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_NOTES_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'notes', 'here is a note' + '\n' * 2 + 'other note' ) ) )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         #
         
@@ -490,10 +499,10 @@ class TestNoteImportOptions( unittest.TestCase ):
         
         note_import_options.SetConflictResolution( NoteImportOptions.NOTE_IMPORT_CONFLICT_IGNORE )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, multinotes )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'b', 'bbb' ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'c', 'ccc' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, multinotes )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'b', 'bbb' ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'c', 'ccc' ) ) ] )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
         #
         
@@ -502,10 +511,10 @@ class TestNoteImportOptions( unittest.TestCase ):
         note_import_options.SetAllNameOverride( 'override' )
         note_import_options.SetNamesToNameOverrides( { 'wew' : 'lad' } )
         
-        result = note_import_options.GetServiceKeysToContentUpdates( media_result, renames )
-        expected_result = { CC.LOCAL_NOTES_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'override', 'aaa' ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'lad', 'wew note' ) ) ] }
+        result = note_import_options.GetContentUpdatePackage( media_result, renames )
+        expected_result = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'override', 'aaa' ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( example_hash, 'lad', 'wew note' ) ) ] )
         
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, result, expected_result )
         
     
 def GetTagsMediaResult( hash, in_inbox, service_key, deleted_tags ):
@@ -528,12 +537,14 @@ def GetTagsMediaResult( hash, in_inbox, service_key, deleted_tags ):
     
     tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
     
-    locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set(), inbox = in_inbox )
+    times_manager = ClientMediaManagers.TimesManager()
+    
+    locations_manager = ClientMediaManagers.LocationsManager( set(), set(), set(), set(), times_manager, inbox = in_inbox )
     ratings_manager = ClientMediaManagers.RatingsManager( {} )
     notes_manager = ClientMediaManagers.NotesManager( {} )
-    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+    file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
     
-    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+    media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
     
     return media_result
     
@@ -893,7 +904,7 @@ class TestTagImportOptions( unittest.TestCase ):
         
         self.assertEqual( whitelist, [] )
         
-        self.assertEqual( default_tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags ), {} )
+        HF.compare_content_update_packages( self, default_tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags ), ClientContentUpdates.ContentUpdatePackage() )
         
         #
         
@@ -971,13 +982,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags, external_filterable_tags = external_filterable_tags, external_additional_service_keys_to_tags = external_additional_service_keys_to_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags, external_filterable_tags = external_filterable_tags, external_additional_service_keys_to_tags = external_additional_service_keys_to_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'bodysuit', 'character:samus aran', 'series:metroid', 'series:evangelion' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }
@@ -994,13 +1005,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags, external_filterable_tags = external_filterable_tags, external_additional_service_keys_to_tags = external_additional_service_keys_to_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags, external_filterable_tags = external_filterable_tags, external_additional_service_keys_to_tags = external_additional_service_keys_to_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'bodysuit', 'character:samus aran', 'series:evangelion' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }
@@ -1026,14 +1037,14 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
         
-        self.assertIn( example_service_key_1, result )
-        self.assertNotIn( example_service_key_2, result )
+        self.assertIn( example_service_key_1, dict( result.IterateContentUpdates() ) )
+        self.assertNotIn( example_service_key_2, dict( result.IterateContentUpdates() ) )
         
-        self.assertTrue( len( result ) == 1 )
+        self.assertTrue( len( dict( result.IterateContentUpdates() ) ) == 1 )
         
-        content_updates_1 = result[ example_service_key_1 ]
+        content_updates_1 = dict( result.IterateContentUpdates() )[ example_service_key_1 ]
         
         filtered_tags = { 'bodysuit', 'character:samus aran', 'series:evangelion' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates_1 }
@@ -1053,13 +1064,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'character:samus aran' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }
@@ -1072,13 +1083,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'bodysuit', 'character:samus aran', 'series:metroid' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }
@@ -1100,13 +1111,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'character:samus aran' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }
@@ -1119,13 +1130,13 @@ class TestTagImportOptions( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = service_keys_to_service_tag_import_options )
         
-        result = tag_import_options.GetServiceKeysToContentUpdates( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
+        result = tag_import_options.GetContentUpdatePackage( CC.STATUS_SUCCESSFUL_AND_NEW, media_result, some_tags )
         
-        self.assertIn( example_service_key, result )
+        self.assertIn( example_service_key, dict( result.IterateContentUpdates() ) )
         
-        self.assertEqual( len( result ), 1 )
+        self.assertEqual( len( dict( result.IterateContentUpdates() ) ), 1 )
         
-        content_updates = result[ example_service_key ]
+        content_updates = dict( result.IterateContentUpdates() )[ example_service_key ]
         
         filtered_tags = { 'bodysuit', 'character:samus aran', 'series:metroid' }
         result_tags = { c_u.GetRow()[0] for c_u in content_updates }

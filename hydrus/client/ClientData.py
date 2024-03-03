@@ -10,7 +10,9 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientThreading
+from hydrus.client.metadata import ClientContentUpdates
 
 def AddPaddingToDimensions( dimensions, padding ):
     
@@ -39,7 +41,7 @@ def CatchExceptionClient( etype, value, tb ):
             first_line = pretty_value
             
         
-        job_key = ClientThreading.JobKey()
+        job_status = ClientThreading.JobStatus()
         
         if etype == HydrusExceptions.ShutdownException:
             
@@ -47,20 +49,20 @@ def CatchExceptionClient( etype, value, tb ):
             
         else:
             
-            try: job_key.SetStatusTitle( str( etype.__name__ ) )
-            except: job_key.SetStatusTitle( str( etype ) )
+            try: job_status.SetStatusTitle( str( etype.__name__ ) )
+            except: job_status.SetStatusTitle( str( etype ) )
             
-            job_key.SetStatusText( first_line )
-            job_key.SetTraceback( trace )
+            job_status.SetStatusText( first_line )
+            job_status.SetTraceback( trace )
             
         
-        text = job_key.ToString()
+        text = job_status.ToString()
         
         HydrusData.Print( 'Uncaught exception:' )
         
         HydrusData.DebugPrint( text )
         
-        HG.client_controller.pub( 'message', job_key )
+        CG.client_controller.pub( 'message', job_status )
         
     except:
         
@@ -78,90 +80,7 @@ def CatchExceptionClient( etype, value, tb ):
     
     time.sleep( 1 )
     
-def ConvertServiceKeysToContentUpdatesToPrettyString( service_keys_to_content_updates ):
-    
-    num_files = 0
-    actions = set()
-    locations = set()
-    
-    extra_words = ''
-    
-    for ( service_key, content_updates ) in list(service_keys_to_content_updates.items()):
-        
-        if len( content_updates ) > 0:
-            
-            name = HG.client_controller.services_manager.GetName( service_key )
-            
-            locations.add( name )
-            
-        
-        for content_update in content_updates:
-            
-            ( data_type, action, row ) = content_update.ToTuple()
-            
-            if data_type == HC.CONTENT_TYPE_MAPPINGS:
-                
-                extra_words = ' tags for'
-                
-            
-            actions.add( HC.content_update_string_lookup[ action ] )
-            
-            if action in ( HC.CONTENT_UPDATE_ARCHIVE, HC.CONTENT_UPDATE_INBOX ):
-                
-                locations = set()
-                
-            
-            num_files += len( content_update.GetHashes() )
-            
-        
-    
-    s = ''
-    
-    if len( locations ) > 0:
-        
-        s += ', '.join( locations ) + '->'
-        
-    
-    s += ', '.join( actions ) + extra_words + ' ' + HydrusData.ToHumanInt( num_files ) + ' files'
-    
-    return s
-    
-def ConvertServiceKeysToTagsToServiceKeysToContentUpdates( hashes, service_keys_to_tags ):
-    
-    service_keys_to_content_updates = {}
-    
-    for ( service_key, tags ) in service_keys_to_tags.items():
-        
-        if len( tags ) == 0:
-            
-            continue
-            
-        
-        try:
-            
-            service = HG.client_controller.services_manager.GetService( service_key )
-            
-        except HydrusExceptions.DataMissing:
-            
-            continue
-            
-        
-        if service.GetServiceType() == HC.LOCAL_TAG:
-            
-            action = HC.CONTENT_UPDATE_ADD
-            
-        else:
-            
-            action = HC.CONTENT_UPDATE_PEND
-            
-        
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, action, ( tag, hashes ) ) for tag in tags ]
-        
-        service_keys_to_content_updates[ service_key ] = content_updates
-        
-    
-    return service_keys_to_content_updates
-    
+
 def ConvertZoomToPercentage( zoom ):
     
     zoom_percent = zoom * 100
@@ -190,15 +109,15 @@ def MergeCounts( min_a: int, max_a: int, min_b: int, max_b: int ):
     
 def OrdIsSensibleASCII( o ):
     
-    return 32 <= o and o <= 127
+    return 32 <= o <= 127
     
 def OrdIsAlphaLower( o ):
     
-    return 97 <= o and o <= 122
+    return 97 <= o <= 122
     
 def OrdIsAlphaUpper( o ):
     
-    return 65 <= o and o <= 90
+    return 65 <= o <= 90
     
 def OrdIsAlpha( o ):
     
@@ -206,7 +125,7 @@ def OrdIsAlpha( o ):
     
 def OrdIsNumber( o ):
     
-    return 48 <= o and o <= 57
+    return 48 <= o <= 57
     
 def ShowExceptionClient( e, do_wait = True ):
     
@@ -254,7 +173,7 @@ def ShowExceptionTupleClient( etype, value, tb, do_wait = True ):
         first_line = pretty_value
         
     
-    job_key = ClientThreading.JobKey()
+    job_status = ClientThreading.JobStatus()
     
     if etype == HydrusExceptions.ShutdownException:
         
@@ -264,19 +183,19 @@ def ShowExceptionTupleClient( etype, value, tb, do_wait = True ):
         
         title = str( getattr( etype, '__name__', etype ) )
         
-        job_key.SetStatusTitle( title )
+        job_status.SetStatusTitle( title )
         
-        job_key.SetStatusText( first_line )
-        job_key.SetTraceback( trace )
+        job_status.SetStatusText( first_line )
+        job_status.SetTraceback( trace )
         
     
-    text = job_key.ToString()
+    text = job_status.ToString()
     
     HydrusData.Print( 'Exception:' )
     
     HydrusData.DebugPrint( text )
     
-    HG.client_controller.pub( 'message', job_key )
+    CG.client_controller.pub( 'message', job_status )
     
     if do_wait:
         
@@ -285,35 +204,24 @@ def ShowExceptionTupleClient( etype, value, tb, do_wait = True ):
     
 def ShowTextClient( text ):
     
-    job_key = ClientThreading.JobKey()
+    job_status = ClientThreading.JobStatus()
     
-    job_key.SetStatusText( str( text ) )
+    job_status.SetStatusText( str( text ) )
     
-    text = job_key.ToString()
+    text = job_status.ToString()
     
     HydrusData.Print( text )
     
-    HG.client_controller.pub( 'message', job_key )
+    CG.client_controller.pub( 'message', job_status )
     
-def TimestampToPrettyTimeDelta( timestamp, just_now_string = 'just now', just_now_threshold = 3, history_suffix = ' ago', show_seconds = True, no_prefix = False ):
-    
-    if HG.client_controller.new_options.GetBoolean( 'always_show_iso_time' ):
-        
-        return HydrusData.ConvertTimestampToPrettyTime( timestamp )
-        
-    else:
-        
-        return HydrusData.BaseTimestampToPrettyTimeDelta( timestamp, just_now_string = just_now_string, just_now_threshold = just_now_threshold, history_suffix = history_suffix, show_seconds = show_seconds, no_prefix = no_prefix )
-        
-    
-HydrusData.TimestampToPrettyTimeDelta = TimestampToPrettyTimeDelta
 
 def ToHumanBytes( size ):
     
-    sig_figs = HG.client_controller.new_options.GetInteger( 'human_bytes_sig_figs' )
+    sig_figs = CG.client_controller.new_options.GetInteger( 'human_bytes_sig_figs' )
     
     return HydrusData.BaseToHumanBytes( size, sig_figs = sig_figs )
     
+
 HydrusData.ToHumanBytes = ToHumanBytes
 
 class Booru( HydrusData.HydrusYAMLBase ):

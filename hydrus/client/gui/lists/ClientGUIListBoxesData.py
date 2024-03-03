@@ -3,9 +3,10 @@ import typing
 
 from hydrus.core import HydrusData
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
-from hydrus.client import ClientSearch
 from hydrus.client.metadata import ClientTags
+from hydrus.client.search import ClientSearch
 
 class ListBoxItem( object ):
     
@@ -67,6 +68,11 @@ class ListBoxItem( object ):
     def GetTags( self ) -> typing.Set[ str ]:
         
         raise NotImplementedError()
+        
+    
+    def UpdateFromOtherTerm( self, term: "ListBoxItem" ):
+        
+        pass
         
     
 class ListBoxItemTagSlice( ListBoxItem ):
@@ -450,6 +456,15 @@ class ListBoxItemTextTagWithCounts( ListBoxItemTextTag ):
         return rows_of_texts_with_namespaces
         
     
+    def UpdateFromOtherTerm( self, term: "ListBoxItemTextTagWithCounts" ):
+        
+        self._current_count = term._current_count
+        self._deleted_count = term._deleted_count
+        self._pending_count = term._pending_count
+        self._petitioned_count = term._petitioned_count
+        self._include_actual_counts = term._include_actual_counts
+        
+    
 class ListBoxItemPredicate( ListBoxItem ):
     
     def __init__( self, predicate: ClientSearch.Predicate ):
@@ -501,7 +516,7 @@ class ListBoxItemPredicate( ListBoxItem ):
             
         else:
             
-            text = self._predicate.ToString( with_count = with_counts )
+            text = self._predicate.ToString( with_count = with_counts, for_parsable_export = True )
             
         
         return text

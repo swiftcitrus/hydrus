@@ -3,8 +3,8 @@ import typing
 
 from hydrus.core import HydrusData
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
-from hydrus.client import ClientConstants as CC
 from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientTags
 
@@ -101,7 +101,7 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
         return death_file_velocity_period
         
     
-    def GetNextCheckTime( self, file_seed_cache, last_check_time, last_next_check_time ):
+    def GetNextCheckTime( self, file_seed_cache, last_check_time: int ) -> int:
         
         if len( file_seed_cache ) == 0:
             
@@ -111,28 +111,29 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
                 
             else:
                 
-                return HydrusData.GetNow() + self._never_slower_than
+                return HydrusTime.GetNow() + self._never_slower_than
                 
             
-        elif self._never_faster_than == self._never_slower_than:
+        
+        
+        if self._never_faster_than == self._never_slower_than:
             
-            if last_next_check_time is None or last_next_check_time == 0:
-                
-                next_check_time = last_check_time - 5
-                
-            else:
-                
-                next_check_time = last_next_check_time
-                
+            # fixed check period
+            fixed_check_period = self._never_slower_than
             
-            while HydrusData.TimeHasPassed( next_check_time ):
-                
-                next_check_time += self._never_slower_than
-                
+            # I had a bunch of complicated logic to try and make sure a saturday check stayed on saturday, even if the check was delayed to sunday, and it just wasn't worth the trouble
+            # KISS
             
-            return next_check_time
+            next_check_time = last_check_time + fixed_check_period
+            
+            while HydrusTime.TimeHasPassed( next_check_time + fixed_check_period ):
+                
+                next_check_time += fixed_check_period
+                
             
         else:
+            
+            # dynamic check period
             
             ( current_files_found, current_time_delta ) = self._GetCurrentFilesVelocity( file_seed_cache, last_check_time )
             
@@ -160,8 +161,10 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
                 check_period = min( max( never_faster_than, ideal_check_period ), self._never_slower_than )
                 
             
-            return last_check_time + check_period
+            next_check_time = last_check_time + check_period
             
+        
+        return next_check_time
         
     
     def GetPrettyCurrentVelocity( self, file_seed_cache, last_check_time, no_prefix = False ):
@@ -190,7 +193,7 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
             
             ( current_files_found, current_time_delta ) = self._GetCurrentFilesVelocity( file_seed_cache, last_check_time )
             
-            pretty_current_velocity += HydrusData.ToHumanInt( current_files_found ) + ' files in previous ' + HydrusData.TimeDeltaToPrettyTimeDelta( current_time_delta )
+            pretty_current_velocity += HydrusData.ToHumanInt( current_files_found ) + ' files in previous ' + HydrusTime.TimeDeltaToPrettyTimeDelta( current_time_delta )
             
         
         return pretty_current_velocity
@@ -205,11 +208,11 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
         
         if self._never_faster_than == self._never_slower_than:
             
-            timing_statement = 'Checking every ' + HydrusData.TimeDeltaToPrettyTimeDelta( self._never_faster_than ) + '.'
+            timing_statement = 'Checking every ' + HydrusTime.TimeDeltaToPrettyTimeDelta( self._never_faster_than ) + '.'
             
         else:
             
-            timing_statement = 'Trying to get ' + HydrusData.ToHumanInt( self._intended_files_per_check ) + ' files per check, never faster than ' + HydrusData.TimeDeltaToPrettyTimeDelta( self._never_faster_than ) + ' and never slower than ' + HydrusData.TimeDeltaToPrettyTimeDelta( self._never_slower_than ) + '.'
+            timing_statement = 'Trying to get ' + HydrusData.ToHumanInt( self._intended_files_per_check ) + ' files per check, never faster than ' + HydrusTime.TimeDeltaToPrettyTimeDelta( self._never_faster_than ) + ' and never slower than ' + HydrusTime.TimeDeltaToPrettyTimeDelta( self._never_slower_than ) + '.'
             
         
         ( death_files_found, death_time_delta ) = self._death_file_velocity
@@ -220,7 +223,7 @@ class CheckerOptions( HydrusSerialisable.SerialisableBase ):
             
         else:
             
-            death_statement = 'Stopping if file velocity falls below ' + HydrusData.ToHumanInt( death_files_found ) + ' files per ' + HydrusData.TimeDeltaToPrettyTimeDelta( death_time_delta ) + '.'
+            death_statement = 'Stopping if file velocity falls below ' + HydrusData.ToHumanInt( death_files_found ) + ' files per ' + HydrusTime.TimeDeltaToPrettyTimeDelta( death_time_delta ) + '.'
             
         
         return timing_statement + os.linesep * 2 + death_statement

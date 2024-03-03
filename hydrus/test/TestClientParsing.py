@@ -44,6 +44,26 @@ class DummyFormula( ClientParsing.ParseFormula ):
         
     
 
+class TestParseFormulaCompound( unittest.TestCase ):
+    
+    def test_complex_unicode( self ):
+        
+        a = 'test \u2014\u201D test'
+        b = 'test \u2019\u201C test'
+        
+        formulae = [
+            DummyFormula( [ a ] ),
+            DummyFormula( [ b ] )
+        ]
+        
+        pfc = ClientParsing.ParseFormulaCompound( formulae = formulae, sub_phrase = '\\1 \\2' )
+        
+        result = pfc.Parse( {}, 'gumpf', False )
+        
+        self.assertEqual( result, [ '{} {}'.format( a, b ) ])
+        
+    
+
 class TestContentParser( unittest.TestCase ):
     
     def test_mappings( self ):
@@ -189,9 +209,16 @@ class TestStringConverter( unittest.TestCase ):
         
         #
         
-        string_converter = ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_DATE_DECODE, ( '%Y-%m-%d %H:%M:%S', HC.TIMEZONE_GMT, 0 ) ) ] )
+        string_converter = ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_DATE_DECODE, ( '%Y-%m-%d %H:%M:%S', HC.TIMEZONE_UTC, 0 ) ) ] )
         
         self.assertEqual( string_converter.Convert( '1970-01-02 00:00:00' ), '86400' )
+        
+        #
+        
+        string_converter = ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_DATEPARSER_DECODE, None ) ] )
+        
+        self.assertEqual( string_converter.Convert( '1970-01-02 00:00:00 UTC' ), '86400' )
+        self.assertEqual( string_converter.Convert( 'January 12, 2012 10:00 PM EST' ), '1326423600' )
         
         #
         
@@ -287,6 +314,41 @@ class TestStringConverter( unittest.TestCase ):
         string_converter = ClientStrings.StringConverter( conversions = conversions )
         
         self.assertEqual( string_converter.Convert( '0123456789' ), 'z xddddddcba' )
+        
+    
+class TestStringJoiner( unittest.TestCase ):
+    
+    def test_basics( self ):
+        
+        texts = [
+            'ab',
+            'cd',
+            'ef',
+            'gh',
+            'ij'
+        ]
+        
+        #
+        
+        joiner = ClientStrings.StringJoiner( joiner = '', join_tuple_size = None )
+        self.assertEqual( joiner.Join( texts ), [ 'abcdefghij' ] )
+        self.assertEqual( joiner.ToString(), 'joining all strings using ""' )
+        
+        joiner = ClientStrings.StringJoiner( joiner = ',', join_tuple_size = None )
+        self.assertEqual( joiner.Join( texts ), [ 'ab,cd,ef,gh,ij' ] )
+        self.assertEqual( joiner.ToString(), 'joining all strings using ","' )
+        
+        joiner = ClientStrings.StringJoiner( joiner = '--', join_tuple_size = 2 )
+        self.assertEqual( joiner.Join( texts ), [ 'ab--cd', 'ef--gh' ] )
+        self.assertEqual( joiner.ToString(), 'joining every 2 strings using "--"' )
+        
+        joiner = ClientStrings.StringJoiner( joiner = r'\n', join_tuple_size = None )
+        self.assertEqual( joiner.Join( texts ), [ 'ab\ncd\nef\ngh\nij' ] )
+        self.assertEqual( joiner.ToString(), 'joining all strings using "\\n"' )
+        
+        joiner = ClientStrings.StringJoiner( joiner = '\\\\', join_tuple_size = None )
+        self.assertEqual( joiner.Join( texts ), [ 'ab\\cd\\ef\\gh\\ij' ] )
+        self.assertEqual( joiner.ToString(), 'joining all strings using "\\\\"' )
         
     
 class TestStringMatch( unittest.TestCase ):
@@ -582,6 +644,14 @@ class TestStringSplitter( unittest.TestCase ):
         self.assertEqual( splitter.Split( '123' ), [ '123' ] )
         self.assertEqual( splitter.Split( '1,2,3' ), [ '1,2,3' ] )
         self.assertEqual( splitter.Split( '1, 2, 3, 4' ), [ '1', '2', '3, 4' ] )
+        
+        splitter = ClientStrings.StringSplitter( separator = r'\n' )
+        
+        self.assertEqual( splitter.Split( '1\n2' ), [ '1', '2' ] )
+        
+        splitter = ClientStrings.StringSplitter( separator = '\\\\' )
+        
+        self.assertEqual( splitter.Split( '1\\2' ), [ '1', '2' ] )
         
     
 class TestStringProcessor( unittest.TestCase ):

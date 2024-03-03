@@ -1,5 +1,6 @@
 from hydrus.core import HydrusSerialisable
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui.lists import ClientGUIListStatus
 
 class ColumnListManager( HydrusSerialisable.SerialisableBase ):
@@ -43,12 +44,30 @@ class ColumnListManager( HydrusSerialisable.SerialisableBase ):
             self._column_list_types_to_statuses[ column_list_type ] = ClientGUIListStatus.ColumnListStatus.STATICGetDefault( column_list_type )
             
         
-        return self._column_list_types_to_statuses[ column_list_type ]
+        column_list_status = self._column_list_types_to_statuses[ column_list_type ]
+        
+        column_list_status.FixMissingDefinitions()
+        
+        return column_list_status
         
     
-    def ResetToDefaults( self ):
+    def ResetToDefaults( self, column_list_type = None ):
         
-        self._column_list_types_to_statuses = HydrusSerialisable.SerialisableDictionary()
+        if column_list_type is None:
+            
+            self._column_list_types_to_statuses = HydrusSerialisable.SerialisableDictionary()
+            
+            CG.client_controller.pub( 'reset_all_listctrl_status' )
+            
+        else:
+            
+            if column_list_type in self._column_list_types_to_statuses:
+                
+                del self._column_list_types_to_statuses[ column_list_type ]
+                
+                CG.client_controller.pub( 'reset_listctrl_status', column_list_type )
+                
+            
         
         self._dirty = True
         
@@ -65,4 +84,5 @@ class ColumnListManager( HydrusSerialisable.SerialisableBase ):
         self._dirty = False
         
     
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_COLUMN_LIST_MANAGER ] = ColumnListManager

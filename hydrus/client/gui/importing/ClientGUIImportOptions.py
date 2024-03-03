@@ -2,7 +2,6 @@ import os
 
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
-from qtpy import QtGui as QG
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
@@ -11,9 +10,11 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUIOptionsPanels
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -48,7 +49,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if file_import_options.IsDefault():
             
-            file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_LOUD ).Duplicate()
+            file_import_options = CG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_LOUD ).Duplicate()
             
             file_import_options.SetIsDefault( True )
             
@@ -136,7 +137,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._allow_decompression_bombs.setToolTip( tt )
         
-        self._mimes = ClientGUIOptionsPanels.OptionsPanelMimes( pre_import_panel, HC.ALLOWED_MIMES )
+        self._mimes = ClientGUIOptionsPanels.OptionsPanelMimesTree( pre_import_panel, HC.ALLOWED_MIMES )
         
         self._min_size = ClientGUIControls.NoneableBytesControl( pre_import_panel )
         self._min_size.SetValue( 5 * 1024 )
@@ -174,7 +175,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         destination_location_context = file_import_options.GetDestinationLocationContext()
         
-        destination_location_context.FixMissingServices( HG.client_controller.services_manager.FilterValidServiceKeys )
+        destination_location_context.FixMissingServices( CG.client_controller.services_manager.FilterValidServiceKeys )
         
         self._destination_location_context = ClientGUILocation.LocationSearchContextButton( destination_panel, destination_location_context )
         
@@ -227,7 +228,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         rows.append( ( 'exclude previously deleted files: ', self._exclude_deleted ) )
         
-        if show_downloader_options and HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if show_downloader_options and CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             rows.append( ( 'check hashes to determine "already in db/previously deleted"?: ', self._preimport_hash_check_type ) )
             rows.append( ( 'check URLs to determine "already in db/previously deleted"?: ', self._preimport_url_check_type ) )
@@ -263,7 +264,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         rows.append( ( 'archive all imports: ', self._auto_archive ) )
         
-        if show_downloader_options and HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if show_downloader_options and CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             rows.append( ( 'associate primary urls: ', self._associate_primary_urls ) )
             rows.append( ( 'associate (and trust) additional source urls: ', self._associate_source_urls ) )
@@ -321,8 +322,8 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _LoadDefaultOptions( self ):
         
-        loud_file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_LOUD )
-        quiet_file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_QUIET )
+        loud_file_import_options = CG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_LOUD )
+        quiet_file_import_options = CG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_QUIET )
         
         choice_tuples = []
         
@@ -383,7 +384,7 @@ class EditFileImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         destination_location_context = file_import_options.GetDestinationLocationContext()
         
-        destination_location_context.FixMissingServices( HG.client_controller.services_manager.FilterValidServiceKeys )
+        destination_location_context.FixMissingServices( CG.client_controller.services_manager.FilterValidServiceKeys )
         
         self._destination_location_context.SetValue( destination_location_context )
         
@@ -422,7 +423,7 @@ For regular import pages, 'presentation' means if the imported file's thumbnail 
 
 If you have a very large (10k+ files) file import page, consider hiding some or all of its thumbs to reduce ui lag and increase overall import speed.'''
         
-        QW.QMessageBox.information( self, 'Information', help_message )
+        ClientGUIDialogsMessage.ShowInformation( self, help_message )
         
     
     def _UpdateDispositiveFromHash( self ):
@@ -741,7 +742,7 @@ class EditNoteImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _LoadDefaultOptions( self ):
         
-        domain_manager = HG.client_controller.network_engine.domain_manager
+        domain_manager = CG.client_controller.network_engine.domain_manager
         
         ( file_post_default_note_import_options, watchable_default_note_import_options, url_class_keys_to_default_note_import_options ) = domain_manager.GetDefaultNoteImportOptions()
         
@@ -819,7 +820,7 @@ If a new note coming in has the same name but different text, then two things ca
 
 Beyond that, you can filter and rename notes. Check the tooltips for more info.'''
         
-        QW.QMessageBox.information( self, 'Information', help_message )
+        ClientGUIDialogsMessage.ShowInformation( self, help_message )
         
     
     def _UpdateIsDefault( self ):
@@ -1030,7 +1031,7 @@ class EditServiceTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         self._service_key = service_key
         self._show_downloader_options = show_downloader_options
         
-        name = HG.client_controller.services_manager.GetName( self._service_key )
+        name = CG.client_controller.services_manager.GetName( self._service_key )
         
         main_box = ClientGUICommon.StaticBox( self, name )
         
@@ -1050,7 +1051,7 @@ class EditServiceTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._get_tags_checkbox = QW.QCheckBox( 'get tags', downloader_options_panel )
         
-        if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             message = None
             
@@ -1127,7 +1128,7 @@ class EditServiceTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit already-exist filter' ) as dlg:
             
-            namespaces = HG.client_controller.network_engine.domain_manager.GetParserNamespaces()
+            namespaces = CG.client_controller.network_engine.domain_manager.GetParserNamespaces()
             
             message = 'If you do not want the \'only add tags that already exist\' option to apply to all tags coming in, set a filter here for the tags you _want_ to be exposed to this test.'
             message += os.linesep * 2
@@ -1335,7 +1336,7 @@ class EditTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
-        if not HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if not CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             st = ClientGUICommon.BetterStaticText( default_panel, label = 'Most of the time, you want to rely on the default tag import options!' )
             
@@ -1406,7 +1407,7 @@ class EditTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         message += os.linesep * 2
         message += 'This is usually easier and faster to do just by adding tags to the downloader query (e.g. "artistname desired_tag"), so reserve this for downloaders that do not work on tags or where you want to whitelist multiple tags.'
         
-        with ClientGUIDialogs.DialogInputTags( self, CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_ACTUAL, list( self._tag_whitelist ), message = message ) as dlg:
+        with ClientGUIDialogs.DialogInputTags( self, CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, list( self._tag_whitelist ), message = message ) as dlg:
             
             if dlg.exec() == QW.QDialog.Accepted:
                 
@@ -1419,7 +1420,7 @@ class EditTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _InitialiseServices( self, tag_import_options ):
         
-        services = HG.client_controller.services_manager.GetServices( HC.REAL_TAG_SERVICES )
+        services = CG.client_controller.services_manager.GetServices( HC.REAL_TAG_SERVICES )
         
         for service in services:
             
@@ -1439,7 +1440,7 @@ class EditTagImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _LoadDefaultOptions( self ):
         
-        domain_manager = HG.client_controller.network_engine.domain_manager
+        domain_manager = CG.client_controller.network_engine.domain_manager
         
         ( file_post_default_tag_import_options, watchable_default_tag_import_options, url_class_keys_to_default_tag_import_options ) = domain_manager.GetDefaultTagImportOptions()
         
@@ -1517,7 +1518,7 @@ You can also set some fixed 'explicit' tags (like, say, 'read later' or 'from my
 
 Please note that once you know what tags you like, you can (and should) set up the 'default' values for these tag import options under _network->downloaders->manage default import options_, both globally and on a per-parser basis. If you always want all the tags going to 'my tags', this is easy to set up there, and you won't have to put it in every time.'''
         
-        QW.QMessageBox.information( self, 'Information', message )
+        ClientGUIDialogsMessage.ShowInformation( self, message )
         
     
     def _UpdateIsDefault( self ):
@@ -1798,21 +1799,21 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
         
         json_string = self._file_import_options.DumpToString()
         
-        HG.client_controller.pub( 'clipboard', 'text', json_string )
+        CG.client_controller.pub( 'clipboard', 'text', json_string )
         
     
     def _CopyNoteImportOptions( self ):
         
         json_string = self._note_import_options.DumpToString()
         
-        HG.client_controller.pub( 'clipboard', 'text', json_string )
+        CG.client_controller.pub( 'clipboard', 'text', json_string )
         
     
     def _CopyTagImportOptions( self ):
         
         json_string = self._tag_import_options.DumpToString()
         
-        HG.client_controller.pub( 'clipboard', 'text', json_string )
+        CG.client_controller.pub( 'clipboard', 'text', json_string )
         
     
     def _EditOptions( self ):
@@ -1862,11 +1863,13 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -1882,16 +1885,14 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard: {}'.format( e ) )
-            
-            HydrusData.ShowException( e )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised File Import Options', e )
             
             return
             
         
         if file_import_options.IsDefault() and not self._allow_default_selection:
             
-            QW.QMessageBox.warning( self, 'Default Options!', 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
             
             return
             
@@ -1903,11 +1904,13 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -1923,16 +1926,14 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard: {}'.format( e ) )
-            
-            HydrusData.ShowException( e )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Note Import Options', e )
             
             return
             
         
         if note_import_options.IsDefault() and not self._allow_default_selection:
             
-            QW.QMessageBox.warning( self, 'Default Options!', 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
             
             return
             
@@ -1944,11 +1945,13 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -1964,16 +1967,14 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard: {}'.format( e ) )
-            
-            HydrusData.ShowException( e )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON-serialised Tag Import Options', e )
             
             return
             
         
         if tag_import_options.IsDefault() and not self._allow_default_selection:
             
-            QW.QMessageBox.warning( self, 'Default Options!', 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Sorry, the options you pasted were set as default, but this button needs something specific!' )
             
             return
             
@@ -1991,7 +1992,7 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
             if make_submenus:
                 
-                submenu = QW.QMenu( menu )
+                submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 label = 'file import options'
                 
@@ -2027,7 +2028,7 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
             if make_submenus:
                 
-                submenu = QW.QMenu( menu )
+                submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 label = 'note import options'
                 
@@ -2063,7 +2064,7 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
             if make_submenus:
                 
-                submenu = QW.QMenu( menu )
+                submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 label = 'tag import options'
                 
@@ -2140,11 +2141,23 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
     
     def _SetLabelAndToolTip( self ):
         
+        all_are_default = True
+        all_are_set = False
+        
         summaries = []
         
         single_label = 'initialising'
         
         if self._file_import_options is not None:
+            
+            if self._file_import_options.IsDefault():
+                
+                all_are_set = False
+                
+            else:
+                
+                all_are_default = False
+                
             
             single_label = 'file import options'
             
@@ -2153,12 +2166,30 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
         
         if self._tag_import_options is not None:
             
+            if self._tag_import_options.IsDefault():
+                
+                all_are_set = False
+                
+            else:
+                
+                all_are_default = False
+                
+            
             single_label = 'tag import options'
             
             summaries.append( self._tag_import_options.GetSummary( self._show_downloader_options ) )
             
         
         if self._note_import_options is not None:
+            
+            if self._note_import_options.IsDefault():
+                
+                all_are_set = False
+                
+            else:
+                
+                all_are_default = False
+                
             
             single_label = 'note import options'
             
@@ -2169,9 +2200,37 @@ class ImportOptionsButton( ClientGUICommon.ButtonWithMenuArrow ):
             
             label = 'import options'
             
+            if self._allow_default_selection:
+                
+                if all_are_default:
+                    
+                    label = f'{label} (all default)'
+                    
+                elif all_are_set:
+                    
+                    label = f'{label} (all set)'
+                    
+                else:
+                    
+                    label = f'{label} (some set)'
+                    
+                
+            
         else:
             
             label = single_label
+            
+            if self._allow_default_selection:
+                
+                if all_are_default:
+                    
+                    label = f'{label} (default)'
+                    
+                else:
+                    
+                    label = f'{label} (set)'
+                    
+                
             
         
         my_action = self.defaultAction()

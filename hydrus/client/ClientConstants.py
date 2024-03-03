@@ -187,6 +187,7 @@ MEDIA_VIEWER_ACTION_SHOW_OPEN_EXTERNALLY_BUTTON = 4
 MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY = 5
 MEDIA_VIEWER_ACTION_DO_NOT_SHOW = 6
 MEDIA_VIEWER_ACTION_SHOW_WITH_MPV = 7
+MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER = 8
 
 media_viewer_action_string_lookup = {
     MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE : 'show with native hydrus viewer',
@@ -196,13 +197,14 @@ media_viewer_action_string_lookup = {
     MEDIA_VIEWER_ACTION_SHOW_OPEN_EXTERNALLY_BUTTON : 'show an \'open externally\' button',
     MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY : 'do not show in the media viewer. on thumbnail activation, open externally',
     MEDIA_VIEWER_ACTION_DO_NOT_SHOW : 'do not show at all',
-    MEDIA_VIEWER_ACTION_SHOW_WITH_MPV : 'show using mpv'
+    MEDIA_VIEWER_ACTION_SHOW_WITH_MPV : 'show using mpv',
+    MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER : 'show using Qt Media Player (EXPERIMENTAL, buggy, crashy!)'
 }
 
 unsupported_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_OPEN_EXTERNALLY_BUTTON, MEDIA_VIEWER_ACTION_DO_NOT_SHOW_ON_ACTIVATION_OPEN_EXTERNALLY, MEDIA_VIEWER_ACTION_DO_NOT_SHOW ]
 static_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE ] + unsupported_media_actions
-animated_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_WITH_MPV ] + static_media_actions
-audio_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_WITH_MPV ] + unsupported_media_actions
+animated_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ] + static_media_actions
+audio_media_actions = [ MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER ] + unsupported_media_actions
 
 # actions, can_start_paused, can_start_with_embed
 static_full_support = ( static_media_actions, False, True )
@@ -215,12 +217,14 @@ media_viewer_capabilities = {
     HC.GENERAL_IMAGE : static_full_support,
     HC.GENERAL_VIDEO : animated_full_support,
     HC.GENERAL_AUDIO : audio_full_support,
-    HC.GENERAL_APPLICATION : no_support
+    HC.GENERAL_APPLICATION : no_support,
+    HC.GENERAL_APPLICATION_ARCHIVE : no_support,
+    HC.GENERAL_IMAGE_PROJECT : no_support
 }
 
 for mime in HC.SEARCHABLE_MIMES:
     
-    if mime in HC.ANIMATIONS:
+    if mime in HC.VIEWABLE_ANIMATIONS:
         
         media_viewer_capabilities[ mime ] = animated_full_support
         
@@ -235,6 +239,10 @@ for mime in HC.SEARCHABLE_MIMES:
     elif mime in HC.AUDIO:
         
         media_viewer_capabilities[ mime ] = audio_full_support
+        
+    elif mime in HC.VIEWABLE_IMAGE_PROJECT_FILES:
+        
+        media_viewer_capabilities[ mime ] = static_full_support
         
     else:
         
@@ -335,6 +343,7 @@ SORT_FILES_BY_NUM_COLLECTION_FILES = 17
 SORT_FILES_BY_LAST_VIEWED_TIME = 18
 SORT_FILES_BY_ARCHIVED_TIMESTAMP = 19
 SORT_FILES_BY_HASH = 20
+SORT_FILES_BY_PIXEL_HASH = 21
 
 SYSTEM_SORT_TYPES = {
     SORT_FILES_BY_NUM_COLLECTION_FILES,
@@ -357,7 +366,8 @@ SYSTEM_SORT_TYPES = {
     SORT_FILES_BY_FILE_MODIFIED_TIMESTAMP,
     SORT_FILES_BY_LAST_VIEWED_TIME,
     SORT_FILES_BY_ARCHIVED_TIMESTAMP,
-    SORT_FILES_BY_HASH
+    SORT_FILES_BY_HASH,
+    SORT_FILES_BY_PIXEL_HASH
 }
 
 system_sort_type_submetatype_string_lookup = {
@@ -372,6 +382,7 @@ system_sort_type_submetatype_string_lookup = {
     SORT_FILES_BY_APPROX_BITRATE : 'file',
     SORT_FILES_BY_FILESIZE : 'file',
     SORT_FILES_BY_HASH : 'file',
+    SORT_FILES_BY_PIXEL_HASH : 'file',
     SORT_FILES_BY_MIME : 'file',
     SORT_FILES_BY_HAS_AUDIO : 'file',
     SORT_FILES_BY_RANDOM : None,
@@ -403,6 +414,7 @@ sort_type_basic_string_lookup = {
     SORT_FILES_BY_LAST_VIEWED_TIME : 'last viewed time',
     SORT_FILES_BY_RANDOM : 'random',
     SORT_FILES_BY_HASH : 'hash',
+    SORT_FILES_BY_PIXEL_HASH : 'pixel hash',
     SORT_FILES_BY_NUM_TAGS : 'number of tags',
     SORT_FILES_BY_MEDIA_VIEWS : 'media views',
     SORT_FILES_BY_MEDIA_VIEWTIME : 'media viewtime'
@@ -440,7 +452,7 @@ STATUS_SKIPPED = 8
 STATUS_SUCCESSFUL_AND_CHILD_FILES = 9
 
 status_string_lookup = {
-    STATUS_UNKNOWN : '',
+    STATUS_UNKNOWN : 'unknown',
     STATUS_SUCCESSFUL_AND_NEW : 'successful',
     STATUS_SUCCESSFUL_BUT_REDUNDANT : 'already in db',
     STATUS_DELETED : 'deleted',
@@ -449,15 +461,12 @@ status_string_lookup = {
     STATUS_PAUSED : 'paused',
     STATUS_VETOED : 'ignored',
     STATUS_SKIPPED : 'skipped',
-    STATUS_SUCCESSFUL_AND_CHILD_FILES : 'completed'
+    STATUS_SUCCESSFUL_AND_CHILD_FILES : 'created children'
 }
 
 SUCCESSFUL_IMPORT_STATES = { STATUS_SUCCESSFUL_AND_NEW, STATUS_SUCCESSFUL_BUT_REDUNDANT, STATUS_SUCCESSFUL_AND_CHILD_FILES }
 UNSUCCESSFUL_IMPORT_STATES = { STATUS_DELETED, STATUS_ERROR, STATUS_VETOED }
 FAILED_IMPORT_STATES = { STATUS_ERROR, STATUS_VETOED }
-
-UNICODE_ALMOST_EQUAL_TO = '\u2248'
-UNICODE_NOT_EQUAL_TO = '\u2260'
 
 ZOOM_NEAREST = 0 # pixelly garbage
 ZOOM_LINEAR = 1 # simple and quick
@@ -577,11 +586,6 @@ class GlobalPixmaps( object ):
         self.paste = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'paste.png' ) )
         
         self.eight_chan = QG.QPixmap( os.path.join( HC.STATIC_DIR, '8chan.png' ) )
-        self.twitter = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'twitter.png' ) )
-        self.tumblr = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'tumblr.png' ) )
-        self.discord = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'discord.png' ) )
-        self.patreon = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'patreon.png' ) )
-        self.github = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'github.png' ) )
         
         self.first = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'first.png' ) )
         self.previous = QG.QPixmap( os.path.join( HC.STATIC_DIR, 'previous.png' ) )
@@ -591,6 +595,38 @@ class GlobalPixmaps( object ):
         
 
 global_pixmaps = GlobalPixmaps.instance
+
+class GlobalIcons( object ):
+    
+    my_instance = None
+    
+    def __init__( self ):
+        
+        self._Initialise()
+        
+    
+    @staticmethod
+    def instance() -> 'GlobalIcons':
+        
+        if GlobalIcons.my_instance is None:
+            
+            GlobalIcons.my_instance = GlobalIcons()
+            
+        
+        return GlobalIcons.my_instance
+        
+    
+    def _Initialise( self ):
+                
+        self.hydrus = QG.QIcon( os.path.join( HC.STATIC_DIR, 'hydrus_black_square.svg' ) )
+        self.github = QG.QIcon( os.path.join( HC.STATIC_DIR, 'github.svg' ) )
+        self.twitter = QG.QIcon( os.path.join( HC.STATIC_DIR, 'twitter.svg' ) )
+        self.tumblr = QG.QIcon( os.path.join( HC.STATIC_DIR, 'tumblr.svg' ) )
+        self.discord = QG.QIcon( os.path.join( HC.STATIC_DIR, 'discord.svg' ) )
+        self.patreon = QG.QIcon( os.path.join( HC.STATIC_DIR, 'patreon.svg' ) )
+
+
+global_icons = GlobalIcons.instance
 
 DEFAULT_LOCAL_TAG_SERVICE_KEY = b'local tags'
 

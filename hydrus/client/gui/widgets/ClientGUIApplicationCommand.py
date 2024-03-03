@@ -8,11 +8,14 @@ from hydrus.core import HydrusGlobals as HG
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.media import ClientMediaFileFilter
 
 class LocalFilesSubPanel( QW.QWidget ):
     
@@ -31,7 +34,7 @@ class LocalFilesSubPanel( QW.QWidget ):
         
         #
         
-        services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) )
+        services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) )
         
         for service in services:
             
@@ -96,7 +99,7 @@ class RatingLikeSubPanel( QW.QWidget ):
         
         #
         
-        services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
+        services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
         
         if len( services ) == 0:
             
@@ -207,7 +210,7 @@ class RatingNumericalSubPanel( QW.QWidget ):
         
         #
         
-        services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
+        services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
         
         if len( services ) == 0:
             
@@ -263,7 +266,7 @@ class RatingNumericalSubPanel( QW.QWidget ):
         
         if service_key is not None:
             
-            service = HG.client_controller.services_manager.GetService( service_key )
+            service = CG.client_controller.services_manager.GetService( service_key )
             
             self._current_ratings_numerical_service = service
             
@@ -329,6 +332,7 @@ class RatingNumericalSubPanel( QW.QWidget ):
             
         
     
+
 class RatingIncDecSubPanel( QW.QWidget ):
     
     def __init__( self, parent: QW.QWidget ):
@@ -344,7 +348,7 @@ class RatingIncDecSubPanel( QW.QWidget ):
         
         #
         
-        services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, HC.LOCAL_RATING_INCDEC ) )
+        services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, HC.LOCAL_RATING_INCDEC ) )
         
         if len( services ) == 0:
             
@@ -394,6 +398,7 @@ class RatingIncDecSubPanel( QW.QWidget ):
         self._ratings_incdec.SetValue( action )
         
     
+
 class SimpleSubPanel( QW.QWidget ):
     
     def __init__( self, parent: QW.QWidget, shortcuts_name: str ):
@@ -428,6 +433,39 @@ class SimpleSubPanel( QW.QWidget ):
         
         #
         
+        self._thumbnail_rearrange_panel = QW.QWidget( self )
+        
+        self._thumbnail_rearrange_type = ClientGUICommon.BetterChoice( self )
+        
+        for rearrange_type in [
+            CAC.MOVE_HOME,
+            CAC.MOVE_END,
+            CAC.MOVE_LEFT,
+            CAC.MOVE_RIGHT,
+            CAC.MOVE_TO_FOCUS
+        ]:
+            
+            self._thumbnail_rearrange_type.addItem( CAC.move_enum_to_str_lookup[ rearrange_type ], rearrange_type )
+            
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._thumbnail_rearrange_type, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self._thumbnail_rearrange_panel.setLayout( vbox )
+        
+        #
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, self._duplicate_type, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        self._duplicates_type_panel.setLayout( vbox )
+        
+        #
+        
         self._seek_panel = QW.QWidget( self )
         
         choices = [
@@ -449,14 +487,6 @@ class SimpleSubPanel( QW.QWidget ):
         
         #
         
-        vbox = QP.VBoxLayout()
-        
-        QP.AddToLayout( vbox, self._duplicate_type, CC.FLAGS_EXPAND_BOTH_WAYS )
-        
-        self._duplicates_type_panel.setLayout( vbox )
-        
-        #
-        
         hbox = QP.HBoxLayout()
         
         QP.AddToLayout( hbox, self._seek_direction, CC.FLAGS_EXPAND_BOTH_WAYS )
@@ -469,11 +499,66 @@ class SimpleSubPanel( QW.QWidget ):
         
         #
         
+        self._thumbnail_move_panel = QW.QWidget( self )
+        
+        choices = [ ( CAC.selection_status_enum_to_str_lookup[ s ], s ) for s in [ CAC.SELECTION_STATUS_NORMAL, CAC.SELECTION_STATUS_SHIFT ] ]
+        
+        self._selection_status = ClientGUICommon.BetterRadioBox( self._thumbnail_move_panel, choices = choices )
+        
+        self._selection_status.SetValue( CAC.SELECTION_STATUS_NORMAL )
+        
+        self._move_direction = ClientGUICommon.BetterChoice( self._thumbnail_move_panel )
+        
+        for m in [ CAC.MOVE_LEFT, CAC.MOVE_RIGHT, CAC.MOVE_UP, CAC.MOVE_DOWN, CAC.MOVE_HOME, CAC.MOVE_END, CAC.MOVE_PAGE_UP, CAC.MOVE_PAGE_DOWN ]:
+            
+            self._move_direction.addItem( CAC.move_enum_to_str_lookup[ m ], m )
+            
+        
+        #
+        
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._selection_status, CC.FLAGS_CENTER )
+        QP.AddToLayout( hbox, self._move_direction, CC.FLAGS_CENTER )
+        
+        self._thumbnail_move_panel.setLayout( hbox )
+        
+        #
+        
+        self._file_filter_panel = QW.QWidget( self )
+        
+        self._file_filter = ClientGUICommon.BetterChoice( self._file_filter_panel )
+        
+        for file_filter in [
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_ALL ),
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_NONE ),
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_INBOX ),
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_ARCHIVE ),
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_LOCAL ),
+            ClientMediaFileFilter.FileFilter( ClientMediaFileFilter.FILE_FILTER_FILE_SERVICE, filter_data = CC.TRASH_SERVICE_KEY )
+        ]:
+            
+            self._file_filter.addItem( file_filter.ToString(), file_filter )
+            
+        
+        #
+        
+        hbox = QP.HBoxLayout()
+        
+        QP.AddToLayout( hbox, self._file_filter, CC.FLAGS_CENTER )
+        
+        self._file_filter_panel.setLayout( hbox )
+        
+        #
+        
         vbox = QP.VBoxLayout()
         
         QP.AddToLayout( vbox, self._simple_actions, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         QP.AddToLayout( vbox, self._duplicates_type_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         QP.AddToLayout( vbox, self._seek_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._thumbnail_move_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._file_filter_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
+        QP.AddToLayout( vbox, self._thumbnail_rearrange_panel, CC.FLAGS_EXPAND_SIZER_BOTH_WAYS )
         
         self.setLayout( vbox )
         
@@ -486,8 +571,11 @@ class SimpleSubPanel( QW.QWidget ):
         
         action = self._simple_actions.GetValue()
         
+        self._thumbnail_rearrange_panel.setVisible( action == CAC.SIMPLE_REARRANGE_THUMBNAILS )
         self._duplicates_type_panel.setVisible( action == CAC.SIMPLE_SHOW_DUPLICATES )
         self._seek_panel.setVisible( action == CAC.SIMPLE_MEDIA_SEEK_DELTA )
+        self._thumbnail_move_panel.setVisible( action == CAC.SIMPLE_MOVE_THUMBNAIL_FOCUS )
+        self._file_filter_panel.setVisible( action == CAC.SIMPLE_SELECT_FILES )
         
     
     def GetValue( self ):
@@ -514,6 +602,25 @@ class SimpleSubPanel( QW.QWidget ):
                 ms = self._seek_duration_ms.value() + ( 1000 * s )
                 
                 simple_data = ( direction, ms )
+                
+            elif action == CAC.SIMPLE_MOVE_THUMBNAIL_FOCUS:
+                
+                move_direction = self._move_direction.GetValue()
+                selection_status = self._selection_status.GetValue()
+                
+                simple_data = ( move_direction, selection_status )
+                
+            elif action == CAC.SIMPLE_SELECT_FILES:
+                
+                file_filter = self._file_filter.GetValue()
+                
+                simple_data = file_filter
+                
+            elif action == CAC.SIMPLE_REARRANGE_THUMBNAILS:
+                
+                rearrange_type = self._thumbnail_rearrange_type.GetValue()
+                
+                simple_data = ( CAC.REARRANGE_THUMBNAILS_TYPE_COMMAND, rearrange_type )
                 
             else:
                 
@@ -549,6 +656,25 @@ class SimpleSubPanel( QW.QWidget ):
             self._seek_duration_s.setValue( s )
             self._seek_duration_ms.setValue( ms )
             
+        elif action == CAC.SIMPLE_MOVE_THUMBNAIL_FOCUS:
+            
+            ( move_direction, selection_status ) = command.GetSimpleData()
+            
+            self._move_direction.SetValue( move_direction )
+            self._selection_status.SetValue( selection_status )
+            
+        elif action == CAC.SIMPLE_SELECT_FILES:
+            
+            file_filter = command.GetSimpleData()
+            
+            self._file_filter.SetValue( file_filter )
+            
+        elif action == CAC.SIMPLE_REARRANGE_THUMBNAILS:
+            
+            ( rearrange_type, rearrange_data ) = command.GetSimpleData()
+            
+            self._thumbnail_rearrange_type.SetValue( rearrange_data )
+            
         
         self._UpdateControls()
         
@@ -571,13 +697,13 @@ class TagSubPanel( QW.QWidget ):
         self._tag_value = QW.QLineEdit( self )
         self._tag_value.setReadOnly( True )
         
-        default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
+        default_location_context = CG.client_controller.new_options.GetDefaultLocalLocationContext()
         
         self._tag_input = ClientGUIACDropdown.AutoCompleteDropdownTagsWrite( self, self.SetTags, default_location_context, CC.COMBINED_TAG_SERVICE_KEY )
         
         #
         
-        services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_TAG, HC.TAG_REPOSITORY ) )
+        services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_TAG, HC.TAG_REPOSITORY ) )
         
         for service in services:
             
@@ -658,6 +784,7 @@ class TagSubPanel( QW.QWidget ):
         self._tag_value.setText( tag )
         
     
+
 class ApplicationCommandWidget( ClientGUIScrolledPanels.EditPanel ):
     
     PANEL_SIMPLE = 0
@@ -716,18 +843,18 @@ class ApplicationCommandWidget( ClientGUIScrolledPanels.EditPanel ):
             
             service_key = command.GetContentServiceKey()
             
-            if HG.client_controller.services_manager.ServiceExists( service_key ):
+            if CG.client_controller.services_manager.ServiceExists( service_key ):
                 
-                service = HG.client_controller.services_manager.GetService( service_key )
+                service = CG.client_controller.services_manager.GetService( service_key )
                 
                 action = command.GetContentAction()
                 value = command.GetContentValue()
                 
             else:
                 
-                QW.QMessageBox.warning( self, 'Warning', 'The service that this command relies upon no longer exists! This command will reset to a default form.' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'The service that this command relies upon no longer exists! This command will reset to a default form.' )
                 
-                local_tag_services = list( HG.client_controller.services_manager.GetServices( ( HC.LOCAL_TAG, ) ) )
+                local_tag_services = list( CG.client_controller.services_manager.GetServices( ( HC.LOCAL_TAG, ) ) )
                 
                 service = local_tag_services[0]
                 

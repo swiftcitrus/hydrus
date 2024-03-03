@@ -8,15 +8,19 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientParsing
 from hydrus.client import ClientStrings
+from hydrus.client import ClientTime
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientMetadataMigration
 from hydrus.client.metadata import ClientMetadataMigrationExporters
 from hydrus.client.metadata import ClientMetadataMigrationImporters
+from hydrus.client.metadata import ClientTags
 
 from hydrus.test import HelperFunctions as HF
 
@@ -70,21 +74,26 @@ class TestSingleFileMetadataRouter( unittest.TestCase ):
         has_audio = False
         num_words = None
         
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        times_manager.SetImportedTimestampMS( CC.LOCAL_FILE_SERVICE_KEY, 123000 )
+        times_manager.SetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, 123000 )
+        
         inbox = True
         
-        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY : 123, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123 }, dict(), set(), set(), inbox )
+        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY }, set(), set(), set(), times_manager, inbox )
         
         ratings_manager = ClientMediaManagers.RatingsManager( {} )
         
         notes_manager = ClientMediaManagers.NotesManager( {} )
         
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
         
         #
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 1, hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         #
         
@@ -204,29 +213,42 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         has_audio = False
         num_words = None
         
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        times_manager.SetImportedTimestampMS( CC.LOCAL_FILE_SERVICE_KEY, 123000 )
+        times_manager.SetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, 123000 )
+        
         inbox = True
         
-        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY : 123, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123 }, dict(), set(), set(), inbox )
+        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY }, set(), set(), set(), times_manager, inbox )
         
         ratings_manager = ClientMediaManagers.RatingsManager( {} )
         
         notes_manager = ClientMediaManagers.NotesManager( {} )
         
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
         
         #
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 1, hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         # simple local
         
-        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( service_key = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY )
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( service_key = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, tag_display_type = ClientTags.TAG_DISPLAY_STORAGE )
         
         result = importer.Import( media_result )
         
         self.assertEqual( set( result ), set( my_current_storage_tags ) )
+        
+        #
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( service_key = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, tag_display_type = ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
+        
+        result = importer.Import( media_result )
+        
+        self.assertEqual( set( result ), set( my_current_display_tags ) )
         
         # simple repo
         
@@ -234,7 +256,7 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         
         result = importer.Import( media_result )
         
-        self.assertEqual( set( result ), set( repo_current_storage_tags ) )
+        self.assertEqual( set( result ), set( repo_current_display_tags ) )
         
         # all known
         
@@ -242,7 +264,7 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         
         result = importer.Import( media_result )
         
-        self.assertEqual( set( result ), set( my_current_storage_tags ).union( repo_current_storage_tags ) )
+        self.assertEqual( set( result ), set( my_current_display_tags ).union( repo_current_display_tags ) )
         
         # with string processor
         
@@ -252,13 +274,13 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         
         string_processor.SetProcessingSteps( processing_steps )
         
-        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( string_processor = string_processor, service_key = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY )
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags( string_processor = string_processor, service_key = CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, tag_display_type = ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
         
         result = importer.Import( media_result )
         
         self.assertTrue( len( result ) > 0 )
-        self.assertNotEqual( set( result ), set( my_current_storage_tags ) )
-        self.assertEqual( set( result ), set( string_processor.ProcessStrings( my_current_storage_tags ) ) )
+        self.assertNotEqual( set( result ), set( my_current_display_tags ) )
+        self.assertEqual( set( result ), set( string_processor.ProcessStrings( my_current_display_tags ) ) )
         
     
     def test_media_notes( self ):
@@ -319,9 +341,14 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         has_audio = False
         num_words = None
         
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        times_manager.SetImportedTimestampMS( CC.LOCAL_FILE_SERVICE_KEY, 123000 )
+        times_manager.SetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, 123000 )
+        
         inbox = True
         
-        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY : 123, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123 }, dict(), set(), set(), inbox, urls )
+        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY }, set(), set(), set(), times_manager, inbox, urls )
         
         # duplicate to generate proper dicts
         
@@ -331,13 +358,13 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         
         notes_manager = ClientMediaManagers.NotesManager( {} )
         
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
         
         #
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 1, hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         # simple
         
@@ -362,6 +389,76 @@ class TestSingleFileMetadataImporters( unittest.TestCase ):
         self.assertTrue( len( result ) > 0 )
         self.assertNotEqual( set( result ), set( urls ) )
         self.assertEqual( set( result ), set( string_processor.ProcessStrings( urls ) ) )
+        
+    
+    def test_media_timestamps( self ):
+        
+        archived_timestamp_ms = HydrusTime.GetNowMS() - 3600000
+        timestamp_data_stub = ClientTime.TimestampData.STATICSimpleStub( HC.TIMESTAMP_TYPE_ARCHIVED )
+        
+        # simple
+        
+        hash = HydrusData.GenerateKey()
+        size = 40960
+        mime = HC.IMAGE_JPEG
+        width = 640
+        height = 480
+        duration = None
+        num_frames = None
+        has_audio = False
+        num_words = None
+        
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        times_manager.SetImportedTimestampMS( CC.LOCAL_FILE_SERVICE_KEY, 123000 )
+        times_manager.SetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, 123000 )
+        times_manager.SetArchivedTimestampMS( archived_timestamp_ms )
+        
+        inbox = True
+        
+        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY }, set(), set(), set(), times_manager, inbox, set() )
+        
+        # duplicate to generate proper dicts
+        
+        tags_manager = ClientMediaManagers.TagsManager( {}, {} ).Duplicate()
+        
+        ratings_manager = ClientMediaManagers.RatingsManager( {} )
+        
+        notes_manager = ClientMediaManagers.NotesManager( {} )
+        
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
+        
+        #
+        
+        file_info_manager = ClientMediaManagers.FileInfoManager( 1, hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
+        
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, local_locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        
+        # simple
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps()
+        importer.SetTimestampDataStub( timestamp_data_stub )
+        
+        result = importer.Import( media_result )
+        
+        self.assertEqual( set( result ), { str( HydrusTime.SecondiseMS( archived_timestamp_ms ) ) } )
+        
+        # with string processor
+        
+        string_processor = ClientStrings.StringProcessor()
+        
+        processing_steps = [ ClientStrings.StringConverter( conversions = [ ( ClientStrings.STRING_CONVERSION_DATE_ENCODE, ( '%Y-%m-%d %H:%M:%S', 0 ) ) ] ) ]
+        
+        string_processor.SetProcessingSteps( processing_steps )
+        
+        importer = ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps( string_processor = string_processor )
+        importer.SetTimestampDataStub( timestamp_data_stub )
+        
+        result = importer.Import( media_result )
+        
+        self.assertTrue( len( result ) > 0 )
+        self.assertNotEqual( set( result ), { str( HydrusTime.SecondiseMS( archived_timestamp_ms ) ) } )
+        self.assertEqual( set( result ), set( string_processor.ProcessStrings( { str( HydrusTime.SecondiseMS( archived_timestamp_ms ) ) } ) ) )
         
     
     def test_media_txt( self ):
@@ -558,7 +655,7 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         with self.assertRaises( Exception ):
             
-            [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
             
         
         # simple local
@@ -573,11 +670,11 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         hashes = { hash }
         
-        expected_service_keys_to_content_updates = { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( tag, hashes ) ) for tag in rows ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( tag, hashes ) ) for tag in rows ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # simple repo
         
@@ -591,11 +688,11 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         hashes = { hash }
         
-        expected_service_keys_to_content_updates = { service_key : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in rows ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in rows ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
     
     def test_media_notes( self ):
@@ -613,7 +710,7 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         with self.assertRaises( Exception ):
             
-            [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
             
         
         # simple
@@ -626,13 +723,13 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         exporter.Export( hash, notes )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in [ n.split( ': ', 1 ) for n in notes ] ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in [ n.split( ': ', 1 ) for n in notes ] ]
         
-        expected_service_keys_to_content_updates = { CC.LOCAL_NOTES_SERVICE_KEY : content_updates }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, content_updates )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
     
     def test_media_urls( self ):
@@ -650,7 +747,7 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         with self.assertRaises( Exception ):
             
-            [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
             
         
         # simple
@@ -661,11 +758,54 @@ class TestSingleFileMetadataExporters( unittest.TestCase ):
         
         exporter.Export( hash, urls )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls, { hash } ) ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls, { hash } ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        HF.compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+    
+    def test_media_timestamps( self ):
+        
+        hash = os.urandom( 32 )
+        timestamp = HydrusTime.GetNow() - 3600
+        
+        rows = [ str( timestamp ) ]
+        
+        # no timestamps makes no write
+        
+        timestamp_data_stub = ClientTime.TimestampData.STATICSimpleStub( HC.TIMESTAMP_TYPE_ARCHIVED )
+        
+        exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps()
+        
+        exporter.SetTimestampDataStub( timestamp_data_stub )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        exporter.Export( hash, [] )
+        
+        with self.assertRaises( Exception ):
+            
+            [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            
+        
+        # simple
+        
+        exporter = ClientMetadataMigrationExporters.SingleFileMetadataExporterMediaTimestamps()
+        
+        exporter.SetTimestampDataStub( timestamp_data_stub )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        exporter.Export( hash, rows )
+        
+        expected_timestamp_data_result = ClientTime.TimestampData.STATICArchivedTime( timestamp * 1000 ) # no precise milliseconds because we do not read millisecond precision from metadata migration yet!
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( hash, ), expected_timestamp_data_result ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
     
     def test_media_txt( self ):

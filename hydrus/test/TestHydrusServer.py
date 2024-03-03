@@ -12,14 +12,14 @@ import twisted.internet.ssl
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusEncryption
-from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworking
-from hydrus.core.networking import HydrusServerRequest
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientServices
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
@@ -68,7 +68,7 @@ class TestServer( unittest.TestCase ):
         
         account_key = HydrusData.GenerateKey()
         account_type = HydrusNetwork.AccountType.GenerateAdminAccountType( HC.SERVER_ADMIN )
-        created = HydrusData.GetNow() - 100000
+        created = HydrusTime.GetNow() - 100000
         expires = None
         
         cls._account = HydrusNetwork.Account( account_key, account_type, created, expires )
@@ -205,7 +205,7 @@ class TestServer( unittest.TestCase ):
         
         # ip
         
-        ( ip, timestamp ) = ( '94.45.87.123', HydrusData.GetNow() - 100000 )
+        ( ip, timestamp ) = ( '94.45.87.123', HydrusTime.GetNow() - 100000 )
         
         HG.test_controller.SetRead( 'ip', ( ip, timestamp ) )
         
@@ -290,7 +290,7 @@ class TestServer( unittest.TestCase ):
             f.write( EXAMPLE_THUMBNAIL )
             
         
-        local_booru_manager = HG.client_controller.local_booru_manager
+        local_booru_manager = CG.client_controller.local_booru_manager
         
         #
         
@@ -305,13 +305,30 @@ class TestServer( unittest.TestCase ):
             'hashes' : hashes
         }
         
-        file_info_manager = ClientMediaManagers.FileInfoManager( 1, hashes[0], 500, HC.IMAGE_JPEG, 640, 480 )
+        media_results = []
         
-        notes_manager = ClientMediaManagers.NotesManager( {} )
-        
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
-        
-        media_results = [ ClientMediaResult.MediaResult( file_info_manager, ClientMediaManagers.TagsManager( {}, {} ), ClientMediaManagers.LocationsManager( dict(), dict(), set(), set() ), ClientMediaManagers.RatingsManager( {} ), notes_manager, file_viewing_stats_manager ) for hash in hashes ]
+        for hash in hashes:
+            
+            file_info_manager = ClientMediaManagers.FileInfoManager( 1, hash, 500, HC.IMAGE_JPEG, 640, 480 )
+            
+            times_manager = ClientMediaManagers.TimesManager()
+            
+            notes_manager = ClientMediaManagers.NotesManager( {} )
+            
+            file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
+            
+            media_result = ClientMediaResult.MediaResult(
+                file_info_manager,
+                ClientMediaManagers.TagsManager( {}, {} ),
+                times_manager,
+                ClientMediaManagers.LocationsManager( set(), set(), set(), set(), times_manager ),
+                ClientMediaManagers.RatingsManager( {} ),
+                notes_manager,
+                file_viewing_stats_manager
+            )
+            
+            media_results.append( media_result )
+            
         
         HG.test_controller.SetRead( 'local_booru_share_keys', [ share_key ] )
         HG.test_controller.SetRead( 'local_booru_share', info )
@@ -382,15 +399,28 @@ class TestServer( unittest.TestCase ):
         
         # petition
         
-        petitioner_account = HydrusNetwork.Account.GenerateUnknownAccount()
+        petitioner_account = HydrusNetwork.Account.GenerateUnknownAccount( HydrusData.GenerateKey() )
         reason = 'it sucks'
         actions_and_contents = ( HC.CONTENT_UPDATE_PETITION, [ HydrusNetwork.Content( HC.CONTENT_TYPE_FILES, [ HydrusData.GenerateKey() for i in range( 10 ) ] ) ] )
         
-        petition = HydrusNetwork.Petition( petitioner_account, reason, actions_and_contents )
+        petition_header = HydrusNetwork.PetitionHeader(
+            content_type = HC.CONTENT_TYPE_FILES,
+            status = HC.CONTENT_STATUS_PETITIONED,
+            account_key = petitioner_account.GetAccountKey(),
+            reason = reason
+        )
+        
+        petition = HydrusNetwork.Petition( petitioner_account = petitioner_account, petition_header = petition_header, actions_and_contents = actions_and_contents )
         
         HG.test_controller.SetRead( 'petition', petition )
         
         response = service.Request( HC.GET, 'petition', { 'content_type' : HC.CONTENT_TYPE_FILES, 'status' : HC.CONTENT_UPDATE_PETITION } )
+        
+        self.assertEqual( response[ 'petition' ].GetSerialisableTuple(), petition.GetSerialisableTuple() )
+        
+        HG.test_controller.SetRead( 'petition', petition )
+        
+        response = service.Request( HC.GET, 'petition', { 'content_type' : HC.CONTENT_TYPE_FILES, 'status' : HC.CONTENT_UPDATE_PETITION, 'account_key' : petitioner_account.GetAccountKey(), reason : reason } )
         
         self.assertEqual( response[ 'petition' ].GetSerialisableTuple(), petition.GetSerialisableTuple() )
         
@@ -457,7 +487,7 @@ class TestServer( unittest.TestCase ):
         
         metadata = HydrusNetwork.Metadata()
         
-        metadata.AppendUpdate( [ definitions_update_hash, content_update_hash ], HydrusData.GetNow() - 101000, HydrusData.GetNow() - 1000, HydrusData.GetNow() + 100000 )
+        metadata.AppendUpdate( [ definitions_update_hash, content_update_hash ], HydrusTime.GetNow() - 101000, HydrusTime.GetNow() - 1000, HydrusTime.GetNow() + 100000 )
         
         service._metadata = metadata
         
@@ -564,7 +594,7 @@ class TestServer( unittest.TestCase ):
         
         HG.test_controller.SetRead( 'registration_keys', [ registration_key ] )
         
-        response = service.Request( HC.GET, 'registration_keys', { 'num' : 1, 'account_type_key' : os.urandom( 32 ), 'expires' : HydrusData.GetNow() + 1200 } )
+        response = service.Request( HC.GET, 'registration_keys', { 'num' : 1, 'account_type_key' : os.urandom( 32 ), 'expires' : HydrusTime.GetNow() + 1200 } )
         
         self.assertEqual( response[ 'registration_keys' ], [ registration_key ] )
         

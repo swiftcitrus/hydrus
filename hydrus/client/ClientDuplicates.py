@@ -7,19 +7,23 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
+from hydrus.core.files.images import HydrusImageMetadata
+from hydrus.core.files.images import HydrusImageOpening
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientThreading
+from hydrus.client import ClientTime
 from hydrus.client.importing.options import NoteImportOptions
 from hydrus.client.media import ClientMedia
+from hydrus.client.media import ClientMediaFileFilter
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTags
 
 hashes_to_jpeg_quality = {}
-hashes_to_pixel_hashes = {}
 
 def GetDuplicateComparisonScore( shown_media, comparison_media ):
     
@@ -38,7 +42,7 @@ def GetDuplicateComparisonScore( shown_media, comparison_media ):
 
 def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     duplicate_comparison_score_higher_jpeg_quality = new_options.GetInteger( 'duplicate_comparison_score_higher_jpeg_quality' )
     duplicate_comparison_score_much_higher_jpeg_quality = new_options.GetInteger( 'duplicate_comparison_score_much_higher_jpeg_quality' )
@@ -49,6 +53,7 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     duplicate_comparison_score_more_tags = new_options.GetInteger( 'duplicate_comparison_score_more_tags' )
     duplicate_comparison_score_older = new_options.GetInteger( 'duplicate_comparison_score_older' )
     duplicate_comparison_score_nicer_ratio = new_options.GetInteger( 'duplicate_comparison_score_nicer_ratio' )
+    duplicate_comparison_score_has_audio = new_options.GetInteger( 'duplicate_comparison_score_has_audio' )
     
     #
     
@@ -67,38 +72,35 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     is_a_pixel_dupe = False
     
-    if shown_media.IsStaticImage() and comparison_media.IsStaticImage() and shown_media.GetResolution() == comparison_media.GetResolution():
+    if s_mime in HC.FILES_THAT_CAN_HAVE_PIXEL_HASH and c_mime in HC.FILES_THAT_CAN_HAVE_PIXEL_HASH and shown_media.GetResolution() == comparison_media.GetResolution():
         
-        global hashes_to_pixel_hashes
+        s_pixel_hash = shown_media.GetFileInfoManager().pixel_hash
+        c_pixel_hash = comparison_media.GetFileInfoManager().pixel_hash
         
-        if s_hash not in hashes_to_pixel_hashes:
+        if s_pixel_hash is None or c_pixel_hash is None:
             
-            path = HG.client_controller.client_files_manager.GetFilePath( s_hash, s_mime )
+            statement = 'could not determine if files were pixel-for-pixel duplicates!'
+            score = 0
             
-            hashes_to_pixel_hashes[ s_hash ] = HydrusImageHandling.GetImagePixelHash( path, s_mime )
+            statements_and_scores[ 'pixel_duplicates' ] = ( statement, score )
             
-        
-        if c_hash not in hashes_to_pixel_hashes:
+        elif s_pixel_hash == c_pixel_hash:
             
-            path = HG.client_controller.client_files_manager.GetFilePath( c_hash, c_mime )
-            
-            hashes_to_pixel_hashes[ c_hash ] = HydrusImageHandling.GetImagePixelHash( path, c_mime )
-            
-        
-        s_pixel_hash = hashes_to_pixel_hashes[ s_hash ]
-        c_pixel_hash = hashes_to_pixel_hashes[ c_hash ]
-        
-        if s_pixel_hash == c_pixel_hash:
+            # this is not appropriate for, say, PSD files
+            other_file_is_pixel_png_appropriate_filetypes = {
+                HC.IMAGE_JPEG,
+                HC.IMAGE_WEBP
+            }
             
             is_a_pixel_dupe = True
             
-            if s_mime == HC.IMAGE_PNG and c_mime != HC.IMAGE_PNG:
+            if s_mime == HC.IMAGE_PNG and c_mime in other_file_is_pixel_png_appropriate_filetypes:
                 
-                statement = 'this is a pixel-for-pixel duplicate png!'
+                statement = 'this is a pixel-for-pixel duplicate png! it is a waste of space!'
                 
                 score = -100
                 
-            elif s_mime != HC.IMAGE_PNG and c_mime == HC.IMAGE_PNG:
+            elif s_mime in other_file_is_pixel_png_appropriate_filetypes and c_mime == HC.IMAGE_PNG:
                 
                 statement = 'other file is a pixel-for-pixel duplicate png!'
                 
@@ -117,61 +119,66 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     if s_size != c_size:
         
-        absolute_size_ratio = max( s_size, c_size ) / min( s_size, c_size )
+        all_measurements_are_good = None not in ( s_size, c_size ) and True not in ( d <= 0 for d in ( s_size, c_size ) )
         
-        if absolute_size_ratio > 2.0:
+        if all_measurements_are_good:
             
-            if s_size > c_size:
+            absolute_size_ratio = max( s_size, c_size ) / min( s_size, c_size )
+            
+            if absolute_size_ratio > 2.0:
                 
-                operator = '>>'
-                score = duplicate_comparison_score_much_higher_filesize
+                if s_size > c_size:
+                    
+                    operator = '>>'
+                    score = duplicate_comparison_score_much_higher_filesize
+                    
+                else:
+                    
+                    operator = '<<'
+                    score = -duplicate_comparison_score_much_higher_filesize
+                    
+                
+            elif absolute_size_ratio > 1.05:
+                
+                if s_size > c_size:
+                    
+                    operator = '>'
+                    score = duplicate_comparison_score_higher_filesize
+                    
+                else:
+                    
+                    operator = '<'
+                    score = -duplicate_comparison_score_higher_filesize
+                    
                 
             else:
                 
-                operator = '<<'
-                score = -duplicate_comparison_score_much_higher_filesize
+                operator = HC.UNICODE_APPROX_EQUAL
+                score = 0
                 
-            
-        elif absolute_size_ratio > 1.05:
             
             if s_size > c_size:
                 
-                operator = '>'
-                score = duplicate_comparison_score_higher_filesize
+                sign = '+'
+                percentage_difference = ( s_size / c_size ) - 1.0
                 
             else:
                 
-                operator = '<'
-                score = -duplicate_comparison_score_higher_filesize
+                sign = ''
+                percentage_difference = ( s_size / c_size ) - 1.0
                 
             
-        else:
+            percentage_different_string = ' ({}{})'.format( sign, HydrusData.ConvertFloatToPercentage( percentage_difference ) )
             
-            operator = CC.UNICODE_ALMOST_EQUAL_TO
-            score = 0
+            if is_a_pixel_dupe:
+                
+                score = 0
+                
             
-        
-        if s_size > c_size:
+            statement = '{} {} {}{}'.format( HydrusData.ToHumanBytes( s_size ), operator, HydrusData.ToHumanBytes( c_size ), percentage_different_string )
             
-            sign = '+'
-            percentage_difference = ( s_size / c_size ) - 1.0
+            statements_and_scores[ 'filesize' ]  = ( statement, score )
             
-        else:
-            
-            sign = ''
-            percentage_difference = ( s_size / c_size ) - 1.0
-            
-        
-        percentage_different_string = ' ({}{})'.format( sign, HydrusData.ConvertFloatToPercentage( percentage_difference ) )
-        
-        if is_a_pixel_dupe:
-            
-            score = 0
-            
-        
-        statement = '{} {} {}{}'.format( HydrusData.ToHumanBytes( s_size ), operator, HydrusData.ToHumanBytes( c_size ), percentage_different_string )
-        
-        statements_and_scores[ 'filesize' ]  = ( statement, score )
         
     
     # higher/same res
@@ -309,7 +316,14 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     # same/diff mime
     
-    if s_mime != c_mime:
+    if s_mime == c_mime:
+        
+        statement = 'both are {}s'.format( HC.mime_string_lookup[ s_mime ] )
+        score = 0
+        
+        statements_and_scores[ 'mime' ] = ( statement, score )
+        
+    else:
         
         statement = '{} vs {}'.format( HC.mime_string_lookup[ s_mime ], HC.mime_string_lookup[ c_mime ] )
         score = 0
@@ -317,10 +331,32 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         statements_and_scores[ 'mime' ] = ( statement, score )
         
     
+    # audio/no audio
+    
+    s_has_audio = shown_media.GetMediaResult().HasAudio()
+    c_has_audio = comparison_media.GetMediaResult().HasAudio()
+    
+    if s_has_audio != c_has_audio:
+        
+        if s_has_audio:
+
+            audio_statement = 'this has audio, the other does not'
+            score = duplicate_comparison_score_has_audio
+
+        else:
+            
+            audio_statement = 'the other has audio, this does not'
+            score = 0
+        
+        statement = '{} vs {}'.format( s_has_audio, c_has_audio )
+
+        statements_and_scores[ 'has_audio' ] = ( audio_statement, score )
+    
+
     # more tags
     
-    s_num_tags = len( shown_media.GetTagsManager().GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_ACTUAL ) )
-    c_num_tags = len( comparison_media.GetTagsManager().GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_ACTUAL ) )
+    s_num_tags = len( shown_media.GetTagsManager().GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ) )
+    c_num_tags = len( comparison_media.GetTagsManager().GetCurrentAndPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ) )
     
     if s_num_tags != c_num_tags:
         
@@ -355,14 +391,14 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
     
     # older
     
-    s_ts = shown_media.GetLocationsManager().GetCurrentTimestamp( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
-    c_ts = comparison_media.GetLocationsManager().GetCurrentTimestamp( CC.COMBINED_LOCAL_FILE_SERVICE_KEY )
+    s_import_timestamp = HydrusTime.SecondiseMS( shown_media.GetLocationsManager().GetTimesManager().GetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
+    c_import_timestamp = HydrusTime.SecondiseMS( comparison_media.GetLocationsManager().GetTimesManager().GetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
     
     one_month = 86400 * 30
     
-    if s_ts is not None and c_ts is not None and abs( s_ts - c_ts ) > one_month:
+    if s_import_timestamp is not None and c_import_timestamp is not None and abs( s_import_timestamp - c_import_timestamp ) > one_month:
         
-        if s_ts < c_ts:
+        if s_import_timestamp < c_import_timestamp:
             
             operator = 'older than'
             score = duplicate_comparison_score_older
@@ -378,7 +414,7 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
             score = 0
             
         
-        statement = '{}, {} {}'.format( ClientData.TimestampToPrettyTimeDelta( s_ts, history_suffix = ' old' ), operator, ClientData.TimestampToPrettyTimeDelta( c_ts, history_suffix = ' old' ) )
+        statement = '{}, {} {}'.format( ClientTime.TimestampToPrettyTimeDelta( s_import_timestamp, history_suffix = ' old' ), operator, ClientTime.TimestampToPrettyTimeDelta( c_import_timestamp, history_suffix = ' old' ) )
         
         statements_and_scores[ 'time_imported' ] = ( statement, score )
         
@@ -389,16 +425,38 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         
         if s_hash not in hashes_to_jpeg_quality:
             
-            path = HG.client_controller.client_files_manager.GetFilePath( s_hash, s_mime )
+            path = CG.client_controller.client_files_manager.GetFilePath( s_hash, s_mime )
             
-            hashes_to_jpeg_quality[ s_hash ] = HydrusImageHandling.GetJPEGQuantizationQualityEstimate( path )
+            try:
+                
+                raw_pil_image = HydrusImageOpening.RawOpenPILImage( path )
+                
+                result = HydrusImageMetadata.GetJPEGQuantizationQualityEstimate( raw_pil_image )
+                
+            except:
+                
+                result = ( 'unknown', None )
+                
+            
+            hashes_to_jpeg_quality[ s_hash ] = result
             
         
         if c_hash not in hashes_to_jpeg_quality:
             
-            path = HG.client_controller.client_files_manager.GetFilePath( c_hash, c_mime )
+            path = CG.client_controller.client_files_manager.GetFilePath( c_hash, c_mime )
             
-            hashes_to_jpeg_quality[ c_hash ] = HydrusImageHandling.GetJPEGQuantizationQualityEstimate( path )
+            try:
+                
+                raw_pil_image = HydrusImageOpening.RawOpenPILImage( path )
+                
+                result = HydrusImageMetadata.GetJPEGQuantizationQualityEstimate( raw_pil_image )
+                
+            except:
+                
+                result = ( 'unknown', None )
+                
+            
+            hashes_to_jpeg_quality[ c_hash ] = result
             
         
         ( s_label, s_jpeg_quality ) = hashes_to_jpeg_quality[ s_hash ]
@@ -408,7 +466,7 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         
         if s_label != c_label:
             
-            if c_jpeg_quality is None or s_jpeg_quality is None:
+            if c_jpeg_quality is None or s_jpeg_quality is None or c_jpeg_quality <= 0 or s_jpeg_quality <= 0:
                 
                 score = 0
                 
@@ -441,45 +499,31 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
             
         
     
-    def has_exif( m ):
+    s_has_transparency = shown_media.GetFileInfoManager().has_transparency
+    c_has_transparency = comparison_media.GetFileInfoManager().has_transparency
+    
+    if s_has_transparency ^ c_has_transparency:
         
-        try:
+        if s_has_transparency:
             
-            hash = m.GetHash()
-            mime = m.GetMime()
+            transparency_statement = 'this has transparency, the other is opaque'
             
-            if mime not in ( HC.IMAGE_JPEG, HC.IMAGE_TIFF ):
-                
-                return False
-                
+        else:
             
-            path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
+            transparency_statement = 'this is opaque, the other has transparency'
             
-            pil_image = HydrusImageHandling.RawOpenPILImage( path )
-            
-            exif_dict = HydrusImageHandling.GetEXIFDict( pil_image )
-            
-            if exif_dict is None:
-                
-                return False
-                
-            
-            return len( exif_dict ) > 0
-            
-        except:
-            
-            return False
-            
+        
+        statements_and_scores[ 'has_transparency' ] = ( transparency_statement, 0 )
         
     
-    s_has_exif = has_exif( shown_media )
-    c_has_exif = has_exif( comparison_media )
+    s_has_exif = shown_media.GetFileInfoManager().has_exif
+    c_has_exif = comparison_media.GetFileInfoManager().has_exif
     
     if s_has_exif ^ c_has_exif:
         
         if s_has_exif:
             
-            exif_statement = 'has exif data, the other does not'
+            exif_statement = 'this has exif data, the other does not'
             
         else:
             
@@ -489,14 +533,14 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         statements_and_scores[ 'exif_data' ] = ( exif_statement, 0 )
         
     
-    s_has_human_readable_embedded_metadata = shown_media.GetMediaResult().GetFileInfoManager().has_human_readable_embedded_metadata
-    c_has_human_readable_embedded_metadata = comparison_media.GetMediaResult().GetFileInfoManager().has_human_readable_embedded_metadata
+    s_has_human_readable_embedded_metadata = shown_media.GetFileInfoManager().has_human_readable_embedded_metadata
+    c_has_human_readable_embedded_metadata = comparison_media.GetFileInfoManager().has_human_readable_embedded_metadata
     
     if s_has_human_readable_embedded_metadata ^ c_has_human_readable_embedded_metadata:
         
         if s_has_human_readable_embedded_metadata:
             
-            embedded_metadata_statement = 'has embedded metadata, the other does not'
+            embedded_metadata_statement = 'this has embedded metadata, the other does not'
             
         else:
             
@@ -513,7 +557,7 @@ def GetDuplicateComparisonStatements( shown_media, comparison_media ):
         
         if s_has_icc:
             
-            icc_statement = 'has icc profile, the other does not'
+            icc_statement = 'this has icc profile, the other does not'
             
         else:
             
@@ -563,9 +607,9 @@ class DuplicatesManager( object ):
                 self._refresh_maintenance_numbers = False
                 self._currently_refreshing_maintenance_numbers = True
                 
-                HG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
+                CG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
                 
-                HG.client_controller.CallToThread( self.THREADRefreshMaintenanceNumbers )
+                CG.client_controller.CallToThread( self.THREADRefreshMaintenanceNumbers )
                 
             
             return ( self._similar_files_maintenance_status, self._currently_refreshing_maintenance_numbers, self._currently_doing_potentials_search )
@@ -578,13 +622,13 @@ class DuplicatesManager( object ):
             
             self._refresh_maintenance_numbers = True
             
-            HG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
+            CG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
             
         
     
     def NotifyNewPotentialsSearchNumbers( self ):
         
-        HG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
+        CG.client_controller.pub( 'new_similar_files_potentials_search_numbers' )
         
     
     def StartPotentialsSearch( self ):
@@ -598,7 +642,7 @@ class DuplicatesManager( object ):
             
             self._currently_doing_potentials_search = True
             
-            HG.client_controller.CallToThreadLongRunning( self.THREADSearchPotentials )
+            CG.client_controller.CallToThreadLongRunning( self.THREADSearchPotentials )
             
         
     
@@ -606,7 +650,7 @@ class DuplicatesManager( object ):
         
         try:
             
-            similar_files_maintenance_status = HG.client_controller.Read( 'similar_files_maintenance_status' )
+            similar_files_maintenance_status = CG.client_controller.Read( 'similar_files_maintenance_status' )
             
             with self._lock:
                 
@@ -616,7 +660,7 @@ class DuplicatesManager( object ):
                     
                     self._refresh_maintenance_numbers = False
                     
-                    HG.client_controller.CallToThread( self.THREADRefreshMaintenanceNumbers )
+                    CG.client_controller.CallToThread( self.THREADRefreshMaintenanceNumbers )
                     
                 else:
                     
@@ -624,13 +668,13 @@ class DuplicatesManager( object ):
                     self._refresh_maintenance_numbers = False
                     
                 
-                HG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
+                CG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
                 
             
         except:
             
             self._currently_refreshing_maintenance_numbers = False
-            HG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
+            CG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
             
             raise
             
@@ -640,7 +684,7 @@ class DuplicatesManager( object ):
         
         try:
             
-            search_distance = HG.client_controller.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
+            search_distance = CG.client_controller.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
             
             with self._lock:
                 
@@ -665,31 +709,35 @@ class DuplicatesManager( object ):
             
             num_searched_estimate = num_searched
             
-            HG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
+            CG.client_controller.pub( 'new_similar_files_maintenance_numbers' )
             
-            job_key = ClientThreading.JobKey( cancellable = True )
+            job_status = ClientThreading.JobStatus( cancellable = True )
             
-            job_key.SetStatusTitle( 'searching for potential duplicates' )
+            job_status.SetStatusTitle( 'searching for potential duplicates' )
             
-            HG.client_controller.pub( 'message', job_key )
+            CG.client_controller.pub( 'message', job_status )
             
             still_work_to_do = True
             
             while still_work_to_do:
                 
-                search_distance = HG.client_controller.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
+                search_distance = CG.client_controller.new_options.GetInteger( 'similar_files_duplicate_pairs_search_distance' )
                 
-                start_time = HydrusData.GetNowPrecise()
+                start_time = HydrusTime.GetNowPrecise()
                 
-                ( still_work_to_do, num_done ) = HG.client_controller.WriteSynchronous( 'maintain_similar_files_search_for_potential_duplicates', search_distance, maintenance_mode = HC.MAINTENANCE_FORCED, job_key = job_key, work_time_float = 0.5 )
+                work_time_ms = CG.client_controller.new_options.GetInteger( 'potential_duplicates_search_work_time_ms' )
                 
-                time_it_took = HydrusData.GetNowPrecise() - start_time
+                work_time = work_time_ms / 1000
+                
+                ( still_work_to_do, num_done ) = CG.client_controller.WriteSynchronous( 'maintain_similar_files_search_for_potential_duplicates', search_distance, maintenance_mode = HC.MAINTENANCE_FORCED, job_status = job_status, work_time_float = work_time )
+                
+                time_it_took = HydrusTime.GetNowPrecise() - start_time
                 
                 num_searched_estimate += num_done
                 
                 if num_searched_estimate > total_num_files:
                     
-                    similar_files_maintenance_status = HG.client_controller.Read( 'similar_files_maintenance_status' )
+                    similar_files_maintenance_status = CG.client_controller.Read( 'similar_files_maintenance_status' )
                     
                     if similar_files_maintenance_status is None:
                         
@@ -707,18 +755,22 @@ class DuplicatesManager( object ):
                     
                 
                 text = 'searching: {}'.format( HydrusData.ConvertValueRangeToPrettyString( num_searched_estimate, total_num_files ) )
-                job_key.SetStatusText( text )
-                job_key.SetVariable( 'popup_gauge_1', ( num_searched_estimate, total_num_files ) )
+                job_status.SetStatusText( text )
+                job_status.SetVariable( 'popup_gauge_1', ( num_searched_estimate, total_num_files ) )
                 
-                if job_key.IsCancelled() or HG.model_shutdown:
+                if job_status.IsCancelled() or HG.model_shutdown:
                     
                     break
                     
                 
-                time.sleep( min( 5, time_it_took ) ) # ideally 0.5s, but potentially longer
+                rest_ratio = CG.client_controller.new_options.GetInteger( 'potential_duplicates_search_rest_percentage' ) / 100
+                
+                reasonable_work_time = min( 5 * work_time, time_it_took )
+                
+                time.sleep( reasonable_work_time * rest_ratio )
                 
             
-            job_key.Delete()
+            job_status.FinishAndDismiss()
             
         finally:
             
@@ -737,11 +789,50 @@ SYNC_ARCHIVE_NONE = 0
 SYNC_ARCHIVE_IF_ONE_DO_BOTH = 1
 SYNC_ARCHIVE_DO_BOTH_REGARDLESS = 2
 
+def get_updated_domain_modified_timestamp_datas( destination_media: ClientMedia.MediaSingleton, source_media: ClientMedia.MediaSingleton, urls: typing.Collection[ str ] ):
+    
+    from hydrus.client.networking import ClientNetworkingFunctions
+    
+    domains = { ClientNetworkingFunctions.ConvertURLIntoDomain( url ) for url in urls }
+    
+    timestamp_datas = []
+    source_timestamp_manager = source_media.GetLocationsManager().GetTimesManager()
+    destination_timestamp_manager = destination_media.GetLocationsManager().GetTimesManager()
+    
+    for domain in domains:
+        
+        source_timestamp_ms = source_timestamp_manager.GetDomainModifiedTimestampMS( domain )
+        
+        if source_timestamp_ms is not None:
+            
+            timestamp_data = ClientTime.TimestampData.STATICDomainModifiedTime( domain, source_timestamp_ms )
+            
+            destination_timestamp_ms = destination_timestamp_manager.GetDomainModifiedTimestampMS( domain )
+            
+            if destination_timestamp_ms is None or ClientTime.ShouldUpdateModifiedTime( destination_timestamp_ms, source_timestamp_ms ):
+                
+                timestamp_datas.append( timestamp_data )
+                
+            
+        
+    
+    return timestamp_datas
+    
+
+def get_domain_modified_content_updates( destination_media: ClientMedia.MediaSingleton, source_media: ClientMedia.MediaSingleton, urls: typing.Collection[ str ] ):
+    
+    timestamp_datas = get_updated_domain_modified_timestamp_datas( destination_media, source_media, urls )
+    
+    content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( destination_media.GetHash(), ), timestamp_data ) ) for timestamp_data in timestamp_datas ]
+    
+    return content_updates
+    
+
 class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_DUPLICATE_CONTENT_MERGE_OPTIONS
     SERIALISABLE_NAME = 'Duplicate Content Merge Options'
-    SERIALISABLE_VERSION = 6
+    SERIALISABLE_VERSION = 7
     
     def __init__( self ):
         
@@ -753,13 +844,14 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
         self._sync_note_import_options = NoteImportOptions.NoteImportOptions()
         self._sync_archive_action = SYNC_ARCHIVE_NONE
         self._sync_urls_action = HC.CONTENT_MERGE_ACTION_NONE
+        self._sync_file_modified_date_action = HC.CONTENT_MERGE_ACTION_COPY
         
     
     def _GetSerialisableInfo( self ):
         
-        if HG.client_controller.IsBooted():
+        if CG.client_controller.IsBooted():
             
-            services_manager = HG.client_controller.services_manager
+            services_manager = CG.client_controller.services_manager
             
             self._tag_service_actions = [ ( service_key, action, tag_filter ) for ( service_key, action, tag_filter ) in self._tag_service_actions if services_manager.ServiceExists( service_key ) and services_manager.GetServiceType( service_key ) in HC.REAL_TAG_SERVICES ]
             self._rating_service_actions = [ ( service_key, action ) for ( service_key, action ) in self._rating_service_actions if services_manager.ServiceExists( service_key ) and services_manager.GetServiceType( service_key ) in HC.RATINGS_SERVICES ]
@@ -770,12 +862,28 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
         
         serialisable_sync_note_import_options = self._sync_note_import_options.GetSerialisableTuple()
         
-        return ( serialisable_tag_service_actions, serialisable_rating_service_actions, self._sync_notes_action, serialisable_sync_note_import_options, self._sync_archive_action, self._sync_urls_action )
+        return (
+            serialisable_tag_service_actions,
+            serialisable_rating_service_actions,
+            self._sync_notes_action,
+            serialisable_sync_note_import_options,
+            self._sync_archive_action,
+            self._sync_urls_action,
+            self._sync_file_modified_date_action
+        )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( serialisable_tag_service_actions, serialisable_rating_service_actions, self._sync_notes_action, serialisable_sync_note_import_options, self._sync_archive_action, self._sync_urls_action ) = serialisable_info
+        (
+            serialisable_tag_service_actions,
+            serialisable_rating_service_actions,
+            self._sync_notes_action,
+            serialisable_sync_note_import_options,
+            self._sync_archive_action,
+            self._sync_urls_action,
+            self._sync_file_modified_date_action
+        ) = serialisable_info
         
         self._tag_service_actions = [ ( bytes.fromhex( serialisable_service_key ), action, HydrusSerialisable.CreateFromSerialisableTuple( serialisable_tag_filter ) ) for ( serialisable_service_key, action, serialisable_tag_filter ) in serialisable_tag_service_actions ]
         self._rating_service_actions = [ ( bytes.fromhex( serialisable_service_key ), action ) for ( serialisable_service_key, action ) in serialisable_rating_service_actions ]
@@ -872,6 +980,32 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
             return ( 6, new_serialisable_info )
             
         
+        if version == 6:
+            
+            (
+                serialisable_tag_service_actions,
+                serialisable_rating_service_actions,
+                sync_notes_action,
+                serialisable_sync_note_import_options,
+                sync_archive_action,
+                sync_urls_action
+            ) = old_serialisable_info
+            
+            sync_file_modified_date_action = HC.CONTENT_MERGE_ACTION_NONE
+            
+            new_serialisable_info = (
+                serialisable_tag_service_actions,
+                serialisable_rating_service_actions,
+                sync_notes_action,
+                serialisable_sync_note_import_options,
+                sync_archive_action,
+                sync_urls_action,
+                sync_file_modified_date_action
+            )
+            
+            return ( 7, new_serialisable_info )
+            
+        
     
     def GetRatingServiceActions( self ) -> typing.Collection[ tuple ]:
         
@@ -886,6 +1020,11 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
     def GetSyncArchiveAction( self ) -> int:
         
         return self._sync_archive_action
+        
+    
+    def GetSyncFileModifiedDateAction( self ) -> int:
+        
+        return self._sync_file_modified_date_action
         
     
     def GetSyncNotesAction( self ) -> int:
@@ -918,6 +1057,11 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
         self._sync_archive_action = sync_archive_action
         
     
+    def SetSyncFileModifiedDateAction( self, sync_file_modified_date_action: int ):
+        
+        self._sync_file_modified_date_action = sync_file_modified_date_action
+        
+    
     def SetSyncNotesAction( self, sync_notes_action: int ):
         
         self._sync_notes_action = sync_notes_action
@@ -933,14 +1077,14 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
         self._sync_urls_action = sync_urls_action
         
     
-    def ProcessPairIntoContentUpdates( self, first_media: ClientMedia.MediaSingleton, second_media: ClientMedia.MediaSingleton, delete_first = False, delete_second = False, file_deletion_reason = None, do_not_do_deletes = False ):
+    def ProcessPairIntoContentUpdatePackage( self, first_media: ClientMedia.MediaSingleton, second_media: ClientMedia.MediaSingleton, delete_first = False, delete_second = False, file_deletion_reason = None, do_not_do_deletes = False ) -> ClientContentUpdates.ContentUpdatePackage:
         
         if file_deletion_reason is None:
             
             file_deletion_reason = 'unknown reason'
             
         
-        service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         first_hash = first_media.GetHash()
         second_hash = second_media.GetHash()
@@ -952,7 +1096,7 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
         
         #
         
-        services_manager = HG.client_controller.services_manager
+        services_manager = CG.client_controller.services_manager
         
         for ( service_key, action, tag_filter ) in self._tag_service_actions:
             
@@ -993,27 +1137,24 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                 first_needs = second_tags.difference( first_tags )
                 second_needs = first_tags.difference( second_tags )
                 
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, second_hashes ) ) for tag in second_needs ) )
+                content_updates.extend( ( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
+                content_updates.extend( ( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, second_hashes ) ) for tag in second_needs ) )
                 
             elif action == HC.CONTENT_MERGE_ACTION_COPY:
                 
                 first_needs = second_tags.difference( first_tags )
                 
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
+                content_updates.extend( ( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
                 
             elif service_type == HC.LOCAL_TAG and action == HC.CONTENT_MERGE_ACTION_MOVE:
                 
                 first_needs = second_tags.difference( first_tags )
                 
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
-                content_updates.extend( ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( tag, second_hashes ) ) for tag in second_tags ) )
+                content_updates.extend( ( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, add_content_action, ( tag, first_hashes ) ) for tag in first_needs ) )
+                content_updates.extend( ( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( tag, second_hashes ) ) for tag in second_tags ) )
                 
             
-            if len( content_updates ) > 0:
-                
-                service_keys_to_content_updates[ service_key ].extend( content_updates )
-                
+            content_update_package.AddContentUpdates( service_key, content_updates )
             
         
         def worth_updating_rating( source_rating, dest_rating ):
@@ -1053,18 +1194,18 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                     
                     if worth_updating_rating( first_current_value, second_current_value ):
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( first_current_value, second_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( first_current_value, second_hashes ) ) )
                         
                     elif worth_updating_rating( second_current_value, first_current_value ):
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                         
                     
                 elif action == HC.CONTENT_MERGE_ACTION_COPY:
                     
                     if worth_updating_rating( second_current_value, first_current_value ):
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                         
                     
                 elif action == HC.CONTENT_MERGE_ACTION_MOVE:
@@ -1073,10 +1214,10 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                         
                         if worth_updating_rating( second_current_value, first_current_value ):
                             
-                            content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
+                            content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( second_current_value, first_hashes ) ) )
                             
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, second_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, second_hashes ) ) )
                         
                     
                 
@@ -1088,27 +1229,27 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                     
                     if second_current_value > 0:
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
                         
                     
                     if first_current_value > 0:
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, second_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, second_hashes ) ) )
                         
                     
                 elif action == HC.CONTENT_MERGE_ACTION_COPY:
                     
                     if second_current_value > 0:
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
                         
                     
                 elif action == HC.CONTENT_MERGE_ACTION_MOVE:
                     
                     if second_current_value > 0:
                         
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
-                        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, second_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( sum_value, first_hashes ) ) )
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, second_hashes ) ) )
                         
                     
                 
@@ -1117,10 +1258,7 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                 continue
                 
             
-            if len( content_updates ) > 0:
-                
-                service_keys_to_content_updates[ service_key ].extend( content_updates )
-                
+            content_update_package.AddContentUpdates( service_key, content_updates )
             
         
         #
@@ -1130,70 +1268,90 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
             first_names_and_notes = list( first_media.GetNotesManager().GetNamesToNotes().items() )
             second_names_and_notes = list( second_media.GetNotesManager().GetNamesToNotes().items() )
             
-            content_updates = []
-            
             # TODO: rework this to UpdateeNamesToNotes
             
             if self._sync_notes_action == HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE:
                 
-                first_service_keys_to_content_updates = self._sync_note_import_options.GetServiceKeysToContentUpdates( first_media_result, second_names_and_notes )
-                second_service_keys_to_content_updates = self._sync_note_import_options.GetServiceKeysToContentUpdates( second_media_result, first_names_and_notes )
+                first_content_update_package = self._sync_note_import_options.GetContentUpdatePackage( first_media_result, second_names_and_notes )
+                second_content_update_package = self._sync_note_import_options.GetContentUpdatePackage( second_media_result, first_names_and_notes )
                 
-                content_updates.extend( first_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] )
-                content_updates.extend( second_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] )
+                content_update_package.AddContentUpdatePackage( first_content_update_package )
+                content_update_package.AddContentUpdatePackage( second_content_update_package )
                 
             elif self._sync_notes_action == HC.CONTENT_MERGE_ACTION_COPY:
                 
-                first_service_keys_to_content_updates = self._sync_note_import_options.GetServiceKeysToContentUpdates( first_media_result, second_names_and_notes )
+                first_content_update_package = self._sync_note_import_options.GetContentUpdatePackage( first_media_result, second_names_and_notes )
                 
-                content_updates.extend( first_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] )
+                content_update_package.AddContentUpdatePackage( first_content_update_package )
                 
             elif self._sync_notes_action == HC.CONTENT_MERGE_ACTION_MOVE:
                 
-                first_service_keys_to_content_updates = self._sync_note_import_options.GetServiceKeysToContentUpdates( first_media_result, second_names_and_notes )
+                first_content_update_package = self._sync_note_import_options.GetContentUpdatePackage( first_media_result, second_names_and_notes )
                 
-                content_updates.extend( first_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] )
+                content_update_package.AddContentUpdatePackage( first_content_update_package )
                 
-                content_updates.extend(
-                    [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( second_hash, name ) ) for ( name, note ) in second_names_and_notes ]
-                )
+                content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( second_hash, name ) ) for ( name, note ) in second_names_and_notes ]
                 
-            
-            if len( content_updates ) > 0:
-                
-                service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ].extend( content_updates )
+                content_update_package.AddContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, content_updates )
                 
             
         
         #
         
-        content_update_archive_first = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, first_hashes )
-        content_update_archive_second = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, second_hashes )
+        content_update_archive_first = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, first_hashes )
+        content_update_archive_second = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, second_hashes )
         
         # and not delete_first gubbins here to help out the delete lock lmao. don't want to archive and then try to delete
-        # TODO: this is obviously a bad solution, so better to refactor this function to return a list of service_keys_to_content_updates and stick the delete command right up top, tested for locks on current info
+        # TODO: this is obviously a bad solution, so better to refactor this function to return a list of content_update_packages and stick the delete command right up top, tested for locks on current info
         
         if self._sync_archive_action == SYNC_ARCHIVE_IF_ONE_DO_BOTH:
             
             if first_media.HasInbox() and second_media.HasArchive() and not delete_first:
                 
-                service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update_archive_first )
+                content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update_archive_first )
                 
             elif first_media.HasArchive() and second_media.HasInbox() and not delete_second:
                 
-                service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update_archive_second )
+                content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update_archive_second )
                 
             
         elif self._sync_archive_action == SYNC_ARCHIVE_DO_BOTH_REGARDLESS:
             
             if first_media.HasInbox() and not delete_first:
                 
-                service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update_archive_first )
+                content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update_archive_first )
                 
             
             if second_media.HasInbox() and not delete_second:
                 
-                service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update_archive_second )
+                content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update_archive_second )
+                
+            
+        
+        #
+        
+        if self._sync_file_modified_date_action != HC.CONTENT_MERGE_ACTION_NONE:
+            
+            first_timestamp_ms = first_media.GetMediaResult().GetTimesManager().GetFileModifiedTimestampMS()
+            second_timestamp_ms = second_media.GetMediaResult().GetTimesManager().GetFileModifiedTimestampMS()
+            
+            if self._sync_file_modified_date_action == HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE:
+                
+                if ClientTime.ShouldUpdateModifiedTime( first_timestamp_ms, second_timestamp_ms ):
+                    
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( first_hash, ), ClientTime.TimestampData.STATICFileModifiedTime( second_timestamp_ms ) ) ) )
+                    
+                elif ClientTime.ShouldUpdateModifiedTime( second_timestamp_ms, first_timestamp_ms ):
+                    
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( second_hash, ), ClientTime.TimestampData.STATICFileModifiedTime( first_timestamp_ms ) ) ) )
+                    
+                
+            elif self._sync_file_modified_date_action == HC.CONTENT_MERGE_ACTION_COPY:
+                
+                if ClientTime.ShouldUpdateModifiedTime( first_timestamp_ms, second_timestamp_ms ):
+                    
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( first_hash, ), ClientTime.TimestampData.STATICFileModifiedTime( second_timestamp_ms ) ) ) )
+                    
                 
             
         
@@ -1204,8 +1362,6 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
             first_urls = set( first_media.GetLocationsManager().GetURLs() )
             second_urls = set( second_media.GetLocationsManager().GetURLs() )
             
-            content_updates = []
-            
             if self._sync_urls_action == HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE:
                 
                 first_needs = second_urls.difference( first_urls )
@@ -1213,12 +1369,16 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                 
                 if len( first_needs ) > 0:
                     
-                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( first_needs, first_hashes ) ) )
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( first_needs, first_hashes ) ) )
+                    
+                    content_update_package.AddContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, get_domain_modified_content_updates( first_media, second_media, first_needs ) )
                     
                 
                 if len( second_needs ) > 0:
                     
-                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( second_needs, second_hashes ) ) )
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( second_needs, second_hashes ) ) )
+                    
+                    content_update_package.AddContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, get_domain_modified_content_updates( second_media, first_media, second_needs ) )
                     
                 
             elif self._sync_urls_action == HC.CONTENT_MERGE_ACTION_COPY:
@@ -1227,13 +1387,10 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                 
                 if len( first_needs ) > 0:
                     
-                    content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( first_needs, first_hashes ) ) )
+                    content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( first_needs, first_hashes ) ) )
                     
-                
-            
-            if len( content_updates ) > 0:
-                
-                service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].extend( content_updates )
+                    content_update_package.AddContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, get_domain_modified_content_updates( first_media, second_media, first_needs ) )
+                    
                 
             
         
@@ -1260,7 +1417,7 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
             
             if media.HasDeleteLocked():
                 
-                ClientMedia.ReportDeleteLockFailures( [ media ] )
+                ClientMediaFileFilter.ReportDeleteLockFailures( [ media ] )
                 
                 continue
                 
@@ -1271,22 +1428,22 @@ class DuplicateContentMergeOptions( HydrusSerialisable.SerialisableBase ):
                 
             else:
                 
-                local_file_service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
+                local_file_service_keys = CG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
                 
                 deletee_service_keys = media.GetLocationsManager().GetCurrent().intersection( local_file_service_keys )
                 
             
             for deletee_service_key in deletee_service_keys:
                 
-                content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes(), reason = file_deletion_reason )
+                content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes(), reason = file_deletion_reason )
                 
-                service_keys_to_content_updates[ deletee_service_key ].append( content_update )
+                content_update_package.AddContentUpdate( deletee_service_key, content_update )
                 
             
         
         #
         
-        return service_keys_to_content_updates
+        return content_update_package
         
     
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_DUPLICATE_CONTENT_MERGE_OPTIONS ] = DuplicateContentMergeOptions

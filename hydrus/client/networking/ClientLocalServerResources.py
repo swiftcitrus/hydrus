@@ -24,29 +24,42 @@ from twisted.web.static import File as FileResource
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusFileHandling
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusTemp
+from hydrus.core import HydrusTime
+from hydrus.core.files import HydrusFileHandling
+from hydrus.core.files.images import HydrusImageHandling
 from hydrus.core.networking import HydrusNetworkVariableHandling
 from hydrus.core.networking import HydrusServerRequest
 from hydrus.core.networking import HydrusServerResources
 
 from hydrus.client import ClientAPI
+from hydrus.client import ClientOptions
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
-from hydrus.client import ClientSearchParseSystemPredicates
 from hydrus.client import ClientThreading
+from hydrus.client import ClientTime
+from hydrus.client import ClientRendering
+from hydrus.client import ClientImageHandling
 from hydrus.client.importing import ClientImportFiles
 from hydrus.client.importing.options import FileImportOptions
 from hydrus.client.media import ClientMedia
+from hydrus.client.media import ClientMediaFileFilter
+from hydrus.client.metadata import ClientContentUpdates
+from hydrus.client.metadata import ClientRatings
 from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientNetworkingContexts
 from hydrus.client.networking import ClientNetworkingDomain
 from hydrus.client.networking import ClientNetworkingFunctions
+from hydrus.client.networking import ClientNetworkingJobs
+from hydrus.client.search import ClientSearch
+from hydrus.client.search import ClientSearchAutocomplete
+from hydrus.client.search import ClientSearchParseSystemPredicates
+from hydrus.client.gui import ClientGUIPopupMessages
+
 
 local_booru_css = FileResource( os.path.join( HC.STATIC_DIR, 'local_booru_style.css' ), defaultType = 'text/css' )
 
@@ -59,9 +72,9 @@ LOCAL_BOORU_JSON_BYTE_LIST_PARAMS = set()
 # if a variable name isn't defined here, a GET with it won't work
 
 CLIENT_API_INT_PARAMS = { 'file_id', 'file_sort_type', 'potentials_search_type', 'pixel_duplicates', 'max_hamming_distance', 'max_num_pairs' }
-CLIENT_API_BYTE_PARAMS = { 'hash', 'destination_page_key', 'page_key', 'service_key', 'Hydrus-Client-API-Access-Key', 'Hydrus-Client-API-Session-Key', 'file_service_key', 'deleted_file_service_key', 'tag_service_key', 'tag_service_key_1', 'tag_service_key_2' }
+CLIENT_API_BYTE_PARAMS = { 'hash', 'destination_page_key', 'page_key', 'service_key', 'Hydrus-Client-API-Access-Key', 'Hydrus-Client-API-Session-Key', 'file_service_key', 'deleted_file_service_key', 'tag_service_key', 'tag_service_key_1', 'tag_service_key_2', 'rating_service_key', 'job_status_key' }
 CLIENT_API_STRING_PARAMS = { 'name', 'url', 'domain', 'search', 'service_name', 'reason', 'tag_display_type', 'source_hash_type', 'desired_hash_type' }
-CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'tags', 'tags_1', 'tags_2', 'file_ids', 'only_return_identifiers', 'only_return_basic_information', 'create_new_file_ids', 'detailed_url_information', 'hide_service_keys_tags', 'simple', 'file_sort_asc', 'return_hashes', 'return_file_ids', 'include_notes', 'notes', 'note_names', 'doublecheck_file_system' }
+CLIENT_API_JSON_PARAMS = { 'basic_permissions', 'tags', 'tags_1', 'tags_2', 'file_ids', 'download', 'only_return_identifiers', 'only_return_basic_information', 'include_blurhash', 'create_new_file_ids', 'detailed_url_information', 'hide_service_keys_tags', 'simple', 'file_sort_asc', 'return_hashes', 'return_file_ids', 'include_notes', 'include_milliseconds', 'include_services_object', 'notes', 'note_names', 'doublecheck_file_system', 'only_in_view' }
 CLIENT_API_JSON_BYTE_LIST_PARAMS = { 'file_service_keys', 'deleted_file_service_keys', 'hashes' }
 CLIENT_API_JSON_BYTE_DICT_PARAMS = { 'service_keys_to_tags', 'service_keys_to_actions_to_tags', 'service_keys_to_additional_tags' }
 
@@ -87,8 +100,21 @@ def Dumps( data, mime ):
             
         
         return cbor2.dumps( data )
-    
+        
     else:
+        
+        if isinstance( data, dict ):
+            
+            if 'version' not in data:
+                
+                data[ 'version' ] = HC.CLIENT_API_VERSION
+                
+            
+            if 'hydrus_version' not in data:
+                
+                data[ 'hydrus_version' ] = HC.SOFTWARE_VERSION
+                
+            
         
         return json.dumps( data )
         
@@ -129,7 +155,7 @@ def CheckFileService( file_service_key: bytes ):
     
     try:
         
-        service = HG.client_controller.services_manager.GetService( file_service_key )
+        service = CG.client_controller.services_manager.GetService( file_service_key )
         
     except:
         
@@ -148,7 +174,7 @@ def CheckTagService( tag_service_key: bytes ):
     
     try:
         
-        service = HG.client_controller.services_manager.GetService( tag_service_key )
+        service = CG.client_controller.services_manager.GetService( tag_service_key )
         
     except:
         
@@ -163,11 +189,83 @@ def CheckTagService( tag_service_key: bytes ):
     return service
     
 
+def CheckTags( tags: typing.Collection[ str ] ):
+    
+    for tag in tags:
+        
+        try:
+            
+            clean_tag = HydrusTags.CleanTag( tag )
+            
+        except Exception as e:
+            
+            raise HydrusExceptions.BadRequestException( 'Could not parse tag "{}"!'.format( tag ) )
+            
+        
+        if clean_tag == '':
+            
+            raise HydrusExceptions.BadRequestException( 'Tag "{}" was empty!'.format( tag ) )
+            
+        
+    
+
+def GetServicesDict():
+    
+    service_types = [
+        HC.LOCAL_TAG,
+        HC.TAG_REPOSITORY,
+        HC.LOCAL_FILE_DOMAIN,
+        HC.LOCAL_FILE_UPDATE_DOMAIN,
+        HC.FILE_REPOSITORY,
+        HC.COMBINED_LOCAL_FILE,
+        HC.COMBINED_LOCAL_MEDIA,
+        HC.COMBINED_FILE,
+        HC.COMBINED_TAG,
+        HC.LOCAL_RATING_LIKE,
+        HC.LOCAL_RATING_NUMERICAL,
+        HC.LOCAL_RATING_INCDEC,
+        HC.LOCAL_FILE_TRASH_DOMAIN
+    ]
+    
+    services = CG.client_controller.services_manager.GetServices( service_types )
+    
+    services_dict = {}
+    
+    for service in services:
+        
+        service_dict = {
+            'name' : service.GetName(),
+            'type' : service.GetServiceType(),
+            'type_pretty' : HC.service_string_lookup[ service.GetServiceType() ]
+        }
+        
+        if service.GetServiceType() in HC.STAR_RATINGS_SERVICES:
+            
+            shape_label = ClientRatings.shape_to_str_lookup_dict[ service.GetShape() ]
+            
+            service_dict[ 'star_shape' ] =  shape_label
+            
+        
+        if service.GetServiceType() == HC.LOCAL_RATING_NUMERICAL:
+            
+            allows_zero = service.AllowZero()
+            num_stars = service.GetNumStars()
+            
+            service_dict[ 'min_stars' ] = 0 if allows_zero else 1
+            service_dict[ 'max_stars' ] = num_stars
+            
+        
+        services_dict[ service.GetServiceKey().hex() ] = service_dict
+        
+    
+    return services_dict
+    
+
 def GetServiceKeyFromName( service_name: str ):
     
     try:
         
-        service_key = HG.client_controller.services_manager.GetServiceKeyFromName( HC.ALL_SERVICES, service_name )
+        service_key = CG.client_controller.services_manager.GetServiceKeyFromName( HC.ALL_SERVICES, service_name )
         
     except HydrusExceptions.DataMissing:
         
@@ -423,7 +521,7 @@ def ParseClientAPIPOSTArgs( request ):
                 
             except json.decoder.JSONDecodeError as e:
                 
-                raise HydrusExceptions.BadRequestException( 'Sorry, did not understand the JSON you gave me: {}'.format( str( e ) ) )
+                raise HydrusExceptions.BadRequestException( 'Sorry, did not understand the JSON you gave me: {}'.format( e ) )
                 
             
             parsed_request_args = ParseClientAPIPOSTByteArgs( args )
@@ -612,7 +710,7 @@ def ParseLocationContext( request: HydrusServerRequest.HydrusRequest, default: C
         
     
 
-def ParseHashes( request: HydrusServerRequest.HydrusRequest ):
+def ParseHashes( request: HydrusServerRequest.HydrusRequest, optional = False ):
     
     something_was_set = False
     
@@ -642,11 +740,11 @@ def ParseHashes( request: HydrusServerRequest.HydrusRequest ):
         
         hash_id = request.parsed_request_args.GetValue( 'file_id', int )
         
-        hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
+        hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
         
         if len( hash_ids_to_hashes ) > 0:
             
-            hashes.extend( hash_ids_to_hashes[ hash_id ] )
+            hashes.append(hash_ids_to_hashes[ hash_id ])
             
         
     
@@ -656,19 +754,25 @@ def ParseHashes( request: HydrusServerRequest.HydrusRequest ):
         
         hash_ids = request.parsed_request_args.GetValue( 'file_ids', list, expected_list_type = int )
         
-        hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
+        hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
         
         hashes.extend( [ hash_ids_to_hashes[ hash_id ] for hash_id in hash_ids ] )
         
     
     if not something_was_set: # subtly different to 'no hashes'
         
+        if optional:
+            
+            return None
+        
         raise HydrusExceptions.BadRequestException( 'Please include some files in your request--file_id or hash based!' )
         
     
     hashes = HydrusData.DedupeList( hashes )
     
-    CheckHashLength( hashes )
+    if not optional or len(hashes) > 0:
+        
+        CheckHashLength( hashes )
     
     return hashes
     
@@ -894,11 +998,6 @@ class HydrusResourceBooru( HydrusServerResources.HydrusResource ):
         self._service.ReportDataUsed( num_bytes )
         
     
-    def _reportRequestUsed( self, request: HydrusServerRequest.HydrusRequest ):
-        
-        self._service.ReportRequestUsed()
-        
-    
     def _checkService( self, request: HydrusServerRequest.HydrusRequest ):
         
         HydrusServerResources.HydrusResource._checkService( self, request )
@@ -916,22 +1015,24 @@ class HydrusResourceBooruFile( HydrusResourceBooru ):
         share_key = request.parsed_request_args[ 'share_key' ]
         hash = request.parsed_request_args[ 'hash' ]
         
-        HG.client_controller.local_booru_manager.CheckFileAuthorised( share_key, hash )
+        is_attachment = request.parsed_request_args.GetValue( 'download', bool, default_value = False )
         
-        media_result = HG.client_controller.local_booru_manager.GetMediaResult( share_key, hash )
+        CG.client_controller.local_booru_manager.CheckFileAuthorised( share_key, hash )
+        
+        media_result = CG.client_controller.local_booru_manager.GetMediaResult( share_key, hash )
         
         try:
             
             mime = media_result.GetMime()
             
-            path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
+            path = CG.client_controller.client_files_manager.GetFilePath( hash, mime )
             
         except HydrusExceptions.FileMissingException:
             
             raise HydrusExceptions.NotFoundException( 'Could not find that file!' )
             
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path )
+        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path, is_attachment = is_attachment )
         
         return response_context
         
@@ -945,7 +1046,7 @@ class HydrusResourceBooruGallery( HydrusResourceBooru ):
         
         share_key = request.parsed_request_args.GetValue( 'share_key', bytes )
         
-        local_booru_manager = HG.client_controller.local_booru_manager
+        local_booru_manager = CG.client_controller.local_booru_manager
         
         local_booru_manager.CheckShareAuthorised( share_key )
         
@@ -976,7 +1077,7 @@ class HydrusResourceBooruGallery( HydrusResourceBooru ):
     <body>'''
         
         body += '''
-        <div class="timeout">This share ''' + HydrusData.ConvertTimestampToPrettyExpires( timeout ) + '''.</div>'''
+        <div class="timeout">This share ''' + HydrusTime.TimestampToPrettyExpires( timeout ) + '''.</div>'''
         
         if name != '': body += '''
         <h3>''' + name + '''</h3>'''
@@ -1027,7 +1128,7 @@ class HydrusResourceBooruPage( HydrusResourceBooru ):
         share_key = request.parsed_request_args.GetValue( 'share_key', bytes )
         hash = request.parsed_request_args.GetValue( 'hash', bytes )
         
-        local_booru_manager = HG.client_controller.local_booru_manager
+        local_booru_manager = CG.client_controller.local_booru_manager
         
         local_booru_manager.CheckFileAuthorised( share_key, hash )
         
@@ -1051,7 +1152,7 @@ class HydrusResourceBooruPage( HydrusResourceBooru ):
     <body>'''
         
         body += '''
-        <div class="timeout">This share ''' + HydrusData.ConvertTimestampToPrettyExpires( timeout ) + '''.</div>'''
+        <div class="timeout">This share ''' + HydrusTime.TimestampToPrettyExpires( timeout ) + '''.</div>'''
         
         if name != '': body += '''
         <h3>''' + name + '''</h3>'''
@@ -1069,7 +1170,7 @@ class HydrusResourceBooruPage( HydrusResourceBooru ):
         
         mime = media_result.GetMime()
         
-        if mime in HC.IMAGES or mime in HC.ANIMATIONS:
+        if mime in HC.IMAGES or mime in HC.VIEWABLE_ANIMATIONS:
             
             ( width, height ) = media_result.GetResolution()
             
@@ -1116,7 +1217,7 @@ class HydrusResourceBooruThumbnail( HydrusResourceBooru ):
         share_key = request.parsed_request_args.GetValue( 'share_key', bytes )
         hash = request.parsed_request_args.GetValue( 'hash', bytes )
         
-        local_booru_manager = HG.client_controller.local_booru_manager
+        local_booru_manager = CG.client_controller.local_booru_manager
         
         local_booru_manager.CheckFileAuthorised( share_key, hash )
         
@@ -1128,23 +1229,29 @@ class HydrusResourceBooruThumbnail( HydrusResourceBooru ):
         
         if mime in HC.MIMES_WITH_THUMBNAILS:
             
-            client_files_manager = HG.client_controller.client_files_manager
-            
-            path = client_files_manager.GetThumbnailPath( media_result )
-            
-            response_context_mime = HC.APPLICATION_UNKNOWN
-            
-            if not os.path.exists( path ):
+            try:
                 
-                path = HydrusPaths.mimes_to_default_thumbnail_paths[ mime ]
+                path = CG.client_controller.client_files_manager.GetThumbnailPath( media_result )
+                
+                if not os.path.exists( path ):
+                    
+                    # not _supposed_ to happen, but it seems in odd situations it can
+                    raise HydrusExceptions.FileMissingException()
+                    
+                
+            except HydrusExceptions.FileMissingException:
+                
+                path = HydrusFileHandling.mimes_to_default_thumbnail_paths[ mime ]
                 
             
         else:
             
-            path = HydrusPaths.mimes_to_default_thumbnail_paths[ mime ]
+            path = HydrusFileHandling.mimes_to_default_thumbnail_paths[ mime ]
             
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = response_context_mime, path = path )
+        response_mime = HydrusFileHandling.GetThumbnailMime( path )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = response_mime, path = path )
         
         return response_context
         
@@ -1196,11 +1303,11 @@ class HydrusResourceClientAPI( HydrusServerResources.HydrusResource ):
         self._service.ReportDataUsed( num_bytes )
         
     
-    def _reportRequestUsed( self, request: HydrusServerRequest.HydrusRequest ):
+    def _reportRequestStarted( self, request: HydrusServerRequest.HydrusRequest ):
         
-        self._service.ReportRequestUsed()
+        HydrusServerResources.HydrusResource._reportRequestStarted( self, request )
         
-        HG.client_controller.ResetIdleTimerFromClientAPI()
+        CG.client_controller.ResetIdleTimerFromClientAPI()
         
     
     def _checkService( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1318,7 +1425,7 @@ class HydrusResourceClientAPIRestricted( HydrusResourceClientAPI ):
         
         try:
             
-            api_permissions = HG.client_controller.client_api_manager.GetPermissions( access_key )
+            api_permissions = CG.client_controller.client_api_manager.GetPermissions( access_key )
             
         except HydrusExceptions.DataMissing as e:
             
@@ -1346,7 +1453,7 @@ class HydrusResourceClientAPIRestricted( HydrusResourceClientAPI ):
                     
                 except:
                     
-                    raise Exception( 'Problem parsing {}!'.format( name_of_key ) )
+                    raise HydrusExceptions.BadRequestException( 'Problem parsing {}!'.format( name_of_key ) )
                     
                 
             
@@ -1376,7 +1483,7 @@ class HydrusResourceClientAPIRestricted( HydrusResourceClientAPI ):
             
             try:
                 
-                access_key = HG.client_controller.client_api_manager.GetAccessKey( session_key )
+                access_key = CG.client_controller.client_api_manager.GetAccessKey( session_key )
                 
             except HydrusExceptions.DataMissing as e:
                 
@@ -1398,7 +1505,7 @@ class HydrusResourceClientAPIRestrictedAccountSessionKey( HydrusResourceClientAP
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
         
-        new_session_key = HG.client_controller.client_api_manager.GenerateSessionKey( request.client_api_permissions.GetAccessKey() )
+        new_session_key = CG.client_controller.client_api_manager.GenerateSessionKey( request.client_api_permissions.GetAccessKey() )
         
         body_dict = {}
         
@@ -1439,6 +1546,7 @@ class HydrusResourceClientAPIRestrictedGetService( HydrusResourceClientAPIRestri
         request.client_api_permissions.CheckAtLeastOnePermission(
             (
                 ClientAPI.CLIENT_API_PERMISSION_ADD_FILES,
+                ClientAPI.CLIENT_API_PERMISSION_EDIT_RATINGS,
                 ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS,
                 ClientAPI.CLIENT_API_PERMISSION_ADD_NOTES,
                 ClientAPI.CLIENT_API_PERMISSION_MANAGE_PAGES,
@@ -1460,6 +1568,9 @@ class HydrusResourceClientAPIRestrictedGetService( HydrusResourceClientAPIRestri
             HC.COMBINED_LOCAL_MEDIA,
             HC.COMBINED_FILE,
             HC.COMBINED_TAG,
+            HC.LOCAL_RATING_LIKE,
+            HC.LOCAL_RATING_NUMERICAL,
+            HC.LOCAL_RATING_INCDEC,
             HC.LOCAL_FILE_TRASH_DOMAIN
         }
         
@@ -1473,7 +1584,7 @@ class HydrusResourceClientAPIRestrictedGetService( HydrusResourceClientAPIRestri
             
             try:
                 
-                service_key = HG.client_controller.services_manager.GetServiceKeyFromName( allowed_service_types, service_name )
+                service_key = CG.client_controller.services_manager.GetServiceKeyFromName( allowed_service_types, service_name )
                 
             except HydrusExceptions.DataMissing:
                 
@@ -1487,7 +1598,7 @@ class HydrusResourceClientAPIRestrictedGetService( HydrusResourceClientAPIRestri
         
         try:
             
-            service = HG.client_controller.services_manager.GetService( service_key )
+            service = CG.client_controller.services_manager.GetService( service_key )
             
         except HydrusExceptions.DataMissing:
             
@@ -1523,6 +1634,7 @@ class HydrusResourceClientAPIRestrictedGetServices( HydrusResourceClientAPIRestr
         request.client_api_permissions.CheckAtLeastOnePermission(
             (
                 ClientAPI.CLIENT_API_PERMISSION_ADD_FILES,
+                ClientAPI.CLIENT_API_PERMISSION_EDIT_RATINGS,
                 ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS,
                 ClientAPI.CLIENT_API_PERMISSION_ADD_NOTES,
                 ClientAPI.CLIENT_API_PERMISSION_MANAGE_PAGES,
@@ -1551,7 +1663,7 @@ class HydrusResourceClientAPIRestrictedGetServices( HydrusResourceClientAPIRestr
         
         for ( service_types, name ) in jobs:
             
-            services = HG.client_controller.services_manager.GetServices( service_types )
+            services = CG.client_controller.services_manager.GetServices( service_types )
             
             services_list = []
             
@@ -1570,6 +1682,8 @@ class HydrusResourceClientAPIRestrictedGetServices( HydrusResourceClientAPIRestr
             body_dict[ name ] = services_list
             
         
+        body_dict[ 'services' ] = GetServicesDict()
+        
         body = Dumps( body_dict, request.preferred_mime )
         
         response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
@@ -1577,6 +1691,7 @@ class HydrusResourceClientAPIRestrictedGetServices( HydrusResourceClientAPIRestr
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddFiles( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1584,6 +1699,7 @@ class HydrusResourceClientAPIRestrictedAddFiles( HydrusResourceClientAPIRestrict
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_FILES )
         
     
+
 class HydrusResourceClientAPIRestrictedAddFilesAddFile( HydrusResourceClientAPIRestrictedAddFiles ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1597,6 +1713,11 @@ class HydrusResourceClientAPIRestrictedAddFilesAddFile( HydrusResourceClientAPIR
                 raise HydrusExceptions.BadRequestException( 'Path "{}" does not exist!'.format( path ) )
                 
             
+            if not os.path.isfile( path ):
+                
+                raise HydrusExceptions.BadRequestException( 'Path "{}" is not a file!'.format( path ) )
+                
+            
             ( os_file_handle, temp_path ) = HydrusTemp.GetTempPath()
             
             request.temp_file_info = ( os_file_handle, temp_path )
@@ -1606,20 +1727,31 @@ class HydrusResourceClientAPIRestrictedAddFilesAddFile( HydrusResourceClientAPIR
         
         ( os_file_handle, temp_path ) = request.temp_file_info
         
-        file_import_options = HG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_QUIET )
+        file_import_options = CG.client_controller.new_options.GetDefaultFileImportOptions( FileImportOptions.IMPORT_TYPE_QUIET )
         
         file_import_job = ClientImportFiles.FileImportJob( temp_path, file_import_options )
+        
+        body_dict = {}
         
         try:
             
             file_import_status = file_import_job.DoWork()
             
-        except:
+        except Exception as e:
             
-            file_import_status = ClientImportFiles.FileImportStatus( CC.STATUS_ERROR, file_import_job.GetHash(), note = traceback.format_exc() )
+            if isinstance( e, ( HydrusExceptions.VetoException, HydrusExceptions.UnsupportedFileException ) ):
+                
+                note = str( e )
+                
+            else:
+                
+                note = repr( e ).splitlines()[0]
+                
             
-        
-        body_dict = {}
+            file_import_status = ClientImportFiles.FileImportStatus( CC.STATUS_ERROR, file_import_job.GetHash(), note = note )
+            
+            body_dict[ 'traceback' ] = traceback.format_exc()
+            
         
         body_dict[ 'status' ] = file_import_status.status
         body_dict[ 'hash' ] = HydrusData.BytesToNoneOrHex( file_import_status.hash )
@@ -1638,14 +1770,11 @@ class HydrusResourceClientAPIRestrictedAddFilesArchiveFiles( HydrusResourceClien
         
         hashes = set( ParseHashes( request ) )
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        if len( service_keys_to_content_updates ) > 0:
-            
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
-            
+        CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
@@ -1669,17 +1798,31 @@ class HydrusResourceClientAPIRestrictedAddFilesDeleteFiles( HydrusResourceClient
         
         hashes = set( ParseHashes( request ) )
         
-        # expand this to take reason
+        location_context.LimitToServiceTypes( CG.client_controller.services_manager.GetServiceType, ( HC.COMBINED_LOCAL_FILE, HC.COMBINED_LOCAL_MEDIA, HC.LOCAL_FILE_DOMAIN ) )
         
-        location_context.LimitToServiceTypes( HG.client_controller.services_manager.GetServiceType, ( HC.COMBINED_LOCAL_FILE, HC.COMBINED_LOCAL_MEDIA, HC.LOCAL_FILE_DOMAIN ) )
+        if CG.client_controller.new_options.GetBoolean( 'delete_lock_for_archived_files' ):
+            
+            media_results = CG.client_controller.Read( 'media_results', hashes )
+            
+            undeletable_media_results = [ m for m in media_results if m.IsDeleteLocked() ]
+            
+            if len( undeletable_media_results ) > 0:
+                
+                message = 'Sorry, some of the files you selected are currently delete locked. Their hashes are:'
+                message += '\n' * 2
+                message += '\n'.join( sorted( [ m.GetHash().hex() for m in undeletable_media_results ] ) )
+                
+                raise HydrusExceptions.ConflictException( message )
+                
+            
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason )
         
         for service_key in location_context.current_service_keys:
             
-            service_keys_to_content_updates = { service_key : [ content_update ] }
+            content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( service_key, content_update )
             
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -1687,17 +1830,18 @@ class HydrusResourceClientAPIRestrictedAddFilesDeleteFiles( HydrusResourceClient
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddFilesUnarchiveFiles( HydrusResourceClientAPIRestrictedAddFiles ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
         
         hashes = set( ParseHashes( request ) )
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+        CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
@@ -1712,15 +1856,15 @@ class HydrusResourceClientAPIRestrictedAddFilesUndeleteFiles( HydrusResourceClie
         
         hashes = set( ParseHashes( request ) )
         
-        location_context.LimitToServiceTypes( HG.client_controller.services_manager.GetServiceType, ( HC.LOCAL_FILE_DOMAIN, HC.COMBINED_LOCAL_MEDIA ) )
+        location_context.LimitToServiceTypes( CG.client_controller.services_manager.GetServiceType, ( HC.LOCAL_FILE_DOMAIN, HC.COMBINED_LOCAL_MEDIA ) )
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes )
         
         for service_key in location_context.current_service_keys:
             
-            service_keys_to_content_updates = { service_key : [ content_update ] }
+            content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( service_key, content_update )
             
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -1728,6 +1872,67 @@ class HydrusResourceClientAPIRestrictedAddFilesUndeleteFiles( HydrusResourceClie
         return response_context
         
     
+class HydrusResourceClientAPIRestrictedAddFilesGenerateHashes( HydrusResourceClientAPIRestrictedAddFiles ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        if not hasattr( request, 'temp_file_info' ):
+            
+            path = request.parsed_request_args.GetValue( 'path', str )
+            
+            if not os.path.exists( path ):
+                
+                raise HydrusExceptions.BadRequestException( 'Path "{}" does not exist!'.format( path ) )
+                
+            
+            if not os.path.isfile( path ):
+                
+                raise HydrusExceptions.BadRequestException( 'Path "{}" is not a file!'.format( path ) )
+                
+            
+            ( os_file_handle, temp_path ) = HydrusTemp.GetTempPath()
+            
+            request.temp_file_info = ( os_file_handle, temp_path )
+            
+            HydrusPaths.MirrorFile( path, temp_path )
+            
+        
+        ( os_file_handle, temp_path ) = request.temp_file_info
+        
+        mime = HydrusFileHandling.GetMime( temp_path )
+        
+        body_dict = {}
+        
+        sha256_hash = HydrusFileHandling.GetHashFromPath( temp_path )
+        
+        body_dict['hash'] = sha256_hash.hex()
+        
+        if mime in HC.FILES_THAT_HAVE_PERCEPTUAL_HASH or mime in HC.FILES_THAT_CAN_HAVE_PIXEL_HASH:
+            
+            numpy_image = HydrusImageHandling.GenerateNumPyImage( temp_path, mime )
+            
+            if mime in HC.FILES_THAT_HAVE_PERCEPTUAL_HASH:
+                
+                perceptual_hashes = ClientImageHandling.GenerateShapePerceptualHashesNumPy( numpy_image )
+                
+                body_dict['perceptual_hashes'] = [ perceptual_hash.hex() for perceptual_hash in perceptual_hashes ]
+                
+            if mime in HC.FILES_THAT_CAN_HAVE_PIXEL_HASH:
+                
+                pixel_hash = HydrusImageHandling.GetImagePixelHashNumPy( numpy_image )
+                
+                body_dict['pixel_hash'] = pixel_hash.hex()
+                
+            
+        
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        return response_context
+        
+    
+
 class HydrusResourceClientAPIRestrictedAddNotes( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1735,6 +1940,7 @@ class HydrusResourceClientAPIRestrictedAddNotes( HydrusResourceClientAPIRestrict
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_NOTES )
         
     
+
 class HydrusResourceClientAPIRestrictedAddNotesSetNotes( HydrusResourceClientAPIRestrictedAddNotes ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1747,7 +1953,7 @@ class HydrusResourceClientAPIRestrictedAddNotesSetNotes( HydrusResourceClientAPI
             
             hash_id = request.parsed_request_args.GetValue( 'file_id', int )
             
-            hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
+            hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
             
             hash = hash_ids_to_hashes[ hash_id ]
             
@@ -1778,7 +1984,7 @@ class HydrusResourceClientAPIRestrictedAddNotesSetNotes( HydrusResourceClientAPI
             note_import_options.SetExtendExistingNoteIfPossible( extend_existing_note_if_possible )
             note_import_options.SetConflictResolution( conflict_resolution )
             
-            media_result = HG.client_controller.Read( 'media_result', hash )
+            media_result = CG.client_controller.Read( 'media_result', hash )
             
             existing_names_to_notes = media_result.GetNotesManager().GetNamesToNotes()
             
@@ -1787,13 +1993,13 @@ class HydrusResourceClientAPIRestrictedAddNotesSetNotes( HydrusResourceClientAPI
             new_names_to_notes = note_import_options.GetUpdateeNamesToNotes( existing_names_to_notes, names_and_notes )
             
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in new_names_to_notes.items() ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in new_names_to_notes.items() ]
         
         if len( content_updates ) > 0:
             
-            service_keys_to_content_updates = { CC.LOCAL_NOTES_SERVICE_KEY : content_updates }
+            content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, content_updates )
             
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
             
         
         body_dict = {}
@@ -1807,6 +2013,7 @@ class HydrusResourceClientAPIRestrictedAddNotesSetNotes( HydrusResourceClientAPI
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddNotesDeleteNotes( HydrusResourceClientAPIRestrictedAddNotes ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1814,32 +2021,34 @@ class HydrusResourceClientAPIRestrictedAddNotesDeleteNotes( HydrusResourceClient
         if 'hash' in request.parsed_request_args:
             
             hash = request.parsed_request_args.GetValue( 'hash', bytes )
-        
+            
         elif 'file_id' in request.parsed_request_args:
             
             hash_id = request.parsed_request_args.GetValue( 'file_id', int )
             
-            hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
+            hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = [ hash_id ] )
             
             hash = hash_ids_to_hashes[ hash_id ]
-        
+            
         else:
             
             raise HydrusExceptions.BadRequestException( 'There was no file identifier or hash given!' )
+            
         
         note_names = request.parsed_request_args.GetValue( 'note_names', list, expected_list_type = str )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( hash, name ) ) for name in note_names ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( hash, name ) ) for name in note_names ]
         
-        service_keys_to_content_updates = { CC.LOCAL_NOTES_SERVICE_KEY : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, content_updates )
         
-        HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+        CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddTags( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1847,6 +2056,7 @@ class HydrusResourceClientAPIRestrictedAddTags( HydrusResourceClientAPIRestricte
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_TAGS )
         
     
+
 class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRestrictedAddTags ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -1951,10 +2161,10 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
         
         if service_keys_to_actions_to_tags is None:
             
-            raise HydrusExceptions.BadRequestException( 'Need a service-names-to-tags parameter!' )
+            raise HydrusExceptions.BadRequestException( 'Need a service_keys_to_tags or service_keys_to_actions_to_tags parameter!' )
             
         
-        service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         for ( service_key, actions_to_tags ) in service_keys_to_actions_to_tags.items():
             
@@ -1976,7 +2186,7 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
                         
                         tag = tag_item
                         
-                    elif isinstance( tag_item, collections.abc.Collection ) and len( tag_item ) == 2:
+                    elif HydrusData.IsAListLikeCollection( tag_item ) and len( tag_item ) == 2:
                         
                         ( tag, reason ) = tag_item
                         
@@ -2010,20 +2220,20 @@ class HydrusResourceClientAPIRestrictedAddTagsAddTags( HydrusResourceClientAPIRe
                 
                 if content_action == HC.CONTENT_UPDATE_PETITION:
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_action, ( tag, hashes ), reason = tags_to_reasons[ tag ] ) for tag in content_update_tags ]
+                    content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_action, ( tag, hashes ), reason = tags_to_reasons[ tag ] ) for tag in content_update_tags ]
                     
                 else:
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_action, ( tag, hashes ) ) for tag in content_update_tags ]
+                    content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, content_action, ( tag, hashes ) ) for tag in content_update_tags ]
                     
                 
-                service_keys_to_content_updates[ service_key ].extend( content_updates )
+                content_update_package.AddContentUpdates( service_key, content_updates )
                 
             
         
-        if len( service_keys_to_content_updates ) > 0:
+        if content_update_package.HasContent():
             
-            HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -2036,23 +2246,25 @@ class HydrusResourceClientAPIRestrictedAddTagsSearchTags( HydrusResourceClientAP
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
         
+        # this doesn't need 'add tags' atm. I was going to add it, but I'm not sure it is actually appropriate
+        # this thing probably should have been in search files space, but whatever
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES )
         
     
-    def _GetParsedAutocompleteText( self, search, tag_service_key ) -> ClientSearch.ParsedAutocompleteText:
+    def _GetParsedAutocompleteText( self, search, tag_service_key ) -> ClientSearchAutocomplete.ParsedAutocompleteText:
         
-        tag_autocomplete_options = HG.client_controller.tag_display_manager.GetTagAutocompleteOptions( tag_service_key )
+        tag_autocomplete_options = CG.client_controller.tag_display_manager.GetTagAutocompleteOptions( tag_service_key )
         
         collapse_search_characters = True
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( search, tag_autocomplete_options, collapse_search_characters )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( search, tag_autocomplete_options, collapse_search_characters )
         
         parsed_autocomplete_text.SetInclusive( True )
         
         return parsed_autocomplete_text
         
     
-    def _GetTagMatches( self, request: HydrusServerRequest.HydrusRequest, tag_display_type: int, tag_service_key: bytes, parsed_autocomplete_text: ClientSearch.ParsedAutocompleteText ) -> typing.List[ ClientSearch.Predicate ]:
+    def _GetTagMatches( self, request: HydrusServerRequest.HydrusRequest, tag_display_type: int, tag_service_key: bytes, parsed_autocomplete_text: ClientSearchAutocomplete.ParsedAutocompleteText ) -> typing.List[ ClientSearch.Predicate ]:
         
         matches = []
         
@@ -2066,13 +2278,13 @@ class HydrusResourceClientAPIRestrictedAddTagsSearchTags( HydrusResourceClientAP
             
             file_search_context = ClientSearch.FileSearchContext( location_context = location_context, tag_context = tag_context )
             
-            job_key = ClientThreading.JobKey( cancellable = True )
+            job_status = ClientThreading.JobStatus( cancellable = True )
             
-            request.disconnect_callables.append( job_key.Cancel )
+            request.disconnect_callables.append( job_status.Cancel )
             
             search_namespaces_into_full_tags = parsed_autocomplete_text.GetTagAutocompleteOptions().SearchNamespacesIntoFullTags()
             
-            predicates = HG.client_controller.Read( 'autocomplete_predicates', tag_display_type, file_search_context, search_text = autocomplete_search_text, job_key = job_key, search_namespaces_into_full_tags = search_namespaces_into_full_tags )
+            predicates = CG.client_controller.Read( 'autocomplete_predicates', tag_display_type, file_search_context, search_text = autocomplete_search_text, job_status = job_status, search_namespaces_into_full_tags = search_namespaces_into_full_tags )
             
             display_tag_service_key = tag_context.display_service_key
             
@@ -2090,7 +2302,7 @@ class HydrusResourceClientAPIRestrictedAddTagsSearchTags( HydrusResourceClientAP
         
         tag_display_type_str = request.parsed_request_args.GetValue( 'tag_display_type', str, default_value = 'storage' )
         
-        tag_display_type = ClientTags.TAG_DISPLAY_STORAGE if tag_display_type_str == 'storage' else ClientTags.TAG_DISPLAY_ACTUAL
+        tag_display_type = ClientTags.TAG_DISPLAY_STORAGE if tag_display_type_str == 'storage' else ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL
         
         tag_service_key = ParseTagServiceKey( request )
         
@@ -2115,6 +2327,51 @@ class HydrusResourceClientAPIRestrictedAddTagsSearchTags( HydrusResourceClientAP
         return response_context
         
     
+
+class HydrusResourceClientAPIRestrictedAddTagsGetTagSiblingsParents( HydrusResourceClientAPIRestrictedAddTags ):
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        tags = request.parsed_request_args.GetValue( 'tags', list, expected_list_type = str )
+        
+        CheckTags( tags )
+        
+        tags = HydrusTags.CleanTags( tags )
+        
+        tags_to_service_keys_to_siblings_and_parents = CG.client_controller.Read( 'tag_siblings_and_parents_lookup', tags )
+        
+        tags_dict = {}
+        
+        for ( tag, service_keys_to_siblings_parents ) in tags_to_service_keys_to_siblings_and_parents.items():
+            
+            tag_dict = {}
+            
+            for ( service_key, siblings_parents ) in service_keys_to_siblings_parents.items():
+                
+                tag_dict[ service_key.hex() ] = {
+                    'siblings': list( siblings_parents[0] ),
+                    'ideal_tag': siblings_parents[1],
+                    'descendants': list( siblings_parents[2] ),
+                    'ancestors': list( siblings_parents[3] )
+                }
+                
+            
+            tags_dict[ tag ] = tag_dict
+            
+        
+        body_dict = {
+            'tags' : tags_dict,
+            'services' : GetServicesDict()
+        }
+        
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        return response_context
+        
+    
+
 class HydrusResourceClientAPIRestrictedAddTagsCleanTags( HydrusResourceClientAPIRestrictedAddTags ):
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2136,6 +2393,7 @@ class HydrusResourceClientAPIRestrictedAddTagsCleanTags( HydrusResourceClientAPI
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddURLs( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2143,6 +2401,7 @@ class HydrusResourceClientAPIRestrictedAddURLs( HydrusResourceClientAPIRestricte
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_ADD_URLS )
         
     
+
 class HydrusResourceClientAPIRestrictedAddURLsAssociateURL( HydrusResourceClientAPIRestrictedAddURLs ):
     
     def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2182,7 +2441,7 @@ class HydrusResourceClientAPIRestrictedAddURLsAssociateURL( HydrusResourceClient
                 
             
         
-        domain_manager = HG.client_controller.network_engine.domain_manager
+        domain_manager = CG.client_controller.network_engine.domain_manager
         
         try:
             
@@ -2205,29 +2464,33 @@ class HydrusResourceClientAPIRestrictedAddURLsAssociateURL( HydrusResourceClient
             raise HydrusExceptions.BadRequestException( 'Did not find any hashes to apply the urls to!' )
             
         
-        service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         if len( urls_to_add ) > 0:
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls_to_add, applicable_hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( urls_to_add, applicable_hashes ) )
             
-            service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update )
+            content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
             
         
         if len( urls_to_delete ) > 0:
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( urls_to_delete, applicable_hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( urls_to_delete, applicable_hashes ) )
             
-            service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ].append( content_update )
+            content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
             
         
-        HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+        if content_update_package.HasContent():
+            
+            CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
+            
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
         return response_context
         
     
+
 class HydrusResourceClientAPIRestrictedAddURLsGetURLFiles( HydrusResourceClientAPIRestrictedAddURLs ):
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2243,16 +2506,18 @@ class HydrusResourceClientAPIRestrictedAddURLsGetURLFiles( HydrusResourceClientA
         
         try:
             
-            normalised_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+            normalised_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
             
         except HydrusExceptions.URLClassException as e:
             
             raise HydrusExceptions.BadRequestException( e )
             
         
-        url_statuses = HG.client_controller.Read( 'url_statuses', normalised_url )
+        url_statuses = CG.client_controller.Read( 'url_statuses', normalised_url )
         
         json_happy_url_statuses = []
+        
+        we_only_saw_successful = True
         
         for file_import_status in url_statuses:
             
@@ -2269,12 +2534,23 @@ class HydrusResourceClientAPIRestrictedAddURLsGetURLFiles( HydrusResourceClientA
             
             json_happy_url_statuses.append( d )
             
+            if file_import_status.status not in CC.SUCCESSFUL_IMPORT_STATES:
+                
+                we_only_saw_successful = False
+                
+            
         
         body_dict = { 'normalised_url' : normalised_url, 'url_file_statuses' : json_happy_url_statuses }
         
         body = Dumps( body_dict, request.preferred_mime )
         
         response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        if we_only_saw_successful:
+            
+            # not likely to change much, so no worries about reducing overhead here
+            response_context.SetMaxAge( 30 )
+            
         
         return response_context
         
@@ -2292,9 +2568,9 @@ class HydrusResourceClientAPIRestrictedAddURLsGetURLInfo( HydrusResourceClientAP
         
         try:
             
-            normalised_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+            normalised_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
             
-            ( url_type, match_name, can_parse, cannot_parse_reason ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( normalised_url )
+            ( url_type, match_name, can_parse, cannot_parse_reason ) = CG.client_controller.network_engine.domain_manager.GetURLParseCapability( normalised_url )
             
         except HydrusExceptions.URLClassException as e:
             
@@ -2310,7 +2586,8 @@ class HydrusResourceClientAPIRestrictedAddURLsGetURLInfo( HydrusResourceClientAP
         
         body = Dumps( body_dict, request.preferred_mime )
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        # max age of ten minutes here
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body, max_age = 600 )
         
         return response_context
         
@@ -2378,12 +2655,12 @@ class HydrusResourceClientAPIRestrictedAddURLsImportURL( HydrusResourceClientAPI
         
         def do_it():
             
-            return HG.client_controller.gui.ImportURLFromAPI( url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
+            return CG.client_controller.gui.ImportURLFromAPI( url, filterable_tags, additional_service_keys_to_tags, destination_page_name, destination_page_key, show_destination_page )
             
         
         try:
             
-            ( normalised_url, result_text ) = HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it )
+            ( normalised_url, result_text ) = CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it )
             
         except HydrusExceptions.URLClassException as e:
             
@@ -2401,6 +2678,252 @@ class HydrusResourceClientAPIRestrictedAddURLsImportURL( HydrusResourceClientAPI
         return response_context
         
     
+
+class HydrusResourceClientAPIRestrictedEditRatings( HydrusResourceClientAPIRestricted ):
+    
+    def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_EDIT_RATINGS )
+        
+    
+
+class HydrusResourceClientAPIRestrictedEditRatingsSetRating( HydrusResourceClientAPIRestrictedEditRatings ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        rating_service_key = request.parsed_request_args.GetValue( 'rating_service_key', bytes )
+        
+        applicable_hashes = set( ParseHashes( request ) )
+        
+        if len( applicable_hashes ) == 0:
+            
+            raise HydrusExceptions.BadRequestException( 'Did not find any hashes to apply the ratings to!' )
+            
+        
+        if 'rating' not in request.parsed_request_args:
+            
+            raise HydrusExceptions.BadRequestException( 'Sorry, you need to give a rating to set it to!' )
+            
+        
+        rating = request.parsed_request_args[ 'rating' ]
+        
+        rating_service = CG.client_controller.services_manager.GetService( rating_service_key )
+        
+        rating_service_type = rating_service.GetServiceType()
+        
+        none_ok = True
+        
+        if rating_service_type == HC.LOCAL_RATING_LIKE:
+            
+            expecting_type = bool
+            
+        elif rating_service_type == HC.LOCAL_RATING_NUMERICAL:
+            
+            expecting_type = int
+            
+        elif rating_service_type == HC.LOCAL_RATING_INCDEC:
+            
+            expecting_type = int
+            
+            none_ok = False
+            
+        else:
+            
+            raise HydrusExceptions.BadRequestException( 'That service is not a rating service!' )
+            
+        
+        if rating is None:
+            
+            if not none_ok:
+                
+                raise HydrusExceptions.BadRequestException( 'Sorry, this service does not allow a null rating!' )
+                
+            
+        elif not isinstance( rating, expecting_type ):
+            
+            raise HydrusExceptions.BadRequestException( 'Sorry, this service expects a "{}" rating!'.format( expecting_type.__name__ ) )
+            
+        
+        rating_for_content_update = rating
+        
+        if rating_service_type == HC.LOCAL_RATING_LIKE:
+            
+            if isinstance( rating, bool ):
+                
+                rating_for_content_update = 1.0 if rating else 0.0
+                
+            
+        elif rating_service_type == HC.LOCAL_RATING_NUMERICAL:
+            
+            if isinstance( rating, int ):
+                
+                rating_for_content_update = rating_service.ConvertStarsToRating( rating )
+                
+            
+        elif rating_service_type == HC.LOCAL_RATING_INCDEC:
+            
+            if rating < 0:
+                
+                rating_for_content_update = 0
+                
+            
+        
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating_for_content_update, applicable_hashes ) )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( rating_service_key, content_update )
+        
+        CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedEditTimes( HydrusResourceClientAPIRestricted ):
+    
+    def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_EDIT_TIMES )
+        
+    
+
+class HydrusResourceClientAPIRestrictedEditTimesSetTime( HydrusResourceClientAPIRestrictedEditTimes ):
+    
+    def _threadDoPOSTJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        hashes = ParseHashes( request )
+        
+        if len( hashes ) == 0:
+            
+            raise HydrusExceptions.BadRequestException( 'Did not find any hashes to apply the times to!' )
+            
+        
+        media_results = CG.client_controller.Read( 'media_results', hashes )
+        
+        if 'timestamp' in request.parsed_request_args:
+            
+            timestamp = request.parsed_request_args.GetValueOrNone( 'timestamp', float )
+            
+            timestamp_ms = HydrusTime.MillisecondiseS( timestamp )
+            
+        elif 'timestamp_ms' in request.parsed_request_args:
+            
+            timestamp_ms = request.parsed_request_args.GetValueOrNone( 'timestamp_ms', int )
+            
+        else:
+            
+            raise HydrusExceptions.BadRequestException( 'Sorry, you have to specify a timestamp, even if you want to send "null"!' )
+            
+        
+        location = None
+        
+        timestamp_type = request.parsed_request_args.GetValue( 'timestamp_type', int )
+        
+        if timestamp_type is None:
+            
+            raise HydrusExceptions.BadRequestException( 'Sorry, you have to specify the timestamp type!' )
+            
+        
+        if timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
+            
+            domain = request.parsed_request_args.GetValue( 'domain', str )
+            
+            if domain == 'local':
+                
+                timestamp_type = HC.TIMESTAMP_TYPE_MODIFIED_FILE
+                
+            else:
+                
+                location = domain
+                
+            
+        elif timestamp_type == HC.TIMESTAMP_TYPE_LAST_VIEWED:
+            
+            canvas_type = request.parsed_request_args.GetValueOrNone( 'canvas_type', int )
+            
+            if canvas_type is None:
+                
+                canvas_type = CC.CANVAS_MEDIA_VIEWER
+                
+            
+            if canvas_type not in ( CC.CANVAS_MEDIA_VIEWER, CC.CANVAS_PREVIEW ):
+                
+                raise HydrusExceptions.BadRequestException( 'Sorry, the canvas type needs to be either 0 or 1!' )
+                
+            
+            location = canvas_type
+            
+        elif timestamp_type in ( HC.TIMESTAMP_TYPE_IMPORTED, HC.TIMESTAMP_TYPE_DELETED, HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED ):
+            
+            file_service_key = request.parsed_request_args.GetValue( 'file_service_key', bytes )
+            
+            if not CG.client_controller.services_manager.ServiceExists( file_service_key ):
+                
+                raise HydrusExceptions.BadRequestException( 'Sorry, do not know that service!' )
+                
+            
+            if CG.client_controller.services_manager.GetServiceType( file_service_key ) not in HC.REAL_FILE_SERVICES:
+                
+                raise HydrusExceptions.BadRequestException( 'Sorry, you have to specify a file service service key!' )
+                
+            
+            location = file_service_key
+            
+        elif timestamp_type in ( HC.TIMESTAMP_TYPE_MODIFIED_FILE, HC.TIMESTAMP_TYPE_ARCHIVED ):
+            
+            pass # simple; no additional location data
+            
+        else:
+            
+            raise HydrusExceptions.BadRequestException( f'Sorry, do not understand that timestamp type "{timestamp_type}"!' )
+            
+        
+        if timestamp_type != HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
+            
+            if timestamp_ms is None:
+                
+                raise HydrusExceptions.BadRequestException( 'Sorry, you can only delete web domain timestamps (type 0) for now!' )
+                
+            else:
+                
+                timestamp_data_stub = ClientTime.TimestampData( timestamp_type = timestamp_type, location = location )
+                
+                for media_result in media_results:
+                    
+                    result = media_result.GetTimesManager().GetTimestampMSFromStub( timestamp_data_stub )
+                    
+                    if result is None:
+                        
+                        raise HydrusExceptions.BadRequestException( f'Sorry, if the timestamp type is other than 0 (web domain), then you cannot add new timestamps, only edit existing ones. I did not see the given timestamp type on one of the files you sent, specifically: {media_result.GetHash().hex()}' )
+                        
+                    
+                
+            
+        
+        timestamp_data = ClientTime.TimestampData( timestamp_type = timestamp_type, location = location, timestamp_ms = timestamp_ms )
+        
+        if timestamp_ms is None:
+            
+            action = HC.CONTENT_UPDATE_DELETE
+            
+        else:
+            
+            action = HC.CONTENT_UPDATE_SET
+            
+        
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, action, ( hashes, timestamp_data ) ) ]
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_updates )
+        
+        CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
 class HydrusResourceClientAPIRestrictedGetFiles( HydrusResourceClientAPIRestricted ):
     
     def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2408,6 +2931,7 @@ class HydrusResourceClientAPIRestrictedGetFiles( HydrusResourceClientAPIRestrict
         request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_SEARCH_FILES )
         
     
+
 class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClientAPIRestrictedGetFiles ):
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2469,11 +2993,11 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
                 return_file_ids = request.parsed_request_args.GetValue( 'return_file_ids', bool )
                 
             
-            job_key = ClientThreading.JobKey( cancellable = True )
+            job_status = ClientThreading.JobStatus( cancellable = True )
             
-            request.disconnect_callables.append( job_key.Cancel )
+            request.disconnect_callables.append( job_status.Cancel )
             
-            hash_ids = HG.client_controller.Read( 'file_query_ids', file_search_context, job_key = job_key, sort_by = sort_by, apply_implicit_limit = False )
+            hash_ids = CG.client_controller.Read( 'file_query_ids', file_search_context, job_status = job_status, sort_by = sort_by, apply_implicit_limit = False )
             
         
         request.client_api_permissions.SetLastSearchResults( hash_ids )
@@ -2482,7 +3006,7 @@ class HydrusResourceClientAPIRestrictedGetFilesSearchFiles( HydrusResourceClient
         
         if return_hashes:
             
-            hash_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
+            hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hash_ids = hash_ids )
             
             # maintain sort
             body_dict[ 'hashes' ] = [ hash_ids_to_hashes[ hash_id ].hex() for hash_id in hash_ids ]
@@ -2512,7 +3036,7 @@ class HydrusResourceClientAPIRestrictedGetFilesGetFile( HydrusResourceClientAPIR
                 
                 request.client_api_permissions.CheckPermissionToSeeFiles( ( file_id, ) )
                 
-                ( media_result, ) = HG.client_controller.Read( 'media_results_from_ids', ( file_id, ) )
+                ( media_result, ) = CG.client_controller.Read( 'media_results_from_ids', ( file_id, ) )
                 
             elif 'hash' in request.parsed_request_args:
                 
@@ -2520,7 +3044,7 @@ class HydrusResourceClientAPIRestrictedGetFilesGetFile( HydrusResourceClientAPIR
                 
                 hash = request.parsed_request_args.GetValue( 'hash', bytes )
                 
-                media_result = HG.client_controller.Read( 'media_result', hash )
+                media_result = CG.client_controller.Read( 'media_result', hash )
                 
             else:
                 
@@ -2537,7 +3061,7 @@ class HydrusResourceClientAPIRestrictedGetFilesGetFile( HydrusResourceClientAPIR
             hash = media_result.GetHash()
             mime = media_result.GetMime()
             
-            path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
+            path = CG.client_controller.client_files_manager.GetFilePath( hash, mime )
             
             if not os.path.exists( path ):
                 
@@ -2549,7 +3073,71 @@ class HydrusResourceClientAPIRestrictedGetFilesGetFile( HydrusResourceClientAPIR
             raise HydrusExceptions.NotFoundException( 'Could not find that file!' )
             
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path )
+        is_attachment = request.parsed_request_args.GetValue( 'download', bool, default_value = False )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path, is_attachment = is_attachment )
+        
+        return response_context
+        
+
+class HydrusResourceClientAPIRestrictedGetFilesGetRenderedFile( HydrusResourceClientAPIRestrictedGetFiles ):
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        try:
+            
+            media_result: ClientMedia.MediaSingleton
+            
+            if 'file_id' in request.parsed_request_args:
+                
+                file_id = request.parsed_request_args.GetValue( 'file_id', int )
+                
+                request.client_api_permissions.CheckPermissionToSeeFiles( ( file_id, ) )
+                
+                ( media_result, ) = CG.client_controller.Read( 'media_results_from_ids', ( file_id, ) )
+                
+            elif 'hash' in request.parsed_request_args:
+                
+                request.client_api_permissions.CheckCanSeeAllFiles()
+                
+                hash = request.parsed_request_args.GetValue( 'hash', bytes )
+                
+                media_result = CG.client_controller.Read( 'media_result', hash )
+                
+            else:
+                
+                raise HydrusExceptions.BadRequestException( 'Please include a file_id or hash parameter!' )
+                
+            
+        except HydrusExceptions.DataMissing as e:
+            
+            raise HydrusExceptions.NotFoundException( 'One or more of those file identifiers was missing!' )
+            
+        
+        if not media_result.IsStaticImage():
+            
+            raise HydrusExceptions.BadRequestException('Requested file is not an image!')
+            
+        
+        renderer: ClientRendering.ImageRenderer = CG.client_controller.GetCache( 'images' ).GetImageRenderer( media_result )
+        
+        while not renderer.IsReady():
+            
+            if request.disconnected:
+                
+                return
+                
+            
+            time.sleep( 0.1 )
+            
+
+        numpy_image = renderer.GetNumPyImage()
+        
+        body = HydrusImageHandling.GeneratePNGBytesNumPy( numpy_image )
+        
+        is_attachment = request.parsed_request_args.GetValue( 'download', bool, default_value = False )
+
+        response_context = HydrusServerResources.ResponseContext( 200, mime = HC.IMAGE_PNG, body = body, is_attachment = is_attachment, max_age = 86400 * 365 )
         
         return response_context
         
@@ -2597,7 +3185,7 @@ class HydrusResourceClientAPIRestrictedGetFilesFileHashes( HydrusResourceClientA
         
         CheckHashLength( source_hashes, hash_type = source_hash_type )
         
-        source_to_desired = HG.client_controller.Read( 'file_hashes', source_hashes, source_hash_type, desired_hash_type )
+        source_to_desired = CG.client_controller.Read( 'file_hashes', source_hashes, source_hash_type, desired_hash_type )
         
         encoded_source_to_desired = { source_hash.hex() : desired_hash.hex() for ( source_hash, desired_hash ) in source_to_desired.items() }
         
@@ -2612,6 +3200,17 @@ class HydrusResourceClientAPIRestrictedGetFilesFileHashes( HydrusResourceClientA
         return response_context
         
     
+
+def AddMissingHashToFileMetadata( metadata: list, hash: bytes ):
+    
+    metadata_row = {
+        'file_id' : None,
+        'hash' : hash.hex()
+    }
+    
+    metadata.append( metadata_row )
+    
+
 class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClientAPIRestrictedGetFiles ):
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
@@ -2621,294 +3220,371 @@ class HydrusResourceClientAPIRestrictedGetFilesFileMetadata( HydrusResourceClien
         hide_service_keys_tags = request.parsed_request_args.GetValue( 'hide_service_keys_tags', bool, default_value = True )
         detailed_url_information = request.parsed_request_args.GetValue( 'detailed_url_information', bool, default_value = False )
         include_notes = request.parsed_request_args.GetValue( 'include_notes', bool, default_value = False )
+        include_milliseconds = request.parsed_request_args.GetValue( 'include_milliseconds', bool, default_value = False )
+        include_services_object = request.parsed_request_args.GetValue( 'include_services_object', bool, default_value = True )
         create_new_file_ids = request.parsed_request_args.GetValue( 'create_new_file_ids', bool, default_value = False )
+        include_blurhash = request.parsed_request_args.GetValue( 'include_blurhash', bool, default_value = False )
+        
+        if include_milliseconds:
+            
+            time_converter = lambda t: t / 1000
+            
+        else:
+            
+            time_converter = HydrusTime.SecondiseMS
+            
         
         hashes = ParseHashes( request )
         
-        file_ids_to_hashes = HG.client_controller.Read( 'hash_ids_to_hashes', hashes = hashes, create_new_hash_ids = create_new_file_ids )
+        hash_ids_to_hashes = CG.client_controller.Read( 'hash_ids_to_hashes', hashes = hashes, create_new_hash_ids = create_new_file_ids )
         
-        missing_hashes = set( hashes ).difference( file_ids_to_hashes.values() )
+        hashes_to_hash_ids = { hash : hash_id for ( hash_id, hash ) in hash_ids_to_hashes.items() }
         
-        file_ids = set( file_ids_to_hashes.keys() )
+        hash_ids = set( hash_ids_to_hashes.keys() )
         
-        request.client_api_permissions.CheckPermissionToSeeFiles( file_ids )
+        request.client_api_permissions.CheckPermissionToSeeFiles( hash_ids )
         
         body_dict = {}
         
         metadata = []
         
-        for hash in missing_hashes:
-            
-            metadata_row = {
-                'file_id' : None,
-                'hash' : hash.hex()
-            }
-            
-            metadata.append( metadata_row )
-            
-        
         if only_return_identifiers:
             
-            for ( file_id, hash ) in file_ids_to_hashes.items():
+            for hash in hashes:
                 
-                metadata_row = {
-                    'file_id' : file_id,
-                    'hash' : hash.hex()
-                }
-                
-                metadata.append( metadata_row )
+                if hash in hashes_to_hash_ids:
+                    
+                    metadata_row = {
+                        'file_id' : hashes_to_hash_ids[ hash ],
+                        'hash' : hash.hex()
+                    }
+                    
+                    metadata.append( metadata_row )
+                    
+                else:
+                    
+                    AddMissingHashToFileMetadata( metadata, hash )
+                    
                 
             
         elif only_return_basic_information:
             
-            file_info_managers = HG.client_controller.Read( 'file_info_managers_from_ids', file_ids, sorted = True )
+            file_info_managers = CG.client_controller.Read( 'file_info_managers_from_ids', hash_ids )
             
-            for file_info_manager in file_info_managers:
+            hashes_to_file_info_managers = { file_info_manager.hash : file_info_manager for file_info_manager in file_info_managers }
+            
+            for hash in hashes:
                 
-                metadata_row = {
-                    'file_id' : file_info_manager.hash_id,
-                    'hash' : file_info_manager.hash.hex(),
-                    'size' : file_info_manager.size,
-                    'mime' : HC.mime_mimetype_string_lookup[ file_info_manager.mime ],
-                    'ext' : HC.mime_ext_lookup[ file_info_manager.mime ],
-                    'width' : file_info_manager.width,
-                    'height' : file_info_manager.height,
-                    'duration' : file_info_manager.duration,
-                    'num_frames' : file_info_manager.num_frames,
-                    'num_words' : file_info_manager.num_words,
-                    'has_audio' : file_info_manager.has_audio
-                }
-                
-                metadata.append( metadata_row )
+                if hash in hashes_to_file_info_managers:
+                    
+                    file_info_manager = hashes_to_file_info_managers[ hash ]
+                    
+                    metadata_row = {
+                        'file_id' : file_info_manager.hash_id,
+                        'hash' : file_info_manager.hash.hex(),
+                        'size' : file_info_manager.size,
+                        'mime' : HC.mime_mimetype_string_lookup[ file_info_manager.mime ],
+                        'filetype_human' : HC.mime_string_lookup[ file_info_manager.mime ],
+                        'filetype_enum' : file_info_manager.mime,
+                        'ext' : HC.mime_ext_lookup[ file_info_manager.mime ],
+                        'width' : file_info_manager.width,
+                        'height' : file_info_manager.height,
+                        'duration' : file_info_manager.duration,
+                        'num_frames' : file_info_manager.num_frames,
+                        'num_words' : file_info_manager.num_words,
+                        'has_audio' : file_info_manager.has_audio
+                    }
+                    
+                    filetype_forced = file_info_manager.FiletypeIsForced()
+                    
+                    metadata_row[ 'filetype_forced' ] = filetype_forced
+                    
+                    if filetype_forced:
+                        
+                        metadata_row[ 'original_mime' ] = HC.mime_mimetype_string_lookup[ file_info_manager.original_mime ]
+                        
+                    
+                    if include_blurhash:
+                        
+                        metadata_row[ 'blurhash' ] = file_info_manager.blurhash
+                        
+                    
+                    metadata.append( metadata_row )
+                    
+                else:
+                    
+                    AddMissingHashToFileMetadata( metadata, hash )
+                    
                 
             
         else:
             
-            media_results = HG.client_controller.Read( 'media_results_from_ids', file_ids, sorted = True )
+            media_results = CG.client_controller.Read( 'media_results_from_ids', hash_ids )
             
-            services_manager = HG.client_controller.services_manager
+            hashes_to_media_results = { media_result.GetFileInfoManager().hash : media_result for media_result in media_results }
             
+            services_manager = CG.client_controller.services_manager
+            
+            rating_service_keys = services_manager.GetServiceKeys( HC.RATINGS_SERVICES )
             tag_service_keys = services_manager.GetServiceKeys( HC.ALL_TAG_SERVICES )
             service_keys_to_types = { service.GetServiceKey() : service.GetServiceType() for service in services_manager.GetServices() }
             service_keys_to_names = services_manager.GetServiceKeysToNames()
             
             ipfs_service_keys = services_manager.GetServiceKeys( ( HC.IPFS, ) )
             
-            thumbnail_bounding_dimensions = HG.client_controller.options[ 'thumbnail_dimensions' ]
-            thumbnail_scale_type = HG.client_controller.new_options.GetInteger( 'thumbnail_scale_type' )
-            thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+            thumbnail_bounding_dimensions = CG.client_controller.options[ 'thumbnail_dimensions' ]
+            thumbnail_scale_type = CG.client_controller.new_options.GetInteger( 'thumbnail_scale_type' )
+            thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
             
-            for media_result in media_results:
+            for hash in hashes:
                 
-                file_info_manager = media_result.GetFileInfoManager()
-                
-                mime = file_info_manager.mime
-                width = file_info_manager.width
-                height = file_info_manager.height
-                
-                metadata_row = {
-                    'file_id' : file_info_manager.hash_id,
-                    'hash' : file_info_manager.hash.hex(),
-                    'size' : file_info_manager.size,
-                    'mime' : HC.mime_mimetype_string_lookup[ mime ],
-                    'ext' : HC.mime_ext_lookup[ mime ],
-                    'width' : width,
-                    'height' : height,
-                    'duration' : file_info_manager.duration,
-                    'num_frames' : file_info_manager.num_frames,
-                    'num_words' : file_info_manager.num_words,
-                    'has_audio' : file_info_manager.has_audio
-                }
-                
-                if file_info_manager.mime in HC.MIMES_WITH_THUMBNAILS:
+                if hash in hashes_to_media_results:
                     
-                    if width is not None and height is not None and width > 0 and height > 0:
-                        
-                        ( clip_rect, ( expected_thumbnail_width, expected_thumbnail_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), thumbnail_bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
-                        
-                        metadata_row[ 'thumbnail_width' ] = expected_thumbnail_width
-                        metadata_row[ 'thumbnail_height' ] = expected_thumbnail_height
-                        
+                    media_result = hashes_to_media_results[ hash ]
                     
-                
-                if include_notes:
+                    file_info_manager = media_result.GetFileInfoManager()
                     
-                    metadata_row[ 'notes' ] = media_result.GetNotesManager().GetNamesToNotes()
-                
-                locations_manager = media_result.GetLocationsManager()
-                
-                metadata_row[ 'file_services' ] = {
-                    'current' : {},
-                    'deleted' : {}
-                }
-                
-                current = locations_manager.GetCurrent()
-                
-                for file_service_key in current:
+                    mime = file_info_manager.mime
+                    width = file_info_manager.width
+                    height = file_info_manager.height
                     
-                    timestamp = locations_manager.GetCurrentTimestamp( file_service_key )
-                    
-                    metadata_row[ 'file_services' ][ 'current' ][ file_service_key.hex() ] = {
-                        'name' : service_keys_to_names[ file_service_key ],
-                        'type' : service_keys_to_types[ file_service_key ],
-                        'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ file_service_key ] ],
-                        'time_imported' : timestamp
+                    metadata_row = {
+                        'file_id' : file_info_manager.hash_id,
+                        'hash' : file_info_manager.hash.hex(),
+                        'size' : file_info_manager.size,
+                        'mime' : HC.mime_mimetype_string_lookup[ mime ],
+                        'filetype_human' : HC.mime_string_lookup[ file_info_manager.mime ],
+                        'filetype_enum' : file_info_manager.mime,
+                        'ext' : HC.mime_ext_lookup[ mime ],
+                        'width' : width,
+                        'height' : height,
+                        'duration' : file_info_manager.duration,
+                        'num_frames' : file_info_manager.num_frames,
+                        'num_words' : file_info_manager.num_words,
+                        'has_audio' : file_info_manager.has_audio,
+                        'blurhash' : file_info_manager.blurhash,
+                        'pixel_hash' : None if file_info_manager.pixel_hash is None else file_info_manager.pixel_hash.hex()
                     }
                     
-                
-                deleted = locations_manager.GetDeleted()
-                
-                for file_service_key in deleted:
+                    filetype_forced = file_info_manager.FiletypeIsForced()
                     
-                    ( timestamp, original_timestamp ) = locations_manager.GetDeletedTimestamps( file_service_key )
+                    metadata_row[ 'filetype_forced' ] = filetype_forced
                     
-                    metadata_row[ 'file_services' ][ 'deleted' ][ file_service_key.hex() ] = {
-                        'name' : service_keys_to_names[ file_service_key ],
-                        'type' : service_keys_to_types[ file_service_key ],
-                        'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ file_service_key ] ],
-                        'time_deleted' : timestamp,
-                        'time_imported' : original_timestamp
+                    if filetype_forced:
+                        
+                        metadata_row[ 'original_mime' ] = HC.mime_mimetype_string_lookup[ file_info_manager.original_mime ]
+                        
+                    
+                    if file_info_manager.mime in HC.MIMES_WITH_THUMBNAILS:
+                        
+                        if width is not None and height is not None and width > 0 and height > 0:
+                            
+                            ( expected_thumbnail_width, expected_thumbnail_height ) = HydrusImageHandling.GetThumbnailResolution( ( width, height ), thumbnail_bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
+                            
+                            metadata_row[ 'thumbnail_width' ] = expected_thumbnail_width
+                            metadata_row[ 'thumbnail_height' ] = expected_thumbnail_height
+                            
+                        
+                    
+                    if include_notes:
+                        
+                        metadata_row[ 'notes' ] = media_result.GetNotesManager().GetNamesToNotes()
+                        
+                    
+                    locations_manager = media_result.GetLocationsManager()
+                    
+                    metadata_row[ 'file_services' ] = {
+                        'current' : {},
+                        'deleted' : {}
                     }
                     
-                
-                timestamp_manager = locations_manager.GetTimestampManager()
-                
-                metadata_row[ 'time_modified' ] = timestamp_manager.GetAggregateModifiedTimestamp()
-                
-                time_modified_details = timestamp_manager.GetDomainModifiedTimestamps()
-                
-                local_modified = timestamp_manager.GetFileModifiedTimestamp()
-                
-                if local_modified is not None:
+                    times_manager = locations_manager.GetTimesManager()
                     
-                    time_modified_details[ 'local' ] = local_modified
+                    current = locations_manager.GetCurrent()
                     
-                
-                metadata_row[ 'time_modified_details' ] = time_modified_details
-                
-                metadata_row[ 'is_inbox' ] = locations_manager.inbox
-                metadata_row[ 'is_local' ] = locations_manager.IsLocal()
-                metadata_row[ 'is_trashed' ] = locations_manager.IsTrashed()
-                metadata_row[ 'is_deleted' ] = CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY in locations_manager.GetDeleted() or locations_manager.IsTrashed()
-                
-                metadata_row[ 'has_exif' ] = file_info_manager.has_exif
-                metadata_row[ 'has_human_readable_embedded_metadata' ] = file_info_manager.has_human_readable_embedded_metadata
-                metadata_row[ 'has_icc_profile' ] = file_info_manager.has_icc_profile
-                
-                known_urls = sorted( locations_manager.GetURLs() )
-                
-                metadata_row[ 'known_urls' ] = known_urls
-                
-                metadata_row[ 'ipfs_multihashes' ] = { ipfs_service_key.hex() : multihash for ( ipfs_service_key, multihash ) in locations_manager.GetServiceFilenames().items() if ipfs_service_key in ipfs_service_keys }
-                
-                if detailed_url_information:
-                    
-                    detailed_known_urls = []
-                    
-                    for known_url in known_urls:
+                    for file_service_key in current:
                         
-                        try:
+                        metadata_row[ 'file_services' ][ 'current' ][ file_service_key.hex() ] = {
+                            'name' : service_keys_to_names[ file_service_key ],
+                            'type' : service_keys_to_types[ file_service_key ],
+                            'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ file_service_key ] ],
+                            'time_imported' : time_converter( times_manager.GetImportedTimestampMS( file_service_key ) )
+                        }
+                        
+                    
+                    deleted = locations_manager.GetDeleted()
+                    
+                    for file_service_key in deleted:
+                        
+                        metadata_row[ 'file_services' ][ 'deleted' ][ file_service_key.hex() ] = {
+                            'name' : service_keys_to_names[ file_service_key ],
+                            'type' : service_keys_to_types[ file_service_key ],
+                            'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ file_service_key ] ],
+                            'time_deleted' : time_converter( times_manager.GetDeletedTimestampMS( file_service_key ) ),
+                            'time_imported' : time_converter( times_manager.GetPreviouslyImportedTimestampMS( file_service_key ) )
+                        }
+                        
+                    
+                    metadata_row[ 'time_modified' ] = time_converter( times_manager.GetAggregateModifiedTimestampMS() )
+                    
+                    domains_to_file_modified_timestamps_ms = times_manager.GetDomainModifiedTimestampsMS()
+                    
+                    local_modified_timestamp_ms = times_manager.GetFileModifiedTimestampMS()
+                    
+                    if local_modified_timestamp_ms is not None:
+                        
+                        domains_to_file_modified_timestamps_ms[ 'local' ] = local_modified_timestamp_ms
+                        
+                    
+                    metadata_row[ 'time_modified_details' ] = { domain : time_converter( timestamp_ms ) for ( domain, timestamp_ms ) in domains_to_file_modified_timestamps_ms.items() }
+                    
+                    metadata_row[ 'is_inbox' ] = locations_manager.inbox
+                    metadata_row[ 'is_local' ] = locations_manager.IsLocal()
+                    metadata_row[ 'is_trashed' ] = locations_manager.IsTrashed()
+                    metadata_row[ 'is_deleted' ] = CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY in locations_manager.GetDeleted() or locations_manager.IsTrashed()
+                    
+                    metadata_row[ 'has_transparency' ] = file_info_manager.has_transparency
+                    metadata_row[ 'has_exif' ] = file_info_manager.has_exif
+                    metadata_row[ 'has_human_readable_embedded_metadata' ] = file_info_manager.has_human_readable_embedded_metadata
+                    metadata_row[ 'has_icc_profile' ] = file_info_manager.has_icc_profile
+                    
+                    known_urls = sorted( locations_manager.GetURLs() )
+                    
+                    metadata_row[ 'known_urls' ] = known_urls
+                    
+                    metadata_row[ 'ipfs_multihashes' ] = { ipfs_service_key.hex() : multihash for ( ipfs_service_key, multihash ) in locations_manager.GetServiceFilenames().items() if ipfs_service_key in ipfs_service_keys }
+                    
+                    if detailed_url_information:
+                        
+                        detailed_known_urls = []
+                        
+                        for known_url in known_urls:
                             
-                            normalised_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( known_url )
+                            try:
+                                
+                                normalised_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( known_url )
+                                
+                                ( url_type, match_name, can_parse, cannot_parse_reason ) = CG.client_controller.network_engine.domain_manager.GetURLParseCapability( normalised_url )
+                                
+                            except HydrusExceptions.URLClassException as e:
+                                
+                                continue
+                                
                             
-                            ( url_type, match_name, can_parse, cannot_parse_reason ) = HG.client_controller.network_engine.domain_manager.GetURLParseCapability( normalised_url )
+                            detailed_dict = { 'normalised_url' : normalised_url, 'url_type' : url_type, 'url_type_string' : HC.url_type_string_lookup[ url_type ], 'match_name' : match_name, 'can_parse' : can_parse }
                             
-                        except HydrusExceptions.URLClassException as e:
+                            if not can_parse:
+                                
+                                detailed_dict[ 'cannot_parse_reason' ] = cannot_parse_reason
+                                
                             
-                            continue
-                            
-                        
-                        detailed_dict = { 'normalised_url' : normalised_url, 'url_type' : url_type, 'url_type_string' : HC.url_type_string_lookup[ url_type ], 'match_name' : match_name, 'can_parse' : can_parse }
-                        
-                        if not can_parse:
-                            
-                            detailed_dict[ 'cannot_parse_reason' ] = cannot_parse_reason
+                            detailed_known_urls.append( detailed_dict )
                             
                         
-                        detailed_known_urls.append( detailed_dict )
+                        metadata_row[ 'detailed_known_urls' ] = detailed_known_urls
                         
                     
-                    metadata_row[ 'detailed_known_urls' ] = detailed_known_urls
+                    ratings_manager = media_result.GetRatingsManager()
                     
-                
-                tags_manager = media_result.GetTagsManager()
-                
-                tags_dict = {}
-                
-                for tag_service_key in tag_service_keys:
+                    ratings_dict = {}
                     
-                    storage_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_STORAGE )
-                    
-                    storage_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in storage_statuses_to_tags.items() if len( tags ) > 0 }
-                    
-                    display_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_ACTUAL )
-                    
-                    display_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in display_statuses_to_tags.items() if len( tags ) > 0 }
-                    
-                    tags_dict_object = {
-                        'name' : service_keys_to_names[ tag_service_key ],
-                        'type' : service_keys_to_types[ tag_service_key ],
-                        'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ tag_service_key ] ],
-                        'storage_tags' : storage_tags_json_serialisable,
-                        'display_tags' : display_tags_json_serialisable
-                    }
-                    
-                    tags_dict[ tag_service_key.hex() ] = tags_dict_object
-                    
-                
-                metadata_row[ 'tags' ] = tags_dict
-                
-                # Old stuff starts here
-                
-                api_service_keys_to_statuses_to_tags = {}
-                
-                service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_STORAGE )
-                
-                for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
-                    
-                    statuses_to_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
-                    
-                    if len( statuses_to_tags_json_serialisable ) > 0:
+                    for rating_service_key in rating_service_keys:
                         
-                        api_service_keys_to_statuses_to_tags[ service_key.hex() ] = statuses_to_tags_json_serialisable
+                        rating_object = ratings_manager.GetRatingForAPI( rating_service_key )
+                        
+                        ratings_dict[ rating_service_key.hex() ] = rating_object
                         
                     
-                
-                if not hide_service_keys_tags:
+                    metadata_row[ 'ratings' ] = ratings_dict
                     
-                    metadata_row[ 'service_keys_to_statuses_to_tags' ] = api_service_keys_to_statuses_to_tags
+                    tags_manager = media_result.GetTagsManager()
                     
-                
-                #
-                
-                api_service_keys_to_statuses_to_tags = {}
-                
-                service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_ACTUAL )
-                
-                for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
+                    tags_dict = {}
                     
-                    statuses_to_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
-                    
-                    if len( statuses_to_tags_json_serialisable ) > 0:
+                    for tag_service_key in tag_service_keys:
                         
-                        api_service_keys_to_statuses_to_tags[ service_key.hex() ] = statuses_to_tags_json_serialisable
+                        storage_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_STORAGE )
+                        
+                        storage_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in storage_statuses_to_tags.items() if len( tags ) > 0 }
+                        
+                        display_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
+                        
+                        display_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in display_statuses_to_tags.items() if len( tags ) > 0 }
+                        
+                        tags_dict_object = {
+                            'name' : service_keys_to_names[ tag_service_key ],
+                            'type' : service_keys_to_types[ tag_service_key ],
+                            'type_pretty' : HC.service_string_lookup[ service_keys_to_types[ tag_service_key ] ],
+                            'storage_tags' : storage_tags_json_serialisable,
+                            'display_tags' : display_tags_json_serialisable
+                        }
+                        
+                        tags_dict[ tag_service_key.hex() ] = tags_dict_object
                         
                     
-                
-                if not hide_service_keys_tags:
+                    metadata_row[ 'tags' ] = tags_dict
                     
-                    metadata_row[ 'service_keys_to_statuses_to_display_tags' ] = api_service_keys_to_statuses_to_tags
+                    # Old stuff starts here
                     
-                
-                # old stuff ends here
-                
-                #
-                
-                metadata.append( metadata_row )
+                    api_service_keys_to_statuses_to_tags = {}
+                    
+                    service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_STORAGE )
+                    
+                    for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
+                        
+                        statuses_to_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
+                        
+                        if len( statuses_to_tags_json_serialisable ) > 0:
+                            
+                            api_service_keys_to_statuses_to_tags[ service_key.hex() ] = statuses_to_tags_json_serialisable
+                            
+                        
+                    
+                    if not hide_service_keys_tags:
+                        
+                        metadata_row[ 'service_keys_to_statuses_to_tags' ] = api_service_keys_to_statuses_to_tags
+                        
+                    
+                    #
+                    
+                    api_service_keys_to_statuses_to_tags = {}
+                    
+                    service_keys_to_statuses_to_tags = tags_manager.GetServiceKeysToStatusesToTags( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
+                    
+                    for ( service_key, statuses_to_tags ) in service_keys_to_statuses_to_tags.items():
+                        
+                        statuses_to_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in statuses_to_tags.items() if len( tags ) > 0 }
+                        
+                        if len( statuses_to_tags_json_serialisable ) > 0:
+                            
+                            api_service_keys_to_statuses_to_tags[ service_key.hex() ] = statuses_to_tags_json_serialisable
+                            
+                        
+                    
+                    if not hide_service_keys_tags:
+                        
+                        metadata_row[ 'service_keys_to_statuses_to_display_tags' ] = api_service_keys_to_statuses_to_tags
+                        
+                    
+                    # old stuff ends here
+                    
+                    #
+                    
+                    metadata.append( metadata_row )
+                    
+                else:
+                    
+                    AddMissingHashToFileMetadata( metadata, hash )
+                    
                 
             
         
         body_dict[ 'metadata' ] = metadata
+        
+        if include_services_object:
+            
+            body_dict[ 'services' ] = GetServicesDict()
+            
         
         mime = request.preferred_mime
         body = Dumps( body_dict, mime )
@@ -2931,7 +3607,7 @@ class HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( HydrusResourceClien
                 
                 request.client_api_permissions.CheckPermissionToSeeFiles( ( file_id, ) )
                 
-                ( media_result, ) = HG.client_controller.Read( 'media_results_from_ids', ( file_id, ) )
+                ( media_result, ) = CG.client_controller.Read( 'media_results_from_ids', ( file_id, ) )
                 
             elif 'hash' in request.parsed_request_args:
                 
@@ -2939,7 +3615,7 @@ class HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( HydrusResourceClien
                 
                 hash = request.parsed_request_args.GetValue( 'hash', bytes )
                 
-                media_result = HG.client_controller.Read( 'media_result', hash )
+                media_result = CG.client_controller.Read( 'media_result', hash )
                 
             else:
                 
@@ -2951,24 +3627,33 @@ class HydrusResourceClientAPIRestrictedGetFilesGetThumbnail( HydrusResourceClien
             raise HydrusExceptions.NotFoundException( 'One or more of those file identifiers was missing!' )
             
         
-        try:
+        mime = media_result.GetMime()
+        
+        if mime in HC.MIMES_WITH_THUMBNAILS:
             
-            path = HG.client_controller.client_files_manager.GetThumbnailPath( media_result )
-            
-            if not os.path.exists( path ):
+            try:
                 
-                # not _supposed_ to happen, but it seems in odd situations it can
-                raise HydrusExceptions.FileMissingException()
+                path = CG.client_controller.client_files_manager.GetThumbnailPath( media_result )
+                
+                if not os.path.exists( path ):
+                    
+                    # not _supposed_ to happen, but it seems in odd situations it can
+                    raise HydrusExceptions.FileMissingException()
+                    
+                
+            except HydrusExceptions.FileMissingException:
+                
+                path = HydrusFileHandling.mimes_to_default_thumbnail_paths[ mime ]
                 
             
-        except HydrusExceptions.FileMissingException:
+        else:
             
-            path = HydrusPaths.mimes_to_default_thumbnail_paths[ media_result.GetMime() ]
+            path = HydrusFileHandling.mimes_to_default_thumbnail_paths[ mime ]
             
         
-        mime = HydrusFileHandling.GetThumbnailMime( path )
+        response_mime = HydrusFileHandling.GetThumbnailMime( path )
         
-        response_context = HydrusServerResources.ResponseContext( 200, mime = mime, path = path )
+        response_context = HydrusServerResources.ResponseContext( 200, mime = response_mime, path = path )
         
         return response_context
         
@@ -2995,7 +3680,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesGetCookies( HydrusResourceCl
         
         network_context = ClientNetworkingContexts.NetworkContext( CC.NETWORK_CONTEXT_DOMAIN, domain )
         
-        session = HG.client_controller.network_engine.session_manager.GetSession( network_context )
+        session = CG.client_controller.network_engine.session_manager.GetSession( network_context )
         
         body_cookies_list = []
         
@@ -3009,8 +3694,6 @@ class HydrusResourceClientAPIRestrictedManageCookiesGetCookies( HydrusResourceCl
             
             body_cookies_list.append( [ name, value, domain, path, expires ] )
             
-        
-        body_dict = {}
         
         body_dict = { 'cookies' : body_cookies_list }
         
@@ -3054,7 +3737,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
             
             network_context = ClientNetworkingContexts.NetworkContext( CC.NETWORK_CONTEXT_DOMAIN, domain )
             
-            session = HG.client_controller.network_engine.session_manager.GetSession( network_context )
+            session = CG.client_controller.network_engine.session_manager.GetSession( network_context )
             
             if value is None:
                 
@@ -3069,10 +3752,10 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
                 ClientNetworkingFunctions.AddCookieToSession( session, name, value, domain, path, expires )
                 
             
-            HG.client_controller.network_engine.session_manager.SetSessionDirty( network_context )
+            CG.client_controller.network_engine.session_manager.SetSessionDirty( network_context )
             
         
-        if HG.client_controller.new_options.GetBoolean( 'notify_client_api_cookies' ) and len( domains_cleared ) + len( domains_set ) > 0:
+        if CG.client_controller.new_options.GetBoolean( 'notify_client_api_cookies' ) and len( domains_cleared ) + len( domains_set ) > 0:
             
             domains_cleared = sorted( domains_cleared )
             domains_set = sorted( domains_set )
@@ -3089,13 +3772,13 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetCookies( HydrusResourceCl
                 message = '{} ({} set)'.format( message, ', '.join( domains_set ) )
                 
             
-            job_key = ClientThreading.JobKey()
+            job_status = ClientThreading.JobStatus()
             
-            job_key.SetStatusText( message )
+            job_status.SetStatusText( message )
             
-            job_key.Delete( 5 )
+            job_status.FinishAndDismiss( 5 )
             
-            HG.client_controller.pub( 'message', job_key )
+            CG.client_controller.pub( 'message', job_status )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -3117,7 +3800,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetUserAgent( HydrusResource
             user_agent = ClientDefaults.DEFAULT_USER_AGENT
             
         
-        HG.client_controller.network_engine.domain_manager.SetCustomHeader( ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT, 'User-Agent', value = user_agent )
+        CG.client_controller.network_engine.domain_manager.SetCustomHeader( ClientNetworkingContexts.GLOBAL_NETWORK_CONTEXT, 'User-Agent', value = user_agent )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
@@ -3156,7 +3839,7 @@ def RenderNetworkContextToJSONObject( network_context: ClientNetworkingContexts.
         
         result[ 'data' ] = network_context.context_data.hex()
         
-    elif isinstance( network_context.context_data, str ) or network_context.context_data is None:
+    elif network_context.context_data is None or isinstance( network_context.context_data, str ):
         
         result[ 'data' ] = network_context.context_data
         
@@ -3174,7 +3857,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesGetHeaders( HydrusResourceCl
         
         network_context = GenerateNetworkContextFromRequest( request )
         
-        ncs_to_header_dicts = HG.client_controller.network_engine.domain_manager.GetNetworkContextsToCustomHeaderDicts()
+        ncs_to_header_dicts = CG.client_controller.network_engine.domain_manager.GetNetworkContextsToCustomHeaderDicts()
         
         body_dict = {}
         
@@ -3216,7 +3899,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetHeaders( HydrusResourceCl
         
         for ( key, info_dict ) in http_header_objects.items():
             
-            ncs_to_header_dicts = HG.client_controller.network_engine.domain_manager.GetNetworkContextsToCustomHeaderDicts()
+            ncs_to_header_dicts = CG.client_controller.network_engine.domain_manager.GetNetworkContextsToCustomHeaderDicts()
             
             if network_context in ncs_to_header_dicts:
                 
@@ -3260,7 +3943,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetHeaders( HydrusResourceCl
                     
                     if key in headers_dict:
                         
-                        HG.client_controller.network_engine.domain_manager.DeleteCustomHeader( network_context, key )
+                        CG.client_controller.network_engine.domain_manager.DeleteCustomHeader( network_context, key )
                         
                         headers_cleared.add( key )
                         
@@ -3294,7 +3977,7 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetHeaders( HydrusResourceCl
                     
                     if do_it:
                         
-                        HG.client_controller.network_engine.domain_manager.SetCustomHeader( network_context, key, value = value, approved = approved, reason = reason )
+                        CG.client_controller.network_engine.domain_manager.SetCustomHeader( network_context, key, value = value, approved = approved, reason = reason )
                         
                     
                 
@@ -3312,11 +3995,11 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetHeaders( HydrusResourceCl
                 
                 headers_altered.add( key )
                 
-                HG.client_controller.network_engine.domain_manager.SetCustomHeader( network_context, key, approved = approved, reason = reason )
+                CG.client_controller.network_engine.domain_manager.SetCustomHeader( network_context, key, approved = approved, reason = reason )
                 
             
         
-        if HG.client_controller.new_options.GetBoolean( 'notify_client_api_cookies' ) and len( headers_cleared ) + len( headers_set ) + len( headers_altered ) > 0:
+        if CG.client_controller.new_options.GetBoolean( 'notify_client_api_cookies' ) and len( headers_cleared ) + len( headers_set ) + len( headers_altered ) > 0:
             
             message_lines = [ 'Headers sent from API:' ]
             
@@ -3337,13 +4020,13 @@ class HydrusResourceClientAPIRestrictedManageCookiesSetHeaders( HydrusResourceCl
             
             message = os.linesep.join( message_lines )
             
-            job_key = ClientThreading.JobKey()
+            job_status = ClientThreading.JobStatus()
             
-            job_key.SetStatusText( message )
+            job_status.SetStatusText( message )
             
-            job_key.Delete( 5 )
+            job_status.FinishAndDismiss( 5 )
             
-            HG.client_controller.pub( 'message', job_key )
+            CG.client_controller.pub( 'message', job_status )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -3374,7 +4057,7 @@ class HydrusResourceClientAPIRestrictedManageDatabaseLockOff( HydrusResourceClie
             raise HydrusExceptions.BadRequestException( 'The server is not busy!' )
             
         
-        HG.client_controller.db.PauseAndDisconnect( False )
+        CG.client_controller.db.PauseAndDisconnect( False )
         
         response_context = HydrusServerResources.ResponseContext( 200 )
         
@@ -3392,13 +4075,13 @@ class HydrusResourceClientAPIRestrictedManageDatabaseLockOn( HydrusResourceClien
             raise HydrusExceptions.BadRequestException( 'The client was already locked!' )
             
         
-        HG.client_controller.db.PauseAndDisconnect( True )
+        CG.client_controller.db.PauseAndDisconnect( True )
         
         TIME_BLOCK = 0.25
         
         for i in range( int( 5 / TIME_BLOCK ) ):
             
-            if not HG.client_controller.db.IsConnected():
+            if not CG.client_controller.db.IsConnected():
                 
                 break
                 
@@ -3415,7 +4098,25 @@ class HydrusResourceClientAPIRestrictedManageDatabaseMrBones( HydrusResourceClie
     
     def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
         
-        boned_stats = HG.client_controller.Read( 'boned_stats' )
+        location_context = ParseLocationContext( request, ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY ) )
+        
+        tag_service_key = ParseTagServiceKey( request )
+        
+        if tag_service_key == CC.COMBINED_TAG_SERVICE_KEY and location_context.IsAllKnownFiles():
+            
+            raise HydrusExceptions.BadRequestException( 'Sorry, search for all known tags over all known files is not supported!' )
+            
+        
+        tag_context = ClientSearch.TagContext( service_key = tag_service_key )
+        predicates = ParseClientAPISearchPredicates( request )
+        
+        file_search_context = ClientSearch.FileSearchContext( location_context = location_context, tag_context = tag_context, predicates = predicates )
+        
+        job_status = ClientThreading.JobStatus( cancellable = True )
+        
+        request.disconnect_callables.append( job_status.Cancel )
+        
+        boned_stats = CG.client_controller.Read( 'boned_stats', file_search_context = file_search_context, job_status = job_status )
         
         body_dict = { 'boned_stats' : boned_stats }
         
@@ -3423,6 +4124,57 @@ class HydrusResourceClientAPIRestrictedManageDatabaseMrBones( HydrusResourceClie
         body = Dumps( body_dict, mime )
         
         response_context = HydrusServerResources.ResponseContext( 200, mime = mime, body = body )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManageDatabaseGetClientOptions( HydrusResourceClientAPIRestrictedManageDatabase ):
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        from hydrus.client import ClientDefaults
+        
+        OLD_OPTIONS_DEFAULT = ClientDefaults.GetClientDefaultOptions()
+        
+        old_options = CG.client_controller.options
+        
+        old_options = { key : value for ( key, value ) in old_options.items() if key in OLD_OPTIONS_DEFAULT }
+        
+        new_options: ClientOptions.ClientOptions = CG.client_controller.new_options
+
+        options_dict = {
+            'booleans' : new_options.GetAllBooleans(),
+            'strings' : new_options.GetAllStrings(),
+            'noneable_strings' : new_options.GetAllNoneableStrings(),
+            'integers' : new_options.GetAllIntegers(),
+            'noneable_integers' : new_options.GetAllNoneableIntegers(),
+            'keys' : new_options.GetAllKeysHex(),
+            'colors' : new_options.GetAllColours(),
+            'media_zooms' : new_options.GetMediaZooms(),
+            'slideshow_durations' : new_options.GetSlideshowDurations(),
+            'default_file_import_options' : {
+                'loud' : new_options.GetDefaultFileImportOptions('loud').GetSummary(),
+                'quiet' : new_options.GetDefaultFileImportOptions('quiet').GetSummary()
+            },
+            'default_namespace_sorts' : [ sort.ToDictForAPI() for sort in new_options.GetDefaultNamespaceSorts() ],
+            'default_sort' : new_options.GetDefaultSort().ToDictForAPI(),
+            'default_tag_sort' : new_options.GetDefaultTagSort().ToDictForAPI(),
+            'fallback_sort' : new_options.GetFallbackSort().ToDictForAPI(),
+            'suggested_tags_favourites' : new_options.GetAllSuggestedTagsFavourites(),
+            'default_local_location_context' : new_options.GetDefaultLocalLocationContext().ToDictForAPI()
+        }
+
+        body_dict = {
+            'old_options' : old_options,
+            'options' : options_dict,
+            'services' : GetServicesDict()
+        }
+
+                
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
         
         return response_context
         
@@ -3445,7 +4197,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsGetRelationships( 
         hashes = ParseHashes( request )
         
         # maybe in future we'll just get the media results and dump the dict from there, but whatever
-        hashes_to_file_duplicates = HG.client_controller.Read( 'file_relationships_for_api', location_context, hashes )
+        hashes_to_file_duplicates = CG.client_controller.Read( 'file_relationships_for_api', location_context, hashes )
         
         body_dict = { 'file_relationships' : hashes_to_file_duplicates }
         
@@ -3469,7 +4221,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsGetPotentialsCount
             max_hamming_distance
         ) = ParseDuplicateSearch( request )
         
-        count = HG.client_controller.Read( 'potential_duplicates_count', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance )
+        count = CG.client_controller.Read( 'potential_duplicates_count', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance )
         
         body_dict = { 'potential_duplicates_count' : count }
         
@@ -3493,9 +4245,9 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsGetPotentialPairs(
             max_hamming_distance
         ) = ParseDuplicateSearch( request )
         
-        max_num_pairs = request.parsed_request_args.GetValue( 'max_num_pairs', int, default_value = HG.client_controller.new_options.GetInteger( 'duplicate_filter_max_batch_size' ) )
+        max_num_pairs = request.parsed_request_args.GetValue( 'max_num_pairs', int, default_value = CG.client_controller.new_options.GetInteger( 'duplicate_filter_max_batch_size' ) )
         
-        filtering_pairs_media_results = HG.client_controller.Read( 'duplicate_pairs_for_filtering', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance, max_num_pairs = max_num_pairs )
+        filtering_pairs_media_results = CG.client_controller.Read( 'duplicate_pairs_for_filtering', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance, max_num_pairs = max_num_pairs )
         
         filtering_pairs_hashes = [ ( m1.GetHash().hex(), m2.GetHash().hex() ) for ( m1, m2 ) in filtering_pairs_media_results ]
         
@@ -3521,7 +4273,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsGetRandomPotential
             max_hamming_distance
         ) = ParseDuplicateSearch( request )
         
-        hashes = HG.client_controller.Read( 'random_potential_duplicate_hashes', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance )
+        hashes = CG.client_controller.Read( 'random_potential_duplicate_hashes', file_search_context_1, file_search_context_2, dupe_search_type, pixel_dupes_preference, max_hamming_distance )
         
         body_dict = { 'random_potential_duplicate_hashes' : [ hash.hex() for hash in hashes ] }
         
@@ -3541,7 +4293,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetKings( HydrusRe
         
         for hash in hashes:
             
-            HG.client_controller.WriteSynchronous( 'duplicate_set_king', hash )
+            CG.client_controller.WriteSynchronous( 'duplicate_set_king', hash )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -3558,19 +4310,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
         
         raw_rows = []
         
-        all_hashes = set()
-        
-        pair_rows_old_arg_raw_rows = request.parsed_request_args.GetValue( 'pair_rows', list, expected_list_type = list, default_value = [] )
-        
-        for row in pair_rows_old_arg_raw_rows:
-            
-            if len( row ) != 6:
-                
-                raise HydrusExceptions.BadRequestException( 'One of the pair rows was the wrong length!' )
-                
-            
-            raw_rows.append( row )
-            
+        # TODO: now I rewangled this to remove the pair_rows parameter, let's get an object or dict bouncing around so we aren't handling a mega-tuple
         
         raw_relationship_dicts = request.parsed_request_args.GetValue( 'relationships', list, expected_list_type = dict, default_value = [] )
         
@@ -3594,6 +4334,8 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
             HC.DUPLICATE_SAME_QUALITY,
             HC.DUPLICATE_POTENTIAL
         }
+        
+        all_hashes = set()
         
         # variable type testing
         for row in raw_rows:
@@ -3622,7 +4364,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
             all_hashes.update( ( hash_a, hash_b ) )
             
         
-        media_results = HG.client_controller.Read( 'media_results', all_hashes )
+        media_results = CG.client_controller.Read( 'media_results', all_hashes )
         
         hashes_to_media_results = { media_result.GetHash() : media_result for media_result in media_results }
         
@@ -3633,7 +4375,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
             hash_a = bytes.fromhex( hash_a_hex )
             hash_b = bytes.fromhex( hash_b_hex )
             
-            list_of_service_keys_to_content_updates = []
+            content_update_packages = []
             
             first_media = ClientMedia.MediaSingleton( hashes_to_media_results[ hash_a ] )
             second_media = ClientMedia.MediaSingleton( hashes_to_media_results[ hash_b ] )
@@ -3642,13 +4384,13 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
             
             if do_default_content_merge:
                 
-                duplicate_content_merge_options = HG.client_controller.new_options.GetDuplicateContentMergeOptions( duplicate_type )
+                duplicate_content_merge_options = CG.client_controller.new_options.GetDuplicateContentMergeOptions( duplicate_type )
                 
-                list_of_service_keys_to_content_updates.append( duplicate_content_merge_options.ProcessPairIntoContentUpdates( first_media, second_media, file_deletion_reason = file_deletion_reason, delete_first = delete_first, delete_second = delete_second ) )
+                content_update_packages.append( duplicate_content_merge_options.ProcessPairIntoContentUpdatePackage( first_media, second_media, file_deletion_reason = file_deletion_reason, delete_first = delete_first, delete_second = delete_second ) )
                 
             elif delete_first or delete_second:
                 
-                service_keys_to_content_updates = collections.defaultdict( list )
+                content_update_package = ClientContentUpdates.ContentUpdatePackage()
                 
                 deletee_media = set()
                 
@@ -3666,7 +4408,7 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
                     
                     if media.HasDeleteLocked():
                         
-                        ClientMedia.ReportDeleteLockFailures( [ media ] )
+                        ClientMediaFileFilter.ReportDeleteLockFailures( [ media ] )
                         
                         continue
                         
@@ -3677,28 +4419,28 @@ class HydrusResourceClientAPIRestrictedManageFileRelationshipsSetRelationships( 
                         
                     else:
                         
-                        local_file_service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
+                        local_file_service_keys = CG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
                         
                         deletee_service_keys = media.GetLocationsManager().GetCurrent().intersection( local_file_service_keys )
                         
                     
                     for deletee_service_key in deletee_service_keys:
                         
-                        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes(), reason = file_deletion_reason )
+                        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, media.GetHashes(), reason = file_deletion_reason )
                         
-                        service_keys_to_content_updates[ deletee_service_key ].append( content_update )
+                        content_update_package.AddContentUpdate( deletee_service_key, content_update )
                         
                     
                 
-                list_of_service_keys_to_content_updates.append( service_keys_to_content_updates )
+                content_update_packages.append( content_update_package )
                 
             
-            database_write_rows.append( ( duplicate_type, hash_a, hash_b, list_of_service_keys_to_content_updates ) )
+            database_write_rows.append( ( duplicate_type, hash_a, hash_b, content_update_packages ) )
             
         
         if len( database_write_rows ) > 0:
             
-            HG.client_controller.WriteSynchronous( 'duplicate_pair_status', database_write_rows )
+            CG.client_controller.WriteSynchronous( 'duplicate_pair_status', database_write_rows )
             
         
         response_context = HydrusServerResources.ResponseContext( 200 )
@@ -3721,7 +4463,7 @@ class HydrusResourceClientAPIRestrictedManagePagesAddFiles( HydrusResourceClient
         
         def do_it( page_key, media_results ):
             
-            page = HG.client_controller.gui.GetPageFromPageKey( page_key )
+            page = CG.client_controller.gui.GetPageFromPageKey( page_key )
             
             from hydrus.client.gui.pages import ClientGUIPages
             
@@ -3747,11 +4489,11 @@ class HydrusResourceClientAPIRestrictedManagePagesAddFiles( HydrusResourceClient
         
         hashes = ParseHashes( request )
         
-        media_results = HG.client_controller.Read( 'media_results', hashes, sorted = True )
+        media_results = CG.client_controller.Read( 'media_results', hashes, sorted = True )
         
         try:
             
-            HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it, page_key, media_results )
+            CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it, page_key, media_results )
             
         except HydrusExceptions.DataMissing as e:
             
@@ -3770,14 +4512,14 @@ class HydrusResourceClientAPIRestrictedManagePagesFocusPage( HydrusResourceClien
         
         def do_it( page_key ):
             
-            return HG.client_controller.gui.ShowPage( page_key )
+            return CG.client_controller.gui.ShowPage( page_key )
             
         
         page_key = request.parsed_request_args.GetValue( 'page_key', bytes )
         
         try:
             
-            HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it, page_key )
+            CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it, page_key )
             
         except HydrusExceptions.DataMissing as e:
             
@@ -3795,10 +4537,10 @@ class HydrusResourceClientAPIRestrictedManagePagesGetPages( HydrusResourceClient
         
         def do_it():
             
-            return HG.client_controller.gui.GetCurrentSessionPageAPIInfoDict()
+            return CG.client_controller.gui.GetCurrentSessionPageAPIInfoDict()
             
         
-        page_info_dict = HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it )
+        page_info_dict = CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it )
         
         body_dict = { 'pages' : page_info_dict }
         
@@ -3816,14 +4558,14 @@ class HydrusResourceClientAPIRestrictedManagePagesGetPageInfo( HydrusResourceCli
         
         def do_it( page_key, simple ):
             
-            return HG.client_controller.gui.GetPageAPIInfoDict( page_key, simple )
+            return CG.client_controller.gui.GetPageAPIInfoDict( page_key, simple )
             
         
         page_key = request.parsed_request_args.GetValue( 'page_key', bytes )
         
         simple = request.parsed_request_args.GetValue( 'simple', bool, default_value = True )
         
-        page_info_dict = HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it, page_key, simple )
+        page_info_dict = CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it, page_key, simple )
         
         if page_info_dict is None:
             
@@ -3846,14 +4588,14 @@ class HydrusResourceClientAPIRestrictedManagePagesRefreshPage( HydrusResourceCli
         
         def do_it( page_key ):
             
-            return HG.client_controller.gui.RefreshPage( page_key )
+            return CG.client_controller.gui.RefreshPage( page_key )
             
         
         page_key = request.parsed_request_args.GetValue( 'page_key', bytes )
         
         try:
             
-            HG.client_controller.CallBlockingToQt( HG.client_controller.gui, do_it, page_key )
+            CG.client_controller.CallBlockingToQt( CG.client_controller.gui, do_it, page_key )
             
         except HydrusExceptions.DataMissing as e:
             
@@ -3865,3 +4607,354 @@ class HydrusResourceClientAPIRestrictedManagePagesRefreshPage( HydrusResourceCli
         return response_context
         
     
+
+def JobStatusToDict( job_status: ClientThreading.JobStatus ):
+        
+        return_dict = {
+            'key' : job_status.GetKey().hex(),
+            'creation_time' : job_status.GetCreationTime(),
+            'status_title' : job_status.GetStatusTitle(),
+            'status_text_1' : job_status.GetStatusText( 1 ),
+            'status_text_2' : job_status.GetStatusText( 2 ),
+            'traceback' : job_status.GetTraceback(),
+            'had_error' : job_status.HadError(),
+            'is_cancellable' : job_status.IsCancellable(),
+            'is_cancelled' : job_status.IsCancelled(),
+            'is_done' : job_status.IsDone(),
+            'is_pausable' : job_status.IsPausable(),
+            'is_paused' : job_status.IsPaused(),
+            'nice_string' : job_status.ToString(),
+            'popup_gauge_1' : job_status.GetIfHasVariable( 'popup_gauge_1' ),
+            'popup_gauge_2' : job_status.GetIfHasVariable( 'popup_gauge_2' ),
+            'attached_files_mergable' : job_status.GetIfHasVariable( 'attached_files_mergable' ),
+            'api_data' : job_status.GetIfHasVariable( 'api_data' )
+        }
+        
+        files_object = job_status.GetFiles()
+        
+        if files_object is not None:
+            
+            ( hashes, label ) = files_object
+            
+            return_dict[ 'files' ] = {
+                'hashes' : [ hash.hex() for hash in hashes ],
+                'label': label
+            }
+            
+        
+        user_callable = job_status.GetUserCallable()
+        
+        if user_callable is not None:
+            
+            return_dict[ 'user_callable_label' ] = user_callable.GetLabel()
+            
+        
+        network_job: ClientNetworkingJobs.NetworkJob = job_status.GetNetworkJob()
+        
+        if network_job is not None:
+            
+            ( status_text, current_speed, bytes_read, bytes_to_read ) = network_job.GetStatus()
+            
+            network_job_dict = {
+                'url' : network_job.GetURL(),
+                'waiting_on_connection_error' : network_job.CurrentlyWaitingOnConnectionError(),
+                'domain_ok' : network_job.DomainOK(),
+                'waiting_on_serverside_bandwidth' : network_job.CurrentlyWaitingOnServersideBandwidth(),
+                'no_engine_yet' : network_job.NoEngineYet(),
+                'has_error' : network_job.HasError(),
+                'total_data_used' : network_job.GetTotalDataUsed(),
+                'is_done' : network_job.IsDone(),
+                'status_text' : status_text,
+                'current_speed' : current_speed,
+                'bytes_read' : bytes_read,
+                'bytes_to_read' : bytes_to_read
+            }
+            
+            return_dict[ 'network_job' ] = network_job_dict
+            
+        
+        return { k: v for k, v in return_dict.items() if v is not None }
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopups( HydrusResourceClientAPIRestricted ):
+    
+    def _CheckAPIPermissions( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        request.client_api_permissions.CheckPermission( ClientAPI.CLIENT_API_PERMISSION_MANAGE_POPUPS )
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsAddPopup( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        pausable = request.parsed_request_args.GetValue( 'is_pausable', bool, default_value = False )
+        cancellable = request.parsed_request_args.GetValue( 'is_cancellable', bool, default_value = False )
+        
+        job_status = ClientThreading.JobStatus( pausable = pausable, cancellable = cancellable )
+        
+        if request.parsed_request_args.GetValue( 'attached_files_mergable', bool, default_value = False ):
+            
+            job_status.SetVariable( 'attached_files_mergable', True )
+            
+        
+        HandlePopupUpdate( job_status, request )
+        
+        CG.client_controller.pub( 'message', job_status )
+        
+        body_dict = {
+            'job_status': JobStatusToDict( job_status )
+        }
+        
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        return response_context
+        
+    
+
+def GetJobStatusFromRequest( request: HydrusServerRequest.HydrusRequest ) -> ClientThreading.JobStatus:
+    
+    job_status_key = request.parsed_request_args.GetValue( 'job_status_key', bytes )
+    
+    job_status_queue: ClientGUIPopupMessages.JobStatusPopupQueue = CG.client_controller.job_status_popup_queue
+    
+    job_status = job_status_queue.GetJobStatus( job_status_key )
+    
+    if job_status is None:
+        
+        raise HydrusExceptions.BadRequestException( 'This job key doesn\'t exist!' )
+        
+    
+    return job_status
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsCallUserCallable( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        user_callable = job_status.GetUserCallable()
+        
+        if user_callable is None:
+            
+            raise HydrusExceptions.BadRequestException('This job doesn\'t have a user callable!')
+            
+        
+        CG.client_controller.CallBlockingToQt( CG.client_controller.gui, user_callable )
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsCancelPopup( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        if job_status.IsCancellable():
+            
+            job_status.Cancel()
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsDismissPopup( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        if job_status.IsDone():
+            
+            job_status.FinishAndDismiss()
+            
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsFinishPopup( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        job_status.Finish()
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsFinishAndDismissPopup( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        seconds = request.parsed_request_args.GetValueOrNone( 'seconds', int )
+        
+        job_status.FinishAndDismiss( seconds )
+        
+        response_context = HydrusServerResources.ResponseContext( 200 )
+        
+        return response_context
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsGetPopups( HydrusResourceClientAPIRestrictedManagePopups ):
+    
+    def _threadDoGETJob( self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status_queue: ClientGUIPopupMessages.JobStatusPopupQueue = CG.client_controller.job_status_popup_queue        
+        
+        only_in_view = request.parsed_request_args.GetValue( 'only_in_view', bool, default_value = False )
+        
+        job_statuses = job_status_queue.GetJobStatuses( only_in_view )
+        
+        body_dict = {
+            'job_statuses' : [JobStatusToDict( job ) for job in job_statuses]
+        }
+        
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        return response_context
+        
+    
+
+def HandlePopupUpdate( job_status: ClientThreading.JobStatus, request: HydrusServerRequest.HydrusRequest ):
+    
+    def HandleGenericVariable( name: str, type: type ):
+        
+        if name in request.parsed_request_args:
+            
+            value = request.parsed_request_args.GetValueOrNone( name, type )
+            
+            if value is not None:
+                
+                job_status.SetVariable( name, value )
+                
+            else:
+                
+                job_status.DeleteVariable( name )
+                
+            
+        
+    
+    if 'status_title' in request.parsed_request_args:
+        
+        status_title = request.parsed_request_args.GetValueOrNone( 'status_title', str )
+        
+        if status_title is not None:
+            
+            job_status.SetStatusTitle( status_title )
+            
+        else:
+            
+            job_status.DeleteStatusTitle()
+            
+        
+    
+    if 'status_text_1' in request.parsed_request_args:
+        
+        status_text = request.parsed_request_args.GetValueOrNone( 'status_text_1', str )
+        
+        if status_text is not None:
+            
+            job_status.SetStatusText( status_text, 1 )
+            
+        else:
+            
+            job_status.DeleteStatusText()
+            
+        
+    
+    if 'status_text_2' in request.parsed_request_args:
+        
+        status_text_2 = request.parsed_request_args.GetValueOrNone( 'status_text_2', str )
+        
+        if status_text_2 is not None:
+            
+            job_status.SetStatusText( status_text_2, 2 )
+            
+        else:
+            
+            job_status.DeleteStatusText( 2 )
+            
+        
+    
+    HandleGenericVariable( 'api_data', dict )
+    
+    for name in ['popup_gauge_1', 'popup_gauge_2']:
+        
+        if name in request.parsed_request_args:
+            
+            value = request.parsed_request_args.GetValueOrNone( name, list, expected_list_type = int )
+            
+            if value is not None:
+                
+                if len(value) != 2:
+                    
+                    raise HydrusExceptions.BadRequestException( 'The parameter "{}" had an invalid number of items!'.format( name ) )
+                    
+                
+                job_status.SetVariable( name, value )
+                
+            else:
+                
+                job_status.DeleteVariable( name )
+                
+            
+        
+    
+    files_label = request.parsed_request_args.GetValueOrNone( 'files_label', str )
+    
+    hashes = ParseHashes( request, True )
+    
+    if hashes is not None:
+        
+        if len(hashes) > 0 and files_label is None:
+            
+            raise HydrusExceptions.BadRequestException( '"files_label" is required to add files to a popup!' )
+            
+        
+        job_status.SetFiles( hashes, files_label )
+        
+    
+
+class HydrusResourceClientAPIRestrictedManagePopupsUpdatePopup( HydrusResourceClientAPIRestrictedManagePages ):
+    
+    def _threadDoPOSTJob(self, request: HydrusServerRequest.HydrusRequest ):
+        
+        job_status = GetJobStatusFromRequest( request )
+        
+        HandlePopupUpdate( job_status, request )
+        
+        body_dict = {
+            'job_status': JobStatusToDict( job_status )
+        }
+        
+        body = Dumps( body_dict, request.preferred_mime )
+        
+        response_context = HydrusServerResources.ResponseContext( 200, mime = request.preferred_mime, body = body )
+        
+        return response_context
+        
+    
+

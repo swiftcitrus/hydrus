@@ -1,3 +1,5 @@
+import typing
+
 try:
     
     import chardet
@@ -8,10 +10,11 @@ except:
     
     CHARDET_OK = False
     
+
 import json
-import os
 import re
 
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusExceptions
 
 re_one_or_more_whitespace = re.compile( r'\s+' ) # this does \t and friends too
@@ -22,7 +25,7 @@ re_leading_single_colon_and_no_more_colons = re.compile( '^:(?=[^:]+$)' )
 re_leading_single_colon_and_later_colon = re.compile( '^:(?=[^:]+:[^:]+$)' )
 re_leading_double_colon = re.compile( '^::(?!:)' )
 re_leading_colons = re.compile( '^:+' )
-re_leading_byte_order_mark = re.compile( '^\ufeff' ) # unicode .txt files prepend with this, wew
+re_leading_byte_order_mark = re.compile( '^' + HC.UNICODE_BYTE_ORDER_MARK ) # unicode .txt files prepend with this, wew
 
 HYDRUS_NOTE_NEWLINE = '\n'
 
@@ -81,26 +84,47 @@ def ElideText( text, max_length, elide_center = False ):
             
             CENTER_END_CHARS = max( 2, max_length // 8 )
             
-            text = '{}\u2026{}'.format( text[ : max_length - ( 1 + CENTER_END_CHARS ) ], text[ - CENTER_END_CHARS : ] )
+            text = '{}{}{}'.format( text[ : max_length - ( 1 + CENTER_END_CHARS ) ], HC.UNICODE_ELLIPSIS, text[ - CENTER_END_CHARS : ] )
             
         else:
             
-            text = '{}\u2026'.format( text[ : max_length - 1 ] )
+            text = '{}{}'.format( text[ : max_length - 1 ], HC.UNICODE_ELLIPSIS )
             
         
     
     return text
     
-def LooksLikeHTML( file_data ):
+def LooksLikeHTML( file_data: typing.Union[ str, bytes ] ):
     # this will false-positive if it is json that contains html, ha ha
     
     if isinstance( file_data, bytes ):
         
-        search_elements = ( b'<html', b'<HTML', b'<title', b'<TITLE' )
+        search_elements = ( b'<html', b'<HTML', b'<!DOCTYPE html', b'<!DOCTYPE HTML' )
         
     else:
         
-        search_elements = ( '<html', '<HTML', '<title', '<TITLE' )
+        search_elements = ( '<html', '<HTML', '<!DOCTYPE html', '<!DOCTYPE HTML' )
+        
+    
+    for s_e in search_elements:
+        
+        if s_e in file_data:
+            
+            return True
+            
+        
+    
+    return False
+
+def LooksLikeSVG( file_data ):
+    
+    if isinstance( file_data, bytes ):
+        
+        search_elements = ( b'<svg', b'<SVG', b'<!DOCTYPE svg', b'<!DOCTYPE SVG' )
+        
+    else:
+        
+        search_elements = ( '<svg', '<SVG', '<!DOCTYPE svg', '<!DOCTYPE SVG' )
         
     
     for s_e in search_elements:
@@ -113,7 +137,8 @@ def LooksLikeHTML( file_data ):
     
     return False
     
-def LooksLikeJSON( file_data ):
+
+def LooksLikeJSON( file_data: typing.Union[ str, bytes ] ) -> bool:
     
     try:
         
@@ -132,7 +157,6 @@ def LooksLikeJSON( file_data ):
         
     
 
-UNICODE_REPLACEMENT_CHARACTER = u'\ufffd'
 NULL_CHARACTER = '\x00'
 
 def ChardetDecode( data ):
@@ -145,7 +169,7 @@ def ChardetDecode( data ):
     
     chardet_text = str( data, chardet_encoding, errors = 'replace' )
     
-    chardet_error_count = chardet_text.count( UNICODE_REPLACEMENT_CHARACTER )
+    chardet_error_count = chardet_text.count( HC.UNICODE_REPLACEMENT_CHARACTER )
     
     return ( chardet_text, chardet_encoding, chardet_confidence, chardet_error_count )
 
@@ -155,7 +179,7 @@ def DefaultDecode( data ):
     
     default_text = str( data, default_encoding, errors = 'replace' )
     
-    default_error_count = default_text.count( UNICODE_REPLACEMENT_CHARACTER )
+    default_error_count = default_text.count( HC.UNICODE_REPLACEMENT_CHARACTER )
     
     return ( default_text, default_encoding, default_error_count )
     
@@ -185,7 +209,7 @@ def NonFailingUnicodeDecode( data, encoding ):
                 text = str( data, encoding, errors = 'replace' )
                 
                 confidence = 0.7
-                error_count = text.count( UNICODE_REPLACEMENT_CHARACTER )
+                error_count = text.count( HC.UNICODE_REPLACEMENT_CHARACTER )
                 
             else:
                 
@@ -257,16 +281,24 @@ def NonFailingUnicodeDecode( data, encoding ):
     
     return ( text, encoding )
     
+
 def RemoveNewlines( text: str ) -> str:
     
-    text = ''.join( text.splitlines() )
+    good_lines = [ l.strip() for l in text.splitlines() ]
+    
+    good_lines = [ l for l in good_lines if l != '' ]
+    
+    # I really want to make this ' '.join(), but I'm sure that would break some old parsers
+    text = ''.join( good_lines )
     
     return text
     
+
 def SortStringsIgnoringCase( list_of_strings ):
     
     list_of_strings.sort( key = lambda s: s.lower() )
     
+
 def StripIOInputLine( t ):
     
     t = re_leading_byte_order_mark.sub( '', t )

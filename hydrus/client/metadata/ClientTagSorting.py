@@ -62,6 +62,11 @@ class TagSort( HydrusSerialisable.SerialisableBase ):
         ( self.sort_type, self.sort_order, self.use_siblings, self.group_by ) = serialisable_info
         
     
+    def AffectedByCount( self ):
+        
+        return self.sort_type == SORT_BY_COUNT
+        
+    
     def ToString( self ):
         
         return '{} {}{}'.format(
@@ -69,6 +74,16 @@ class TagSort( HydrusSerialisable.SerialisableBase ):
             'asc' if self.sort_order == CC.SORT_ASC else 'desc',
             ' namespace' if self.group_by == GROUP_BY_NAMESPACE else ''
         )
+        
+    
+    def ToDictForAPI( self ):
+        
+        return {
+            'sort_type' : self.sort_type,
+            'sort_order' : self.sort_order,
+            'use_siblings': self.use_siblings,
+            'group_by' : self.group_by
+        }
         
     
     @staticmethod

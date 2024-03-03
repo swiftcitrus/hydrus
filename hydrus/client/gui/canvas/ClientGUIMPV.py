@@ -1,5 +1,6 @@
 import locale
 import os
+import time
 import traceback
 import typing
 
@@ -9,16 +10,19 @@ from qtpy import QtWidgets as QW
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusPaths
-from hydrus.core import HydrusVideoHandling
+from hydrus.core.files import HydrusAnimationHandling
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientThreading
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIMedia
 from hydrus.client.gui import ClientGUIMediaControls
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
+from hydrus.client.gui.canvas import ClientGUIMediaVolume
 from hydrus.client.media import ClientMedia
 
 mpv_failed_reason = 'MPV seems ok!'
@@ -35,6 +39,8 @@ except Exception as e:
     
     MPV_IS_AVAILABLE = False
     
+
+damaged_file_hashes = set()
 
 def GetClientAPIVersionString():
     
@@ -71,9 +77,48 @@ def GetClientAPIVersionString():
         
     '''
 
+def EmergencyDumpOutGlobal( probably_crashy, reason ):
+    
+    # this is Qt thread so we can talk to this guy no prob
+    MPVHellBasket.instance().emergencyDumpOut.emit( probably_crashy, reason )
+    
+
 def log_handler( loglevel, component, message ):
     
-    HydrusData.DebugPrint( '[{}] {}: {}'.format( loglevel, component, message ) )
+    # ok important bug dude, if you have multiple mpv windows and hence log handlers, then somehow the mpv dll or python-mpv wrapper is delivering at least some log events to the wrong player's event loop
+    # so my mapping here to preserve the mpv widget for a particular log message and then dump out the player in emergency is only going to work half the time
+    
+    nah_it_is_fine_bro_tests = [
+        'rescan-external-files' in message,
+        'LZW decode failed' in message # borked gif headers
+    ]
+    
+    if True in nah_it_is_fine_bro_tests and not HG.mpv_report_mode:
+        
+        return
+        
+    
+    if loglevel == 'error' and 'ffmpeg' in component:
+        
+        probably_crashy_tests = [
+            'Invalid NAL unit size' in message,
+            'Error splitting the input' in message
+        ]
+        
+        CG.client_controller.CallBlockingToQt( CG.client_controller.gui, EmergencyDumpOutGlobal, True in probably_crashy_tests, f'{component}: {message}' )
+        
+    
+    HydrusData.DebugPrint( '[MPV {}] {}: {}'.format( loglevel, component, message ) )
+    
+
+MPVShutdownEventType = QP.registerEventType()
+
+class MPVShutdownEvent( QC.QEvent ):
+    
+    def __init__( self ):
+        
+        QC.QEvent.__init__( self, MPVShutdownEventType )
+        
     
 
 MPVFileLoadedEventType = QP.registerEventType()
@@ -85,7 +130,20 @@ class MPVFileLoadedEvent( QC.QEvent ):
         QC.QEvent.__init__( self, MPVFileLoadedEventType )
         
     
+'''
+MPVLogEventType = QP.registerEventType()
 
+class MPVLogEvent( QC.QEvent ):
+    
+    def __init__( self, player, event ):
+        
+        QC.QEvent.__init__( self, MPVLogEventType )
+        
+        self.player = player
+        self.event = event
+        
+    
+'''
 MPVFileSeekedEventType = QP.registerEventType()
 
 class MPVFileSeekedEvent( QC.QEvent ):
@@ -96,22 +154,58 @@ class MPVFileSeekedEvent( QC.QEvent ):
         
     
 
+class MPVHellBasket( QC.QObject ):
+    
+    emergencyDumpOut = QC.Signal( bool, str )
+    my_instance = None
+    
+    def __init__( self ):
+        
+        QC.QObject.__init__( self )
+        
+        MPVHellBasket.my_instance = self
+        
+    
+    @staticmethod
+    def instance() -> 'MPVHellBasket':
+        
+        if MPVHellBasket.my_instance is None:
+            
+            MPVHellBasket.my_instance = MPVHellBasket()
+            
+        
+        return MPVHellBasket.my_instance
+        
+    
+
 LOCALE_IS_SET = False
 
 #Not sure how well this works with hardware acceleration. This just renders to a QWidget. In my tests it seems fine, even with vdpau video out, but I'm not 100% sure it actually uses hardware acceleration.
 #Here is an example on how to render into a QOpenGLWidget instead: https://gist.github.com/cosven/b313de2acce1b7e15afda263779c0afc
-class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
+class MPVWidget( CAC.ApplicationCommandProcessorMixin, QW.QWidget ):
     
     launchMediaViewer = QC.Signal()
     
     def __init__( self, parent ):
         
-        CAC.ApplicationCommandProcessorMixin.__init__( self )
         QW.QWidget.__init__( self, parent )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         
         self._canvas_type = CC.CANVAS_PREVIEW
         
         self._stop_for_slideshow = False
+        
+        # ok, if you talk to this object during an eventPaint while it is in various states of 'null', you'll get this instability problem:
+        # QBackingStore::endPaint() called with active painter; did you forget to destroy it or call QPainter::end() on it?
+        # simply calling a do-nothing GetAnimationBarStatus stub that returns immediately will cause this, so it must be some C++ wrapper magic triggering some during-paint reset/event-cycle/whatever
+        #
+        # #####
+        # THUS, DO NOT EVER TALK TO THIS GUY DURING A paintEvent. fetch your data and call update() if it changed. Also, we now make sure _something_ is loaded as much as possible, even if it is a black square png
+        # #####
+        #
+        self._black_png_path = os.path.join( HC.STATIC_DIR, 'blacksquare.png' )
+        self._hydrus_png_path = os.path.join( HC.STATIC_DIR, 'hydrus.png' )
+        self._currently_in_media_load_error_state = False
         
         global LOCALE_IS_SET
         
@@ -128,9 +222,13 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         self.setAttribute( QC.Qt.WA_NativeWindow )
         
         # loglevels: fatal, error, debug
-        loglevel = 'debug' if HG.mpv_report_mode else 'fatal'
+        loglevel = 'debug' if HG.mpv_report_mode else 'error'
         
-        self._player = mpv.MPV( wid = str( int( self.winId() ) ), log_handler = log_handler, loglevel = loglevel )
+        self._player = mpv.MPV(
+            wid = str( int( self.winId() ) ),
+            log_handler = log_handler,
+            loglevel = loglevel
+        )
         
         # hydev notes on OSC:
         # OSC is by default off, default input bindings are by default off
@@ -160,8 +258,9 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         self._media = None
         
-        self._file_is_loaded = False
+        self._file_header_is_loaded = False
         self._disallow_seek_on_this_file = False
+        self._have_shown_human_error_on_this_file = False
         
         self._times_to_play_animation = 0
         
@@ -171,10 +270,10 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         
         self.destroyed.connect( self._player.terminate )
         
-        HG.client_controller.sub( self, 'UpdateAudioMute', 'new_audio_mute' )
-        HG.client_controller.sub( self, 'UpdateAudioVolume', 'new_audio_volume' )
-        HG.client_controller.sub( self, 'UpdateConf', 'notify_new_options' )
-        HG.client_controller.sub( self, 'SetLogLevel', 'set_mpv_log_level' )
+        CG.client_controller.sub( self, 'UpdateAudioMute', 'new_audio_mute' )
+        CG.client_controller.sub( self, 'UpdateAudioVolume', 'new_audio_volume' )
+        CG.client_controller.sub( self, 'UpdateConf', 'notify_new_options' )
+        CG.client_controller.sub( self, 'SetLogLevel', 'set_mpv_log_level' )
         
         self.installEventFilter( self )
         
@@ -189,19 +288,31 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             self.we_are_newer_api = False
             
         
+        MPVHellBasket.instance().emergencyDumpOut.connect( self.EmergencyDumpOut )
+        
+        try:
+            
+            self._player.loadfile( self._black_png_path )
+            
+        except mpv.ShutdownError:
+            
+            # fugg, libmpv core probably shut down already. not much we can do but panic
+            self._currently_in_media_load_error_state = True
+            
+        
     
     def _GetAudioOptionNames( self ):
         
         if self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
             
-            if HG.client_controller.new_options.GetBoolean( 'media_viewer_uses_its_own_audio_volume' ):
+            if CG.client_controller.new_options.GetBoolean( 'media_viewer_uses_its_own_audio_volume' ):
                 
                 return ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_MEDIA_VIEWER ]
                 
             
         elif self._canvas_type == CC.CANVAS_PREVIEW:
             
-            if HG.client_controller.new_options.GetBoolean( 'preview_uses_its_own_audio_volume' ):
+            if CG.client_controller.new_options.GetBoolean( 'preview_uses_its_own_audio_volume' ):
                 
                 return ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_PREVIEW ]
                 
@@ -210,49 +321,34 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         return ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_GLOBAL ]
         
     
-    def _GetCorrectCurrentMute( self ):
+    def _HandleLoadError( self ):
         
-        ( global_mute_option_name, global_volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_GLOBAL ]
+        # file failed to load, and we are going to start getting what seem to be C++ level paintEvent exceptions after the GUI object is touched by code and then asked for repaints
         
-        mute_option_name = global_mute_option_name
+        self._file_header_is_loaded = False
+        self._currently_in_media_load_error_state = True
         
-        if self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
+        try:
             
-            ( mute_option_name, volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_MEDIA_VIEWER ]
+            self._player.loadfile( self._hydrus_png_path )
             
-        elif self._canvas_type == CC.CANVAS_PREVIEW:
+        except mpv.ShutdownError:
             
-            ( mute_option_name, volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_PREVIEW ]
-            
-        
-        return HG.client_controller.new_options.GetBoolean( mute_option_name ) or HG.client_controller.new_options.GetBoolean( global_mute_option_name )
-        
-    
-    def _GetCorrectCurrentVolume( self ):
-        
-        ( mute_option_name, volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_GLOBAL ]
-        
-        if self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
-            
-            if HG.client_controller.new_options.GetBoolean( 'media_viewer_uses_its_own_audio_volume' ):
-                
-                ( mute_option_name, volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_MEDIA_VIEWER ]
-                
-            
-        elif self._canvas_type == CC.CANVAS_PREVIEW:
-            
-            if HG.client_controller.new_options.GetBoolean( 'preview_uses_its_own_audio_volume' ):
-                
-                ( mute_option_name, volume_option_name ) = ClientGUIMediaControls.volume_types_to_option_names[ ClientGUIMediaControls.AUDIO_PREVIEW ]
-                
+            # libmpv core probably shut down
+            HydrusData.ShowText( 'While trying to handle another error, the mpv window could not show the error fallback png! Program may be unstable, restart ASAP recommended.' )
             
         
-        return HG.client_controller.new_options.GetInteger( volume_option_name )
+        if self._media is not None:
+            
+            HydrusData.ShowText( f'The file with hash "{self._media.GetHash().hex()}" seems to have failed to load in mpv. In order to preserve program stability, I have unloaded it immediately!' )
+            
         
     
     def _InitialiseMPVCallbacks( self ):
         
         player = self._player
+        
+        # note that these happen on the mpv mainloop, not UI code, so we need to post events to stay stable
         
         @player.event_callback( mpv.MpvEventID.SEEK )
         def seek_event( event ):
@@ -266,6 +362,62 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             QW.QApplication.instance().postEvent( self, MPVFileLoadedEvent() )
             
         
+        @player.event_callback( mpv.MpvEventID.SHUTDOWN )
+        def file_started_event( event ):
+            
+            app = QW.QApplication.instance()
+            
+            if app is not None and QP.isValid( self ):
+                
+                app.postEvent( self, MPVShutdownEvent() )
+                
+            
+        
+        '''
+        @player.event_callback( mpv.MpvEventID.LOG_MESSAGE )
+        def log_event( event ):
+            
+            QW.QApplication.instance().postEvent( self, MPVLogEvent( player, event ) )
+            
+        '''
+    
+    def _LooksLikeALoadError( self ):
+        
+        # as an additional note for the error we are handling here, this isn't catching something like 'error: truncated gubbins', but instead the 'verbose' debug level message of 'ffmpeg can't handle this apng's format, update ffmpeg'
+        # what happens in this state is the media is unloaded and the self._player.path goes from a valid path to None
+        # the extra fun is that self._player.path starts as None even after self._player.loadfile and may not be the valid path get as of the LoadedEvent. that event is sent when headers are read, not data
+        # so we need to detect when the data is actually loaded, after the .path was (briefly) something valid, and then switches back to None
+        # thankfully, it seems on the dump-out unload, the playlist is unset, and this appears to be the most reliable indicator of a problem and an mpv with nothing currently loaded!
+        
+        try:
+            
+            if self._player.path is None:
+                
+                playlist = self._player.playlist
+                
+                if len( playlist ) == 0:
+                    
+                    return True
+                    
+                
+                for item in playlist:
+                    
+                    if 'current' in item:
+                        
+                        return False
+                        
+                    
+                
+                return True
+                
+            
+            return False
+            
+        except mpv.ShutdownError:
+            
+            return True
+            
+        
     
     def ClearMedia( self ):
         
@@ -274,35 +426,63 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def eventFilter( self, watched, event ):
         
-        if event.type() == MPVFileLoadedEventType:
+        try:
             
-            self._file_is_loaded = True
-            
-            return True
-            
-        elif event.type() == MPVFileSeekedEventType:
-            
-            if not self._file_is_loaded:
+            if event.type() == MPVFileLoadedEventType:
+                
+                if self._player.path is None:
+                    
+                    if self._LooksLikeALoadError():
+                        
+                        self._HandleLoadError()
+                        
+                    
+                
+                if not self._currently_in_media_load_error_state:
+                    
+                    self._file_header_is_loaded = True
+                    
                 
                 return True
                 
+            elif event.type() == MPVFileSeekedEventType:
+                
+                if not self._file_header_is_loaded:
+                    
+                    return True
+                    
+                
+                current_timestamp_s = self._player.time_pos
+                
+                if self._media is not None and current_timestamp_s is not None and current_timestamp_s <= 1.0:
+                    
+                    self._current_seek_to_start_count += 1
+                    
+                    if self._stop_for_slideshow:
+                        
+                        self.Pause()
+                        
+                    
+                    if self._times_to_play_animation != 0 and self._current_seek_to_start_count >= self._times_to_play_animation:
+                        
+                        self.Pause()
+                        
+                    
+                
+                return True
+                
+            elif event.type() == MPVShutdownEventType:
+                
+                self.setVisible( False )
+                
             
-            current_timestamp_s = self._player.time_pos
+        except mpv.ShutdownError:
             
-            if self._media is not None and current_timestamp_s is not None and current_timestamp_s <= 1.0:
-                
-                self._current_seek_to_start_count += 1
-                
-                if self._stop_for_slideshow:
-                    
-                    self.Pause()
-                    
-                
-                if self._times_to_play_animation != 0 and self._current_seek_to_start_count >= self._times_to_play_animation:
-                    
-                    self.Pause()
-                    
-                
+            return True
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             
@@ -310,54 +490,126 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
         return False
         
     
-    def GetAnimationBarStatus( self ):
+    def EmergencyDumpOut( self, probably_crashy, reason ):
         
-        buffer_indices = None
+        # we had to rewrite this thing due to some threading/loop/event issues at the lower mpv level
+        # when we have an emergency, we now broadcast to all mpv players at once, they all crash out, to be safe
         
-        if self._media is None or not self._file_is_loaded:
+        original_media = self._media
+        
+        if original_media is None:
             
-            current_frame_index = 0
-            current_timestamp_ms = 0
-            paused = True
+            # this MPV window is probably not the one that had a problem
+            return
             
-        else:
+        
+        media_line = '\n\nIts hash is: {}'.format( original_media.GetHash().hex() )
+        
+        if probably_crashy:
             
-            current_timestamp_s = self._player.time_pos
+            self.ClearMedia()
             
-            if current_timestamp_s is None:
+            global damaged_file_hashes
+            
+            hash = original_media.GetHash()
+            
+            if hash in damaged_file_hashes:
                 
-                current_frame_index = 0
-                current_timestamp_ms = None
+                return
+                
+            
+            damaged_file_hashes.add( hash )
+            
+        
+        if not self._have_shown_human_error_on_this_file:
+            
+            self._have_shown_human_error_on_this_file = True
+            
+            if probably_crashy:
+                
+                message = f'Sorry, this media appears to have a serious problem! To avoid crashes, MPV will not attempt to play it! The file is possibly truncated or otherwise corrupted, but if you think it is good, please send it to hydev for more testing. The specific errors should be written to the log.{media_line}'
+                
+                HydrusData.DebugPrint( message )
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', f'{message}\n\nThe first error was:\n\n{reason}' )
+                
+                job_status = ClientThreading.JobStatus()
+                
+                job_status.SetFiles( [ original_media.GetHash() ], 'MPV-crasher' )
+                
+                CG.client_controller.pub( 'message', job_status )
                 
             else:
                 
-                current_timestamp_ms = current_timestamp_s * 1000
+                message = f'A media loaded in MPV appears to have had an error. This may be not a big deal, or it may be a crash. The specific errors should be written after this message. They are not positively known as crashy, but if you are getting crashes, please send the file and these errors to hydev so he can test his end.{media_line}'
                 
-                num_frames = self._media.GetNumFrames()
+                HydrusData.DebugPrint( message )
                 
-                if num_frames is None or num_frames == 1:
+            
+    
+    def GetAnimationBarStatus( self ):
+        
+        if self._file_header_is_loaded and self._LooksLikeALoadError():
+            
+            self._HandleLoadError()
+            
+        
+        try:
+            
+            if self._media is None or not self._file_header_is_loaded or self._currently_in_media_load_error_state:
+                
+                return None
+                
+            else:
+                
+                current_timestamp_s = self._player.time_pos
+                
+                if current_timestamp_s is None:
                     
                     current_frame_index = 0
+                    current_timestamp_ms = None
                     
                 else:
                     
-                    current_frame_index = int( round( ( current_timestamp_ms / self._media.GetDurationMS() ) * num_frames ) )
+                    current_timestamp_ms = current_timestamp_s * 1000
                     
-                    current_frame_index = min( current_frame_index, num_frames - 1 )
+                    num_frames = self._media.GetNumFrames()
+                    
+                    if num_frames is None or num_frames == 1:
+                        
+                        current_frame_index = 0
+                        
+                    else:
+                        
+                        current_frame_index = int( round( ( current_timestamp_ms / self._media.GetDurationMS() ) * num_frames ) )
+                        
+                        current_frame_index = min( current_frame_index, num_frames - 1 )
+                        
+                    
+                    current_timestamp_ms = min( current_timestamp_ms, self._media.GetDurationMS() )
                     
                 
-                current_timestamp_ms = min( current_timestamp_ms, self._media.GetDurationMS() )
+                paused = self._player.pause
                 
             
-            paused = self._player.pause
+        except mpv.ShutdownError:
             
+            return None
+            
+        
+        buffer_indices = None
         
         return ( current_frame_index, current_timestamp_ms, paused, buffer_indices )
         
     
     def GotoPreviousOrNextFrame( self, direction ):
         
-        if not self._file_is_loaded:
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        if not self._file_header_is_loaded:
             
             return
             
@@ -373,7 +625,14 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             command = 'frame-back-step'
             
         
-        self._player.command( command )
+        try:
+            
+            self._player.command( command )
+            
+        except mpv.ShutdownError:
+            
+            pass
+            
         
     
     def HasPlayedOnceThrough( self ):
@@ -383,22 +642,79 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def IsPaused( self ):
         
-        return self._player.pause
+        if self._currently_in_media_load_error_state:
+            
+            return True
+            
+        
+        try:
+            
+            return self._player.pause
+            
+        except:
+            
+            # libmpv core probably shut down
+            return True
+            
+        
+    
+    def paintEvent(self, event):
+        
+        return
         
     
     def Pause( self ):
         
-        self._player.pause = True
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        try:
+            
+            self._player.pause = True
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
         
 
     def PausePlay( self ):
         
-        self._player.pause = not self._player.pause
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        try:
+            
+            self._player.pause = not self._player.pause
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
         
 
     def Play( self ):
         
-        self._player.pause = False
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        try:
+            
+            self._player.pause = False
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
         
     
     def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
@@ -427,7 +743,18 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
                 
                 if self._media is not None:
                     
+                    self.Pause()
+                    
                     ClientGUIMedia.OpenExternally( self._media )
+                    
+                
+            elif action == CAC.SIMPLE_OPEN_FILE_IN_FILE_EXPLORER:
+                
+                if self._media is not None:
+                    
+                    self.Pause()
+                    
+                    ClientGUIMedia.OpenFileLocation( self._media )
                     
                 
             elif action == CAC.SIMPLE_CLOSE_MEDIA_VIEWER and self._canvas_type in CC.CANVAS_MEDIA_VIEWER_TYPES:
@@ -453,7 +780,12 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def Seek( self, time_index_ms ):
         
-        if not self._file_is_loaded:
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        if not self._file_header_is_loaded:
             
             return
             
@@ -480,12 +812,31 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def SeekDelta( self, direction, duration_ms ):
         
-        if not self._file_is_loaded:
+        if self._media is None:
             
             return
             
         
-        current_timestamp_s = self._player.time_pos
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        if not self._file_header_is_loaded:
+            
+            return
+            
+        
+        try:
+            
+            current_timestamp_s = self._player.time_pos
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            return
+            
+        
         
         if current_timestamp_s is None:
             
@@ -520,7 +871,15 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def SetLogLevel( self, level: str ):
         
-        self._player.set_loglevel( level )
+        try:
+            
+            self._player.set_loglevel( level )
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
         
     
     def SetMedia( self, media: typing.Optional[ ClientMedia.MediaSingleton ], start_paused = False ):
@@ -530,81 +889,104 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             return
             
         
-        self._file_is_loaded = False
+        global damaged_file_hashes
+        
+        if media is not None and media.GetHash() in damaged_file_hashes:
+            
+            self.ClearMedia()
+            
+            return
+            
+        
+        self._currently_in_media_load_error_state = False
+        self._file_header_is_loaded = False
         self._disallow_seek_on_this_file = False
+        self._times_to_play_animation = 0
+        self._current_seek_to_start_count = 0
         
         self._media = media
         
-        self._times_to_play_animation = 0
-        
-        if self._media is not None and self._media.GetMime() in HC.ANIMATIONS and not HG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
+        try:
             
-            hash = self._media.GetHash()
-            
-            mime = self._media.GetMime()
-            
-            path = HG.client_controller.client_files_manager.GetFilePath( hash, mime )
-            
-            if mime == HC.IMAGE_GIF:
+            if self._media is None:
                 
-                self._times_to_play_animation = HydrusImageHandling.GetTimesToPlayGIF( path )
+                self._player.pause = True
                 
-            elif mime == HC.IMAGE_APNG:
+                self._player.loadfile( self._black_png_path )
                 
-                self._times_to_play_animation = HydrusVideoHandling.GetAPNGTimesToPlay( path )
+                # old method. this does 'work', but null seems to be subtly dangerous in these accursed lands 
+                '''
+                if len( self._player.playlist ) > 0:
+                    
+                    try:
+                        
+                        self._player.command( 'stop' )
+                        
+                        # used to have this, it could raise errors if the load failed
+                        # self._player.command( 'playlist-remove', 'current' )
+                        
+                    except Exception as e:
+                        
+                        HydrusData.PrintException( e )
+                        
+                        pass
+                        
+                    
+                '''
                 
-            
-        
-        self._current_seek_to_start_count = 0
-        
-        if self._media is None:
-            
-            self._player.pause = True
-            
-            if len( self._player.playlist ) > 0:
+            else:
+                
+                self._have_shown_human_error_on_this_file = False
+                
+                hash = self._media.GetHash()
+                mime = self._media.GetMime()
+                
+                # some videos have an audio channel that is silent. hydrus thinks these dudes are 'no audio', but when we throw them at mpv, it may play audio for them
+                # would be fine, you think, except in one reported case this causes scratches and pops and hell whitenoise
+                # so let's see what happens here
+                mute_override = not self._media.HasAudio()
+                
+                client_files_manager = CG.client_controller.client_files_manager
+                
+                path = client_files_manager.GetFilePath( hash, mime )
+                
+                self._player.visibility = 'always'
+                
+                self._stop_for_slideshow = False
+                
+                self._player.pause = True
+                
+                if mime in HC.VIEWABLE_ANIMATIONS and not CG.client_controller.new_options.GetBoolean( 'always_loop_gifs' ):
+                    
+                    if mime == HC.ANIMATION_GIF:
+                        
+                        self._times_to_play_animation = HydrusAnimationHandling.GetTimesToPlayPILAnimation( path )
+                        
+                    elif mime == HC.ANIMATION_APNG:
+                        
+                        self._times_to_play_animation = HydrusAnimationHandling.GetTimesToPlayAPNG( path )
+                        
+                    
                 
                 try:
                     
-                    self._player.command( 'playlist-remove', 'current' )
+                    self._player.loadfile( path )
                     
-                except:
+                except Exception as e:
                     
-                    pass # sometimes happens after an error--screw it
+                    HydrusData.ShowException( e )
                     
                 
-            
-        else:
-            
-            hash = self._media.GetHash()
-            mime = self._media.GetMime()
-            
-            # some videos have an audio channel that is silent. hydrus thinks these dudes are 'no audio', but when we throw them at mpv, it may play audio for them
-            # would be fine, you think, except in one reported case this causes scratches and pops and hell whitenoise
-            # so let's see what happens here
-            mute_override = not self._media.HasAudio()
-            
-            client_files_manager = HG.client_controller.client_files_manager
-            
-            path = client_files_manager.GetFilePath( hash, mime )
-            
-            self._player.visibility = 'always'
-            
-            self._stop_for_slideshow = False
-            
-            self._player.pause = True
-            
-            try:
-                
-                self._player.loadfile( path )
-                
-            except Exception as e:
-                
-                HydrusData.ShowException( e )
+                self._player.volume = ClientGUIMediaVolume.GetCorrectCurrentVolume( self._canvas_type )
+                self._player.mute = mute_override or ClientGUIMediaVolume.GetCorrectCurrentMute( self._canvas_type )
+                self._player.pause = start_paused
                 
             
-            self._player.volume = self._GetCorrectCurrentVolume()
-            self._player.mute = mute_override or self._GetCorrectCurrentMute()
-            self._player.pause = start_paused
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
             
         
     
@@ -615,21 +997,48 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
     
     def UpdateAudioMute( self ):
         
-        self._player.mute = self._GetCorrectCurrentMute()
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        try:
+            
+            self._player.mute = ClientGUIMediaVolume.GetCorrectCurrentMute( self._canvas_type )
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
+        
         
 
     def UpdateAudioVolume( self ):
         
-        self._player.volume = self._GetCorrectCurrentVolume()
+        if self._currently_in_media_load_error_state:
+            
+            return
+            
+        
+        try:
+            
+            self._player.volume = ClientGUIMediaVolume.GetCorrectCurrentVolume( self._canvas_type )
+            
+        except mpv.ShutdownError:
+            
+            # libmpv core probably shut down
+            pass
+            
         
     
     def UpdateConf( self ):
         
-        mpv_config_path = HG.client_controller.GetMPVConfPath()
+        mpv_config_path = CG.client_controller.GetMPVConfPath()
         
         if not os.path.exists( mpv_config_path ):
             
-            default_mpv_config_path = HG.client_controller.GetDefaultMPVConfPath()
+            default_mpv_config_path = CG.client_controller.GetDefaultMPVConfPath()
             
             if not os.path.exists( default_mpv_config_path ):
                 
@@ -659,7 +1068,7 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             self._previous_conf_content_bytes = conf_content_bytes
             
         
-        #To load an existing config file (by default it doesn't load the user/global config like standalone mpv does):
+        # To load an existing config file (by default it doesn't load the user/global config like standalone mpv does):
         
         load_f = getattr( mpv, '_mpv_load_config_file', None )
         
@@ -668,6 +1077,10 @@ class MPVWidget( QW.QWidget, CAC.ApplicationCommandProcessorMixin ):
             try:
                 
                 load_f( self._player.handle, mpv_config_path.encode( 'utf-8' ) ) # pylint: disable=E1102
+                
+            except mpv.ShutdownError:
+                
+                pass
                 
             except Exception as e:
                 

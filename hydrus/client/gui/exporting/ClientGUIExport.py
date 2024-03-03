@@ -9,14 +9,17 @@ from qtpy import QtWidgets as QW
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusLists
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusThreading
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
 from hydrus.client import ClientThreading
 from hydrus.client.exporting import ClientExportingFiles
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -29,10 +32,12 @@ from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.metadata import ClientGUIMetadataMigration
 from hydrus.client.gui.search import ClientGUIACDropdown
 from hydrus.client.gui.widgets import ClientGUICommon
-from hydrus.client.media import ClientMedia
+from hydrus.client.media import ClientMediaFileFilter
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientMetadataMigrationExporters
 from hydrus.client.metadata import ClientMetadataMigrationImporters
 from hydrus.client.metadata import ClientTags
+from hydrus.client.search import ClientSearch
 
 class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
     
@@ -68,7 +73,7 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _AddFolder( self ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         phrase = new_options.GetString( 'export_phrase' )
         
@@ -77,7 +82,7 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
         export_type = HC.EXPORT_FOLDER_TYPE_REGULAR
         delete_from_client_after_export = False
         
-        default_location_context = HG.client_controller.new_options.GetDefaultLocalLocationContext()
+        default_location_context = CG.client_controller.new_options.GetDefaultLocalLocationContext()
         
         file_search_context = ClientSearch.FileSearchContext( location_context = default_location_context )
         
@@ -98,7 +103,7 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
                 return
                 
             
-            if result != QW.QDialog.DialogCode.Accepted:
+            if result != QW.QDialog.Accepted:
                 
                 metadata_routers = []
                 
@@ -136,7 +141,7 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _ConvertExportFolderToListCtrlTuples( self, export_folder: ClientExportingFiles.ExportFolder ):
         
-        ( name, path, export_type, delete_from_client_after_export, export_symlinks, file_search_context, run_regularly, period, phrase, last_checked, paused, run_now ) = export_folder.ToTuple()
+        ( name, path, export_type, delete_from_client_after_export, export_symlinks, file_search_context, run_regularly, period, phrase, last_checked, run_now ) = export_folder.ToTuple()
         
         pretty_export_type = 'regular'
         
@@ -154,7 +159,7 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if run_regularly:
             
-            pretty_period = HydrusData.TimeDeltaToPrettyTimeDelta( period )
+            pretty_period = HydrusTime.TimeDeltaToPrettyTimeDelta( period )
             
         else:
             
@@ -166,22 +171,13 @@ class EditExportFoldersPanel( ClientGUIScrolledPanels.EditPanel ):
             pretty_period += ' (running after dialog ok)'
             
         
-        if paused:
-            
-            pretty_paused = 'yes'
-            
-        else:
-            
-            pretty_paused = ''
-            
-        
         pretty_phrase = phrase
         
         last_error = export_folder.GetLastError()
         
-        display_tuple = ( name, path, pretty_export_type, pretty_file_search_context, pretty_paused, pretty_period, pretty_phrase, last_error )
+        display_tuple = ( name, path, pretty_export_type, pretty_file_search_context, pretty_period, pretty_phrase, last_error )
         
-        sort_tuple = ( name, path, pretty_export_type, pretty_file_search_context, paused, period, phrase, last_error )
+        sort_tuple = ( name, path, pretty_export_type, pretty_file_search_context, period, phrase, last_error )
         
         return ( display_tuple, sort_tuple )
         
@@ -244,7 +240,7 @@ class EditExportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._export_folder = export_folder
         
-        ( name, path, export_type, delete_from_client_after_export, export_symlinks, file_search_context, run_regularly, period, phrase, self._last_checked, paused, run_now ) = self._export_folder.ToTuple()
+        ( name, path, export_type, delete_from_client_after_export, export_symlinks, file_search_context, run_regularly, period, phrase, self._last_checked, run_now ) = self._export_folder.ToTuple()
         
         self._path_box = ClientGUICommon.StaticBox( self, 'name and location' )
         
@@ -279,9 +275,9 @@ class EditExportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._run_regularly = QW.QCheckBox( self._period_box )
         
-        self._paused = QW.QCheckBox( self._period_box )
-        
         self._run_now = QW.QCheckBox( self._period_box )
+        
+        self._show_working_popup = QW.QCheckBox( self._period_box )
         
         #
         
@@ -304,7 +300,7 @@ class EditExportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         self._metadata_routers_box = ClientGUICommon.StaticBox( self, 'sidecar exporting' )
         
         metadata_routers = export_folder.GetMetadataRouters()
-        allowed_importer_classes = [ ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ]
+        allowed_importer_classes = [ ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps ]
         allowed_exporter_classes = [ ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT, ClientMetadataMigrationExporters.SingleFileMetadataExporterJSON ]
         
         self._metadata_routers_button = ClientGUIMetadataMigration.SingleFileMetadataRoutersButton( self._metadata_routers_box, metadata_routers, allowed_importer_classes, allowed_exporter_classes )
@@ -325,9 +321,9 @@ class EditExportFolderPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._run_regularly.setChecked( run_regularly )
         
-        self._paused.setChecked( paused )
-        
         self._run_now.setChecked( run_now )
+        
+        self._show_working_popup.setChecked( export_folder.ShowWorkingPopup() )
         
         self._pattern.setText( phrase )
         
@@ -367,12 +363,11 @@ If you select synchronise, be careful!'''
         
         self._query_box.Add( self._tag_autocomplete )
         
-        self._period_box.Add( self._period, CC.FLAGS_EXPAND_PERPENDICULAR )
-        
         rows = []
         
         rows.append( ( 'run regularly?: ', self._run_regularly ) )
-        rows.append( ( 'paused: ', self._paused ) )
+        rows.append( self._period )
+        rows.append( ( 'show popup when working regularly?: ', self._show_working_popup ) )
         rows.append( ( 'run on dialog ok: ', self._run_now ) )
         
         gridbox = ClientGUICommon.WrapInGrid( self._period_box, rows )
@@ -400,9 +395,19 @@ If you select synchronise, be careful!'''
         self.widget().setLayout( vbox )
         
         self._UpdateTypeDeleteUI()
+        self._UpdateRunRegularly()
         
         self._type.currentIndexChanged.connect( self._UpdateTypeDeleteUI )
         self._delete_from_client_after_export.clicked.connect( self.EventDeleteFilesAfterExport )
+        self._run_regularly.clicked.connect( self._UpdateRunRegularly )
+        
+    
+    def _UpdateRunRegularly( self ):
+        
+        run_regularly = self._run_regularly.isChecked()
+        
+        self._period.setEnabled( run_regularly )
+        self._show_working_popup.setEnabled( run_regularly )
         
     
     def _UpdateTypeDeleteUI( self ):
@@ -443,7 +448,7 @@ If you select synchronise, be careful!'''
         
         if self._delete_from_client_after_export.isChecked():
             
-            QW.QMessageBox.warning( self, 'Warning', 'This will delete the exported files from your client after the export! If you do not know what this means, uncheck it!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'This will delete the exported files from your client after the export! If you do not know what this means, uncheck it!' )
             
         
     
@@ -485,9 +490,9 @@ If you select synchronise, be careful!'''
         
         run_now = self._run_now.isChecked()
         
-        paused = self._paused.isChecked()
-        
         last_error = self._export_folder.GetLastError()
+        
+        show_working_popup = self._show_working_popup.isChecked()
         
         export_folder = ClientExportingFiles.ExportFolder(
             name,
@@ -501,9 +506,9 @@ If you select synchronise, be careful!'''
             period = period,
             phrase = phrase,
             last_checked = self._last_checked,
-            paused = paused,
             run_now = run_now,
-            last_error = last_error
+            last_error = last_error,
+            show_working_popup = show_working_popup
         )
         
         return export_folder
@@ -515,7 +520,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         self._media_to_paths = {}
         self._media_to_number_indices = { media : i + 1 for ( i, media ) in enumerate( flat_media ) }
@@ -525,9 +530,9 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._tags_box = ClientGUIListBoxes.StaticBoxSorterForListBoxTags( self, 'files\' tags' )
         
-        services_manager = HG.client_controller.services_manager
+        services_manager = CG.client_controller.services_manager
         
-        t = ClientGUIListBoxes.ListBoxTagsMedia( self._tags_box, ClientTags.TAG_DISPLAY_ACTUAL, include_counts = True )
+        t = ClientGUIListBoxes.ListBoxTagsMedia( self._tags_box, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, include_counts = True )
         
         self._tags_box.SetTagsBox( t )
         
@@ -566,7 +571,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
             
         
         metadata_routers = new_options.GetDefaultExportFilesMetadataRouters()
-        allowed_importer_classes = [ ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs ]
+        allowed_importer_classes = [ ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTags, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaNotes, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaURLs, ClientMetadataMigrationImporters.SingleFileMetadataImporterMediaTimestamps ]
         allowed_exporter_classes = [ ClientMetadataMigrationExporters.SingleFileMetadataExporterTXT, ClientMetadataMigrationExporters.SingleFileMetadataExporterJSON ]
         
         self._metadata_routers_button = ClientGUIMetadataMigration.SingleFileMetadataRoutersButton( self, metadata_routers, allowed_importer_classes, allowed_exporter_classes )
@@ -589,7 +594,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._paths.SetData( flat_media )
         
-        self._delete_files_after_export.setChecked( HG.client_controller.new_options.GetBoolean( 'delete_files_after_export' ) )
+        self._delete_files_after_export.setChecked( CG.client_controller.new_options.GetBoolean( 'delete_files_after_export' ) )
         self._delete_files_after_export.clicked.connect( self.EventDeleteFilesChanged )
         
         #
@@ -635,7 +640,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if do_export_and_then_quit:
             
-            HG.client_controller.CallAfterQtSafe( self, 'doing export before dialog quit', self._DoExport, True )
+            CG.client_controller.CallAfterQtSafe( self, 'doing export before dialog quit', self._DoExport, True )
             
         
     
@@ -749,7 +754,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         pattern = self._pattern.text()
         
-        HG.client_controller.new_options.SetString( 'export_phrase', pattern )
+        CG.client_controller.new_options.SetString( 'export_phrase', pattern )
         
         try:
             
@@ -757,14 +762,14 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            ClientGUIDialogsMessage.ShowWarning( self, f'Problem parsing export phrase!\n\n{e}' )
             
             return
             
         
         metadata_routers = self._metadata_routers_button.GetValue()
         
-        client_files_manager = HG.client_controller.client_files_manager
+        client_files_manager = CG.client_controller.client_files_manager
         
         self._export.setEnabled( False )
         
@@ -801,19 +806,19 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def do_it( directory, metadata_routers, delete_afterwards, export_symlinks, quit_afterwards ):
             
-            job_key = ClientThreading.JobKey( cancellable = True )
+            job_status = ClientThreading.JobStatus( cancellable = True )
             
-            job_key.SetStatusTitle( 'file export' )
+            job_status.SetStatusTitle( 'file export' )
             
-            HG.client_controller.pub( 'message', job_key )
+            CG.client_controller.pub( 'message', job_status )
             
-            pauser = HydrusData.BigJobPauser()
+            pauser = HydrusThreading.BigJobPauser()
             
             for ( index, ( media, dest_path ) ) in enumerate( to_do ):
                 
                 number = self._media_to_number_indices[ media ]
                 
-                if job_key.IsCancelled():
+                if job_status.IsCancelled():
                     
                     break
                     
@@ -822,8 +827,8 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                     
                     x_of_y = HydrusData.ConvertValueRangeToPrettyString( index + 1, num_to_do )
                     
-                    job_key.SetStatusText( 'Done {}'.format( x_of_y ) )
-                    job_key.SetVariable( 'popup_gauge_1', ( index + 1, num_to_do ) )
+                    job_status.SetStatusText( 'Done {}'.format( x_of_y ) )
+                    job_status.SetVariable( 'popup_gauge_1', ( index + 1, num_to_do ) )
                     
                     QP.CallAfter( qt_update_label, x_of_y )
                     
@@ -874,7 +879,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                     
                 except:
                     
-                    QP.CallAfter( QW.QMessageBox.information, self, 'Information', 'Encountered a problem while attempting to export file #{}:'.format( HydrusData.ToHumanInt( number ) ) + os.linesep * 2 + traceback.format_exc() )
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem during file export!', f'Encountered a problem while attempting to export file #{HydrusData.ToHumanInt( number )}:\n\n{traceback.format_exc()}' )
                     
                     break
                     
@@ -882,17 +887,17 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 pauser.Pause()
                 
             
-            if not job_key.IsCancelled() and delete_afterwards:
+            if not job_status.IsCancelled() and delete_afterwards:
                 
                 QP.CallAfter( qt_update_label, 'deleting' )
                 
                 possible_deletee_medias = { media for ( media, path ) in to_do }
                 
-                deletee_medias = ClientMedia.FilterAndReportDeleteLockFailures( possible_deletee_medias )
+                deletee_medias = ClientMediaFileFilter.FilterAndReportDeleteLockFailures( possible_deletee_medias )
                 
-                local_file_service_keys = HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
+                local_file_service_keys = CG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) )
                 
-                chunks_of_deletee_medias = HydrusData.SplitListIntoChunks( list( deletee_medias ), 64 )
+                chunks_of_deletee_medias = HydrusLists.SplitListIntoChunks( list( deletee_medias ), 64 )
                 
                 for chunk_of_deletee_medias in chunks_of_deletee_medias:
                     
@@ -910,19 +915,17 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
                     
                     for service_key in ClientLocation.ValidLocalDomainsFilter( service_keys_to_hashes.keys() ):
                         
-                        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, service_keys_to_hashes[ service_key ], reason = reason )
+                        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, service_keys_to_hashes[ service_key ], reason = reason )
                         
-                        HG.client_controller.WriteSynchronous( 'content_updates', { service_key : [ content_update ] } )
+                        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( service_key, content_update ) )
                         
                     
                 
             
-            job_key.DeleteVariable( 'popup_gauge_1' )
-            job_key.SetStatusText( 'Done!' )
+            job_status.DeleteVariable( 'popup_gauge_1' )
+            job_status.SetStatusText( 'Done!' )
             
-            job_key.Finish()
-            
-            job_key.Delete( 5 )
+            job_status.FinishAndDismiss( 5 )
             
             QP.CallAfter( qt_update_label, 'done!' )
             
@@ -933,7 +936,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
             QP.CallAfter( qt_done, quit_afterwards )
             
         
-        HG.client_controller.CallToThread( do_it, directory, metadata_routers, delete_afterwards, export_symlinks, quit_afterwards )
+        CG.client_controller.CallToThread( do_it, directory, metadata_routers, delete_afterwards, export_symlinks, quit_afterwards )
         
     
     def _GetPath( self, media ):
@@ -967,7 +970,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         metadata_routers = self._metadata_routers_button.GetValue()
         
-        HG.client_controller.new_options.SetDefaultExportFilesMetadataRouters( metadata_routers )
+        CG.client_controller.new_options.SetDefaultExportFilesMetadataRouters( metadata_routers )
         
     
     def _RefreshPaths( self ):
@@ -983,7 +986,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         self._last_phrase_used = pattern
         self._last_dir_used = dir_path
         
-        HG.client_controller.new_options.SetString( 'export_phrase', pattern )
+        CG.client_controller.new_options.SetString( 'export_phrase', pattern )
         
         self._existing_filenames = set()
         self._media_to_paths = {}
@@ -1012,7 +1015,7 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         value = self._delete_files_after_export.isChecked()
         
-        HG.client_controller.new_options.SetBoolean( 'delete_files_after_export', value )
+        CG.client_controller.new_options.SetBoolean( 'delete_files_after_export', value )
         
         if value:
             
@@ -1026,7 +1029,14 @@ class ReviewExportFilesPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if directory is not None and directory != '':
             
+            if not os.path.exists( directory ):
+                
+                ClientGUIDialogsMessage.ShowCritical( self, 'Does not exist!', 'That location does not seem to exist!' )
+                
+                return
+                
+            
             HydrusPaths.LaunchDirectory( directory )
-        
+            
         
     

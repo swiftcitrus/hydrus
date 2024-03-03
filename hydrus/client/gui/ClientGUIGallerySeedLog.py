@@ -1,8 +1,6 @@
 import os
 
-from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
-from qtpy import QtGui as QG
 
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
@@ -10,10 +8,13 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
+from hydrus.client import ClientTime
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUISerialisable
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -51,15 +52,16 @@ def GetURLsFromURLsString( urls_string ):
     
     return urls
     
+
 def ImportFromClipboard( win: QW.QWidget, gallery_seed_log: ClientImportGallerySeeds.GallerySeedLog, can_generate_more_pages: bool ):
     
     try:
         
-        raw_text = HG.client_controller.GetClipboardText()
+        raw_text = CG.client_controller.GetClipboardText()
         
     except HydrusExceptions.DataMissing as e:
         
-        QW.QMessageBox.critical( win, 'Error', str(e) )
+        ClientGUIDialogsMessage.ShowCritical( win, 'Problem importing from clipboard!', str(e) )
         
         return
         
@@ -70,13 +72,12 @@ def ImportFromClipboard( win: QW.QWidget, gallery_seed_log: ClientImportGalleryS
         
         ImportURLs( win, gallery_seed_log, urls, can_generate_more_pages )
         
-    except:
+    except Exception as e:
         
-        QW.QMessageBox.critical( win, 'Error', 'Could not import!' )
-        
-        raise
+        ClientGUIFunctions.PresentClipboardParseError( win, raw_text, 'Lines of URLs', e )
         
     
+
 def ImportFromPNG( win: QW.QWidget, gallery_seed_log: ClientImportGallerySeeds.GallerySeedLog, can_generate_more_pages: bool ):
     
     with QP.FileDialog( win, 'select the png with the urls', wildcard = 'PNG (*.png)' ) as dlg:
@@ -93,9 +94,9 @@ def ImportFromPNG( win: QW.QWidget, gallery_seed_log: ClientImportGallerySeeds.G
                 
                 ImportURLs( win, gallery_seed_log, urls, can_generate_more_pages )
                 
-            except:
+            except Exception as e:
                 
-                QW.QMessageBox.critical( win, 'Error', 'Could not import!' )
+                ClientGUIDialogsMessage.ShowCritical( win, 'Could not import!', str( e ) )
                 
                 raise
                 
@@ -169,7 +170,7 @@ def ExportToClipboard( gallery_seed_log: ClientImportGallerySeeds.GallerySeedLog
     
     payload = GetExportableURLsString( gallery_seed_log )
     
-    HG.client_controller.pub( 'clipboard', 'text', payload )
+    CG.client_controller.pub( 'clipboard', 'text', payload )
     
 def RetryErrors( win: QW.QWidget, gallery_seed_log: ClientImportGallerySeeds.GallerySeedLog ):
     
@@ -220,7 +221,7 @@ def PopulateGallerySeedLogButton( win: QW.QWidget, menu: QW.QMenu, gallery_seed_
             ClientGUIMenus.AppendSeparator( menu )
             
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
 
         ClientGUIMenus.AppendMenuItem( submenu, 'to clipboard', 'Copy all the urls in this list to the clipboard.', ExportToClipboard, gallery_seed_log )
         ClientGUIMenus.AppendMenuItem( submenu, 'to png', 'Export all the urls in this list to a png file.', ExportToPNG, win, gallery_seed_log )
@@ -230,7 +231,7 @@ def PopulateGallerySeedLogButton( win: QW.QWidget, menu: QW.QMenu, gallery_seed_
     
     if not read_only:
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         ClientGUIMenus.AppendMenuItem( submenu, 'from clipboard', 'Import new urls to this list from the clipboard.', ImportFromClipboard, win, gallery_seed_log, can_generate_more_pages )
         ClientGUIMenus.AppendMenuItem( submenu, 'from png', 'Import new urls to this list from a png file.', ImportFromPNG, win, gallery_seed_log, can_generate_more_pages )
@@ -271,7 +272,7 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self.widget().setLayout( vbox )
         
-        self._list_ctrl.AddMenuCallable( self._GetListCtrlMenu )
+        self._list_ctrl.AddRowsMenuCallable( self._GetListCtrlMenu )
         
         self._controller.sub( self, 'NotifyGallerySeedsUpdated', 'gallery_seed_log_gallery_seeds_updated' )
         
@@ -297,9 +298,9 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
         
         pretty_gallery_seed_index = HydrusData.ToHumanInt( gallery_seed_index )
         pretty_url = url
-        pretty_status = CC.status_string_lookup[ status ]
-        pretty_added = ClientData.TimestampToPrettyTimeDelta( added )
-        pretty_modified = ClientData.TimestampToPrettyTimeDelta( modified )
+        pretty_status = CC.status_string_lookup[ status ] if status != CC.STATUS_UNKNOWN else ''
+        pretty_added = ClientTime.TimestampToPrettyTimeDelta( added )
+        pretty_modified = ClientTime.TimestampToPrettyTimeDelta( modified )
         pretty_note = note.split( os.linesep )[0]
         
         display_tuple = ( pretty_gallery_seed_index, pretty_url, pretty_status, pretty_added, pretty_modified, pretty_note )
@@ -318,7 +319,7 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
             
             text = separator.join( ( gallery_seed.url for gallery_seed in gallery_seeds ) )
             
-            HG.client_controller.pub( 'clipboard', 'text', text )
+            CG.client_controller.pub( 'clipboard', 'text', text )
             
         
     
@@ -342,7 +343,7 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
             
             text = separator.join( notes )
             
-            HG.client_controller.pub( 'clipboard', 'text', text )
+            CG.client_controller.pub( 'clipboard', 'text', text )
             
         
     
@@ -367,7 +368,7 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
         
         selected_gallery_seeds = self._list_ctrl.GetData( only_selected = True )
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         if len( selected_gallery_seeds ) == 0:
             
@@ -399,7 +400,7 @@ class EditGallerySeedLogPanel( ClientGUIScrolledPanels.EditPanel ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         PopulateGallerySeedLogButton( self, submenu, self._gallery_seed_log, self._read_only, self._can_generate_more_pages, self._gallery_type_string )
         
@@ -634,7 +635,7 @@ class GallerySeedLogStatusControl( QW.QFrame ):
         
         #
         
-        HG.client_controller.gui.RegisterUIUpdateWindow( self )
+        CG.client_controller.gui.RegisterUIUpdateWindow( self )
         
     
     def _GetGallerySeedLog( self ):

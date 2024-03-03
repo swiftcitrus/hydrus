@@ -1,4 +1,5 @@
 import collections
+import functools
 import os
 import typing
 
@@ -16,33 +17,7 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusThreading
-
-mimes_to_default_thumbnail_paths = collections.defaultdict( lambda: os.path.join( HC.STATIC_DIR, 'hydrus.png' ) )
-
-mimes_to_default_thumbnail_paths[ HC.APPLICATION_PDF ] = os.path.join( HC.STATIC_DIR, 'pdf.png' )
-mimes_to_default_thumbnail_paths[ HC.APPLICATION_PSD ] = os.path.join( HC.STATIC_DIR, 'psd.png' )
-mimes_to_default_thumbnail_paths[ HC.APPLICATION_CLIP ] = os.path.join( HC.STATIC_DIR, 'clip.png' )
-
-for mime in HC.AUDIO:
-    
-    path = os.path.join( HC.STATIC_DIR, 'audio.png' )
-    
-    mimes_to_default_thumbnail_paths[ mime ] = os.path.join( path )
-    
-
-for mime in HC.VIDEO:
-    
-    path = os.path.join( HC.STATIC_DIR, 'video.png' )
-    
-    mimes_to_default_thumbnail_paths[ mime ] = os.path.join( path )
-    
-
-for mime in HC.ARCHIVES:
-    
-    path = os.path.join( HC.STATIC_DIR, 'zip.png' )
-    
-    mimes_to_default_thumbnail_paths[ mime ] = os.path.join( path )
-    
+from hydrus.core import HydrusTime
 
 def AppendPathUntilNoConflicts( path ):
     
@@ -122,56 +97,13 @@ def ConvertPortablePathToAbsPath( portable_path, base_dir_override = None ):
     
     return abs_path
     
-def CopyAndMergeTree( source, dest ):
-    
-    pauser = HydrusData.BigJobPauser()
-    
-    MakeSureDirectoryExists( dest )
-    
-    num_errors = 0
-    
-    for ( root, dirnames, filenames ) in os.walk( source ):
-        
-        dest_root = root.replace( source, dest )
-        
-        for dirname in dirnames:
-            
-            pauser.Pause()
-            
-            source_path = os.path.join( root, dirname )
-            dest_path = os.path.join( dest_root, dirname )
-            
-            MakeSureDirectoryExists( dest_path )
-            
-            shutil.copystat( source_path, dest_path )
-            
-        
-        for filename in filenames:
-            
-            if num_errors > 5:
-                
-                raise Exception( 'Too many errors, directory copy abandoned.' )
-                
-            
-            pauser.Pause()
-            
-            source_path = os.path.join( root, filename )
-            dest_path = os.path.join( dest_root, filename )
-            
-            ok = MirrorFile( source_path, dest_path )
-            
-            if not ok:
-                
-                num_errors += 1
-                
-            
-        
-    
+
 def CopyFileLikeToFileLike( f_source, f_dest ):
     
     for block in ReadFileLikeAsBlocks( f_source ): f_dest.write( block )
     
-def DeletePath( path ):
+
+def DeletePath( path ) -> bool:
     
     if HG.file_report_mode:
         
@@ -180,7 +112,7 @@ def DeletePath( path ):
         HydrusData.ShowText( ''.join( traceback.format_stack() ) )
         
     
-    if os.path.exists( path ):
+    if os.path.lexists( path ):
         
         TryToMakeFileWriteable( path )
         
@@ -209,20 +141,33 @@ def DeletePath( path ):
                 HydrusData.ShowException( e )
                 
             
-        
-    
-def DirectoryIsWriteable( path ):
-    
-    while not os.path.exists( path ):
-        
-        try:
-            
-            path = os.path.dirname( path )
-            
-        except:
-            
             return False
             
+        
+    
+    return True
+    
+
+def DirectoryIsWriteable( path ):
+    
+    if not PotentialPathDeviceIsConnected( path ):
+        
+        raise Exception( f'Cannot figure out if "{path}" is writeable-to because its device does not seem to be mounted!' )
+        
+    
+    try:
+        
+        MakeSureDirectoryExists( path )
+        
+    except ( PermissionError, OSError ) as e:
+        
+        return False
+        
+    
+    if not os.path.exists( path ):
+        
+        # the makedirs failed, probably permission related
+        return False
         
     
     if not os.access( path, os.W_OK | os.X_OK ):
@@ -230,7 +175,7 @@ def DirectoryIsWriteable( path ):
         return False
         
     
-    # we'll actually do a file, since Program Files passes the above test lmaoooo
+    # we'll actually try making a file, since Windows Program Files passes the above test lmaoooo
     
     try:
         
@@ -253,10 +198,124 @@ def DirectoryIsWriteable( path ):
     
     return True
     
+
+def ElideFilenameOrDirectorySafely( name: str, num_characters_used_in_other_components: typing.Optional[ int ] = None, num_characters_already_used_in_this_component: typing.Optional[ int ] = None ):
+    
+    # most OSes cannot handle a filename or dirname with more than 255 characters
+    # Windows cannot handle a _total_ pathname more than 260
+    # to be safe and deal with surprise extensions like (11) or .txt sidecars, we use 220
+    # moreover, unicode paths are encoded to bytes, so we have to count differently
+    
+    MAX_PATH_LENGTH = 220
+    
+    num_characters_available = MAX_PATH_LENGTH
+    
+    if num_characters_used_in_other_components is not None:
+        
+        if HC.PLATFORM_WINDOWS:
+            
+            num_characters_available -= num_characters_used_in_other_components
+            
+            if num_characters_available <= 0:
+                
+                raise Exception( 'Sorry, it looks like the combined export filename or directory would be too long! Try shortening the export directory name!' )
+                
+            
+        
+    
+    if num_characters_already_used_in_this_component is not None:
+        
+        num_characters_available -= num_characters_already_used_in_this_component
+        
+        if num_characters_available <= 0:
+            
+            raise Exception( 'Sorry, it looks like the export filename would be too long! Try shortening the export phrase or directory!' )
+            
+        
+    
+    if name == '':
+        
+        return name
+        
+    
+    while len( name.encode( 'utf-8' ) ) > num_characters_available:
+        
+        name = name[:-1]
+        
+    
+    if name == '':
+        
+        raise Exception( 'Sorry, it looks like the export filename would be too long! Try shortening the export phrase or directory!' )
+        
+    
+    return name
+    
+
+def FigureOutDBDir( arg_db_dir: str ):
+    
+    switching_to_userpath_is_ok = False
+    
+    if arg_db_dir is None:
+        
+        if HC.RUNNING_FROM_MACOS_APP:
+            
+            if HC.USERPATH_DB_DIR is None:
+                
+                raise Exception( 'The userpath (for macOS App database) could not be determined!' )
+                
+            
+            db_dir = HC.USERPATH_DB_DIR
+            
+        else:
+            
+            db_dir = HC.DEFAULT_DB_DIR
+            
+            switching_to_userpath_is_ok = True
+            
+        
+    else:
+        
+        db_dir = arg_db_dir
+        
+        db_dir = ConvertPortablePathToAbsPath( db_dir, HC.BASE_DIR )
+        
+    
+    if not DirectoryIsWriteable( db_dir ):
+        
+        if switching_to_userpath_is_ok:
+            
+            if HC.USERPATH_DB_DIR is None:
+                
+                raise Exception( f'The db path "{db_dir}" was not writeable-to, and the userpath could not be determined!' )
+                
+            else:
+                
+                if not DirectoryIsWriteable( HC.USERPATH_DB_DIR ):
+                    
+                    raise Exception( f'Neither the default db path "{db_dir}", nor the userpath fallback "{HC.USERPATH_DB_DIR}", were writeable-to!' )
+                    
+                
+                HydrusData.Print( f'The given db path "{db_dir}" is not writeable-to! Falling back to userpath at "{HC.USERPATH_DB_DIR}".' )
+                
+                HC.WE_SWITCHED_TO_USERPATH = True
+                
+                db_dir = HC.USERPATH_DB_DIR
+                
+            
+        else:
+            
+            raise Exception( f'The chosen db path "{db_dir}" is not writeable-to!' )
+            
+        
+    
+    return db_dir
+    
+
 def FileisWriteable( path: str ):
     
     return os.access( path, os.W_OK )
     
+
 def FilterFreePaths( paths ):
     
     free_paths = []
@@ -273,6 +332,31 @@ def FilterFreePaths( paths ):
     
     return free_paths
     
+
+def FilterOlderModifiedFiles( paths: typing.Collection[ str ], grace_period: int ) -> typing.List[ str ]:
+    
+    only_older_than = HydrusTime.GetNow() - grace_period
+    
+    good_paths = []
+    
+    for path in paths:
+        
+        try:
+            
+            if os.path.getmtime( path ) < only_older_than:
+                
+                good_paths.append( path )
+                
+            
+        except:
+            
+            continue
+            
+        
+    
+    return good_paths
+    
+
 def GetDefaultLaunchPath():
     
     if HC.PLATFORM_WINDOWS:
@@ -292,6 +376,8 @@ def GetDefaultLaunchPath():
         return 'open "%path%"'
         
     
+
+@functools.lru_cache( maxsize = 128 )
 def GetPartitionInfo( path ) -> typing.Optional[ typing.NamedTuple ]:
     
     path = path.lower()
@@ -340,7 +426,7 @@ def GetDevice( path ) -> typing.Optional[ str ]:
         
     
 
-def GetFileSystemType( path ):
+def GetFileSystemType( path: str ) -> typing.Optional[ str ]:
     
     partition_info = GetPartitionInfo( path )
     
@@ -360,12 +446,14 @@ def GetFreeSpace( path ):
     
     return disk_usage.free
     
+
 def GetTotalSpace( path ):
     
     disk_usage = psutil.disk_usage( path )
     
     return disk_usage.total
     
+
 def LaunchDirectory( path ):
     
     def do_it():
@@ -491,11 +579,10 @@ def LaunchFile( path, launch_path = None ):
     
     thread.start()
     
+
 def MakeSureDirectoryExists( path ):
     
-    it_exists_already = os.path.exists( path )
-    
-    if it_exists_already:
+    if os.path.exists( path ):
         
         if os.path.isdir( path ):
             
@@ -503,81 +590,137 @@ def MakeSureDirectoryExists( path ):
             
         else:
             
-            raise Exception( 'Sorry, the desired directory "{}" already exists as a normal file!'.format( path ) )
+            raise Exception( f'Cannot create the directory "{path}" because it already exists as a normal file!' )
+            
+        
+    else:
+        
+        try:
+            
+            os.makedirs( path, exist_ok = True )
+            
+        except FileNotFoundError as e:
+            
+            raise FileNotFoundError( f'While trying to ensure the directory "{path}" exists, none of the possible parent folders seem to exist either! Is the device not plugged in?' ) from e
             
         
     
-    os.makedirs( path, exist_ok = True )
-    
-def safe_copy2( source, dest ):
-    
-    copy_metadata = True
+
+def FileModifiedTimeIsOk( mtime: typing.Union[ int, float ] ):
     
     if HC.PLATFORM_WINDOWS:
         
-        mtime = os.path.getmtime( source )
-        
         # this is 1980-01-01 UTC, before which Windows can have trouble copying lmaoooooo
+        # This is the 'DOS' epoch
         if mtime < 315532800:
             
-            copy_metadata = False
+            return False
+            
+        
+    else:
+        
+        # Epoch obviously
+        if mtime < 0:
+            
+            return False
             
         
     
-    if copy_metadata:
+    return True
+    
+
+def safe_copy2( source, dest ):
+    
+    mtime = os.path.getmtime( source )
+    
+    if FileModifiedTimeIsOk( mtime ):
         
-        # this overwrites on conflict without hassle
-        shutil.copy2( source, dest )
+        try:
+            
+            # this overwrites on conflict without hassle
+            shutil.copy2( source, dest )
+            
+        except PermissionError:
+            
+            HydrusData.Print( f'Failed to copy2 metadata from {source} to {dest}! mtime was {HydrusTime.TimestampToPrettyTime( mtime )}' )
+            
+            shutil.copy( source, dest )
+            
         
     else:
         
         shutil.copy( source, dest )
         
     
-def MergeFile( source, dest ):
+
+def MergeFile( source, dest ) -> bool:
+    """
+    Moves a file unless it already exists with same size and modified date, in which case it simply deletes the source.
     
-    # this can merge a file, but if it is given a dir it will just straight up overwrite not merge
+    :return: Whether an actual move happened.
+    """
+    
+    if not os.path.exists( source ):
+        
+        raise Exception( f'Cannot file-merge "{source}" to "{dest}"--the source does not exist!' )
+        
+    
+    if os.path.isdir( source ):
+        
+        raise Exception( f'Cannot file-merge "{source}" to "{dest}"--the source is a directory, not a file!' )
+        
+    
+    if os.path.isdir( dest ):
+        
+        raise Exception( f'Cannot file-merge "{source}" to "{dest}"--the destination is a directory, not a file!' )
+        
     
     if os.path.exists( source ) and os.path.exists( dest ) and os.path.samefile( source, dest ):
         
+        # maybe this should just return, but we don't want the parent caller deleting the source or anything, so bleh
         raise Exception( f'Woah, "{source}" and "{dest}" are the same file!' )
         
     
-    if not os.path.isdir( source ):
+    if PathsHaveSameSizeAndDate( source, dest ):
         
-        if PathsHaveSameSizeAndDate( source, dest ):
-            
-            DeletePath( source )
-            
-            return True
-            
-        
-    
-    try:
-        
-        # this overwrites on conflict without hassle
-        shutil.move( source, dest, copy_function = safe_copy2 )
-        
-    except Exception as e:
-        
-        HydrusData.ShowText( 'Trying to move ' + source + ' to ' + dest + ' caused the following problem:' )
-        
-        HydrusData.ShowException( e )
+        DeletePath( source )
         
         return False
         
+    
+    # this overwrites on conflict without hassle
+    shutil.move( source, dest, copy_function = safe_copy2 )
     
     return True
     
 
 def MergeTree( source, dest, text_update_hook = None ):
+    """
+    Moves everything in the source to the dest using fast MergeFile tech.
+    """
+    
+    if not os.path.exists( source ):
+        
+        raise Exception( f'Cannot directory-merge "{source}" to "{dest}"--the source does not exist!' )
+        
+    
+    if os.path.isfile( source ):
+        
+        raise Exception( f'Cannot directory-merge "{source}" to "{dest}"--the source is a file, not a directory!' )
+        
+    
+    if os.path.isfile( dest ):
+        
+        raise Exception( f'Cannot directory-merge "{source}" to "{dest}"--the destination is a file, not a directory!' )
+        
     
     if os.path.exists( source ) and os.path.exists( dest ) and os.path.samefile( source, dest ):
         
+        # maybe this should just return, but we don't want the parent caller deleting the source or anything, so bleh
         raise Exception( f'Woah, "{source}" and "{dest}" are the same directory!' )
         
     
-    pauser = HydrusData.BigJobPauser()
+    pauser = HydrusThreading.BigJobPauser()
     
     if not os.path.exists( dest ):
         
@@ -598,8 +741,6 @@ def MergeTree( source, dest, text_update_hook = None ):
     else:
         
         # I had a thing here that tried to optimise if dest existed but was empty, but it wasn't neat
-        
-        num_errors = 0
         
         for ( root, dirnames, filenames ) in os.walk( source ):
             
@@ -624,40 +765,58 @@ def MergeTree( source, dest, text_update_hook = None ):
             
             for filename in filenames:
                 
-                if num_errors > 5:
-                    
-                    raise Exception( 'Too many errors, directory move abandoned.' )
-                    
-                
                 pauser.Pause()
                 
                 source_path = os.path.join( root, filename )
                 dest_path = os.path.join( dest_root, filename )
                 
-                ok = MergeFile( source_path, dest_path )
-                
-                if not ok:
+                try:
                     
-                    num_errors += 1
+                    MergeFile( source_path, dest_path )
+                    
+                except Exception as e:
+                    
+                    raise Exception( f'While trying to merge "{source}" into the already-existing "{dest}", moving "{source_path}" to "{dest_path}" failed!' ) from e
                     
                 
             
         
-        if num_errors == 0:
-            
-            DeletePath( source )
-            
+        DeletePath( source )
         
     
 
-def MirrorFile( source, dest ):
+def MirrorFile( source, dest ) -> bool:
+    """
+    Copies a file unless it already exists with same date and size.
+    
+    :return: Whether an actual file copy/overwrite happened.
+    """
+    
+    if not os.path.exists( source ):
+        
+        raise Exception( f'Cannot file-mirror "{source}" to "{dest}"--the source does not exist!' )
+        
+    
+    if os.path.isdir( source ):
+        
+        raise Exception( f'Cannot file-mirror "{source}" to "{dest}"--the source is a directory, not a file!' )
+        
+    
+    if os.path.isdir( dest ):
+        
+        raise Exception( f'Cannot file-mirror "{source}" to "{dest}"--the destination is a directory, not a file!' )
+        
     
     if os.path.exists( source ) and os.path.exists( dest ) and os.path.samefile( source, dest ):
         
-        return True
+        return False
         
     
-    if not PathsHaveSameSizeAndDate( source, dest ):
+    if PathsHaveSameSizeAndDate( source, dest ):
+        
+        return False
+        
+    else:
         
         try:
             
@@ -667,28 +826,60 @@ def MirrorFile( source, dest ):
             
         except Exception as e:
             
-            HydrusData.ShowText( 'Trying to copy ' + source + ' to ' + dest + ' caused the following problem:' )
+            from hydrus.core import HydrusTemp
             
-            HydrusData.ShowException( e )
+            if isinstance( e, OSError ) and 'Errno 28' in str( e ) and dest.startswith( HydrusTemp.GetCurrentTempDir() ):
+                
+                message = 'The recent failed file copy looks like it was because your temporary folder ran out of disk space!'
+                message += '\n' * 2
+                message += 'This folder is normally on your system drive, so either free up space on that or use the "--temp_dir" launch command to tell hydrus to use a different location for the temporary folder. (Check the advanced help for more info!)'
+                message += '\n' * 2
+                message += 'If your system drive appears to have space but your temp folder still maxed out, then there are probably special rules about how big a file we are allowed to put in there. Use --temp_dir.'
+                
+                if HC.PLATFORM_LINUX:
+                    
+                    message += ' You are also on Linux, where these temp dir rules are not uncommon!'
+                    
+                
+                HydrusData.ShowText( message )
+                
             
-            return False
+            raise
             
         
+        return True
+        
     
-    return True
-    
+
 def MirrorTree( source, dest, text_update_hook = None, is_cancelled_hook = None ):
+    """
+    Makes the destination directory look exactly like the source using fast MirrorFile tech.
+    It deletes surplus stuff in the dest!
+    """
+    
+    if not os.path.exists( source ):
+        
+        raise Exception( f'Cannot directory-mirror "{source}" to "{dest}"--the source does not exist!' )
+        
+    
+    if os.path.isfile( source ):
+        
+        raise Exception( f'Cannot directory-mirror "{source}" to "{dest}"--the source is a file, not a directory!' )
+        
+    
+    if os.path.isfile( dest ):
+        
+        raise Exception( f'Cannot directory-mirror "{source}" to "{dest}"--the destination is a file, not a directory!' )
+        
     
     if os.path.exists( source ) and os.path.exists( dest ) and os.path.samefile( source, dest ):
         
         return
         
     
-    pauser = HydrusData.BigJobPauser()
+    pauser = HydrusThreading.BigJobPauser()
     
     MakeSureDirectoryExists( dest )
-    
-    num_errors = 0
     
     for ( root, dirnames, filenames ) in os.walk( source ):
         
@@ -722,11 +913,6 @@ def MirrorTree( source, dest, text_update_hook = None, is_cancelled_hook = None 
         
         for filename in filenames:
             
-            if num_errors > 5:
-                
-                raise Exception( 'Too many errors, directory copy abandoned.' )
-                
-            
             pauser.Pause()
             
             source_path = os.path.join( root, filename )
@@ -735,11 +921,13 @@ def MirrorTree( source, dest, text_update_hook = None, is_cancelled_hook = None 
             
             surplus_dest_paths.discard( dest_path )
             
-            ok = MirrorFile( source_path, dest_path )
-            
-            if not ok:
+            try:
                 
-                num_errors += 1
+                MirrorFile( source_path, dest_path )
+                
+            except Exception as e:
+                
+                raise Exception( f'While trying to mirror "{source}" into "{dest}", moving "{source_path}" to "{dest_path}" failed!' ) from e
                 
             
         
@@ -805,30 +993,62 @@ def PathsHaveSameSizeAndDate( path1, path2 ):
     
 def PathIsFree( path ):
     
+    if not os.path.exists( path ):
+        
+        return False
+        
+    
     try:
         
         stat_result = os.stat( path )
         
         current_bits = stat_result.st_mode
         
-        if not current_bits & stat.S_IWRITE:
+        if current_bits & stat.S_IWRITE:
             
-            # read-only file, cannot do the rename check
+            os.rename( path, path ) # rename a path to itself
             
             return True
             
-        
-        os.rename( path, path ) # rename a path to itself
-        
-        return True
         
     except OSError as e: # 'already in use by another process' or an odd filename too long error
         
         HydrusData.Print( 'Already in use/inaccessible: ' + path )
         
+        return False
+        
     
-    return False
+    try:
+        
+        with open( path, 'rb' ) as f:
+            
+            return True
+            
+        
+    except:
+        
+        HydrusData.Print( 'Could not open the file: ' + path )
+        
+        return False
+        
     
+
+def PotentialPathDeviceIsConnected( path: str ):
+    
+    # this is a little hacky, but it works at catching "H:\ is not plugged in"
+    # does not work for Linux, oh well
+    try:
+        
+        os.path.ismount( path )
+        
+        return True
+        
+    except FileNotFoundError:
+        
+        return False
+        
+    
+
 def ReadFileLikeAsBlocks( f ):
     
     next_block = f.read( HC.READ_BLOCK_SIZE )
@@ -849,7 +1069,7 @@ def RecyclePath( path ):
         HydrusData.ShowText( ''.join( traceback.format_stack() ) )
         
     
-    if os.path.exists( path ):
+    if os.path.lexists( path ):
         
         TryToMakeFileWriteable( path )
         
@@ -894,7 +1114,16 @@ def SanitizePathForExport( directory_path, directories_and_filename ):
     
     suffix_directories = components[:-1]
     
-    force_ntfs = GetFileSystemType( directory_path ).lower() in ( 'ntfs', 'exfat' )
+    fst = GetFileSystemType( directory_path )
+    
+    if fst is None:
+        
+        force_ntfs = False
+        
+    else:
+        
+        force_ntfs = fst.lower() in ( 'ntfs', 'exfat' )
+        
     
     suffix_directories = [ SanitizeFilename( suffix_directory, force_ntfs = force_ntfs ) for suffix_directory in suffix_directories ]
     filename = SanitizeFilename( filename, force_ntfs = force_ntfs )

@@ -1,10 +1,8 @@
-import collections
 import hashlib
 import http.client
 import json
 import os
 import random
-import shutil
 import time
 import unittest
 import urllib
@@ -16,25 +14,29 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
-from hydrus.core import HydrusImageHandling
+from hydrus.core import HydrusPaths
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
+from hydrus.core.files.images import HydrusImageHandling
 
-from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientAPI
+from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
-from hydrus.client import ClientSearchParseSystemPredicates
 from hydrus.client import ClientServices
+from hydrus.client import ClientTime
 from hydrus.client.importing import ClientImportFiles
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTags
 from hydrus.client.networking import ClientLocalServer
 from hydrus.client.networking import ClientLocalServerResources
 from hydrus.client.networking import ClientNetworkingContexts
+from hydrus.client.search import ClientSearch
 
-from hydrus.test import HelperFunctions
+from hydrus.test import HelperFunctions as HF
 
 CBOR_AVAILABLE = False
 try:
@@ -43,6 +45,97 @@ try:
     CBOR_AVAILABLE = True
 except:
     pass
+
+def wash_example_json_response( obj ):
+    
+    if isinstance( obj, dict ):
+        
+        obj[ 'version' ] = HC.CLIENT_API_VERSION
+        obj[ 'hydrus_version' ] = HC.SOFTWARE_VERSION
+        
+    
+
+def GetExampleServicesDict():
+    
+    services_dict = {
+        '6c6f63616c2074616773': {
+            'name' : 'my tags',
+            'type' : 5,
+            'type_pretty' : 'local tag service'
+        },
+        HG.test_controller.example_tag_repo_service_key.hex() : {
+            'name' : 'example tag repo',
+            'type' : 0,
+            'type_pretty' : 'hydrus tag repository'
+        },
+        '6c6f63616c2066696c6573' : {
+            'name' : 'my files',
+            'type' : 2,
+            'type_pretty' : 'local file domain'
+        },
+        '7265706f7369746f72792075706461746573' : {
+            'name' : 'repository updates',
+            'type' : 20,
+            'type_pretty' : 'local update file domain'
+        },
+        HG.test_controller.example_file_repo_service_key_1.hex() : {
+            'name' : 'example file repo 1',
+            'type' : 1,
+            'type_pretty' : 'hydrus file repository'
+        },
+        HG.test_controller.example_file_repo_service_key_2.hex() : {
+            'name' : 'example file repo 2',
+            'type' : 1,
+            'type_pretty' : 'hydrus file repository'
+        },
+        '616c6c206c6f63616c2066696c6573' : {
+            'name' : 'all local files',
+            'type' : 15,
+            'type_pretty' : 'virtual combined local file service'
+        },
+        '616c6c206c6f63616c206d65646961' : {
+            'name' : 'all my files',
+            'type' : 21,
+            'type_pretty' : 'virtual combined local media service'
+        },
+        '616c6c206b6e6f776e2066696c6573' : {
+            'name' : 'all known files',
+            'type' : 11,
+            'type_pretty' : 'virtual combined file service'
+        },
+        '616c6c206b6e6f776e2074616773' : {
+            'name' : 'all known tags',
+            'type' : 10,
+            'type_pretty' : 'virtual combined tag service'
+        },
+        HG.test_controller.example_like_rating_service_key.hex() : {
+            'name' : 'example local rating like service',
+            'type' : 7,
+            'type_pretty' : 'local like/dislike rating service',
+            'star_shape' : 'circle'
+        },
+        HG.test_controller.example_numerical_rating_service_key.hex() : {
+            'name' : 'example local rating numerical service',
+            'type' : 6,
+            'type_pretty' : 'local numerical rating service',
+            'min_stars' : 0,
+            'max_stars' : 5,
+            'star_shape' : 'circle'
+        },
+        HG.test_controller.example_incdec_rating_service_key.hex() : {
+            'name' : 'example local rating inc/dec service',
+            'type' : 22,
+            'type_pretty' : 'local inc/dec rating service'
+        },
+        '7472617368' : {
+            'name' : 'trash',
+            'type' : 14,
+            'type_pretty' : 'local trash file domain'
+        }
+    }
+    
+    return services_dict
+    
 
 class TestClientAPI( unittest.TestCase ):
     
@@ -65,21 +158,6 @@ class TestClientAPI( unittest.TestCase ):
         reactor.callFromThread( TWISTEDSetup )
         
         time.sleep( 1 )
-        
-    
-    def _compare_content_updates( self, service_keys_to_content_updates, expected_service_keys_to_content_updates ):
-        
-        self.assertEqual( len( service_keys_to_content_updates ), len( expected_service_keys_to_content_updates ) )
-        
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
-            
-            expected_content_updates = expected_service_keys_to_content_updates[ service_key ]
-            
-            c_u_tuples = sorted( ( ( c_u.ToTuple(), c_u.GetReason() ) for c_u in content_updates ) )
-            e_c_u_tuples = sorted( ( ( e_c_u.ToTuple(), e_c_u.GetReason() ) for e_c_u in expected_content_updates ) )
-            
-            self.assertEqual( c_u_tuples, e_c_u_tuples )
-            
         
     
     def _test_basics( self, connection ):
@@ -129,13 +207,17 @@ class TestClientAPI( unittest.TestCase ):
         url = 'http://safebooru.org/index.php?page=post&s=view&id=2753608'
         normalised_url = 'https://safebooru.org/index.php?id=2753608&page=post&s=view'
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = normalised_url
-        expected_answer[ 'url_type' ] = HC.URL_TYPE_POST
-        expected_answer[ 'url_type_string' ] = 'post url'
-        expected_answer[ 'match_name' ] = 'safebooru file page'
-        expected_answer[ 'can_parse' ] = True
+        expected_result[ 'normalised_url' ] = normalised_url
+        expected_result[ 'url_type' ] = HC.URL_TYPE_POST
+        expected_result[ 'url_type_string' ] = 'post url'
+        expected_result[ 'match_name' ] = 'safebooru file page'
+        expected_result[ 'can_parse' ] = True
+        
+        cbor_expected_result = dict( expected_result )
+        
+        wash_example_json_response( expected_result )
         
         hash = os.urandom( 32 )
         
@@ -156,7 +238,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        self.assertEqual( d, expected_answer )
+        self.assertEqual( d, expected_result )
         
         # explicit GET cbor by arg
         
@@ -173,7 +255,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = cbor2.loads( data )
         
-        self.assertEqual( d, expected_answer )
+        self.assertEqual( d, cbor_expected_result )
         
         # explicit GET json by Accept
         
@@ -192,7 +274,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        self.assertEqual( d, expected_answer )
+        self.assertEqual( d, expected_result )
         
         # explicit GET cbor by Accept
         
@@ -209,7 +291,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = cbor2.loads( data )
         
-        self.assertEqual( d, expected_answer )
+        self.assertEqual( d, cbor_expected_result )
         
     
     def _test_client_api_basics( self, connection ):
@@ -533,10 +615,9 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self.assertIn( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, service_keys_to_content_updates )
-        self.assertTrue( len( service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] ) > 0 )
+        self.assertTrue( content_update_package.HasContentForServiceKey( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ) )
         
         #
         
@@ -554,10 +635,9 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self.assertIn( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, service_keys_to_content_updates )
-        self.assertTrue( len( service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] ) > 0 )
+        self.assertTrue( content_update_package.HasContentForServiceKey( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ) )
         
         #
         
@@ -575,10 +655,9 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self.assertIn( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, service_keys_to_content_updates )
-        self.assertTrue( len( service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] ) > 0 )
+        self.assertTrue( content_update_package.HasContentForServiceKey( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ) )
         
         #
         
@@ -640,7 +719,7 @@ class TestClientAPI( unittest.TestCase ):
         should_work = { set_up_permissions[ 'everything' ], set_up_permissions[ 'add_files' ], set_up_permissions[ 'add_tags' ], set_up_permissions[ 'manage_pages' ], set_up_permissions[ 'search_all_files' ], set_up_permissions[ 'search_green_files' ] }
         should_break = { set_up_permissions[ 'add_urls' ], set_up_permissions[ 'manage_headers' ] }
         
-        expected_answer = {
+        expected_result = {
             'local_tags' : [
                 {
                     'name' : 'my tags',
@@ -725,8 +804,11 @@ class TestClientAPI( unittest.TestCase ):
                     'type': 14,
                     'type_pretty': 'local trash file domain'
                 }
-            ]
+            ],
+            'services' : GetExampleServicesDict()
         }
+        
+        wash_example_json_response( expected_result )
         
         get_service_expected_result = {
             'service' : {
@@ -736,6 +818,8 @@ class TestClientAPI( unittest.TestCase ):
                 'type_pretty': 'local update file domain'
             }
         }
+        
+        wash_example_json_response( get_service_expected_result )
         
         for api_permissions in should_work.union( should_break ):
             
@@ -761,7 +845,7 @@ class TestClientAPI( unittest.TestCase ):
                 
                 d = json.loads( text )
                 
-                self.assertEqual( d, expected_answer )
+                self.assertEqual( d, expected_result )
                 
             else:
                 
@@ -855,7 +939,8 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response_json[ 'status' ], CC.STATUS_ERROR )
         self.assertEqual( response_json[ 'hash' ], hash.hex() )
-        self.assertIn( 'Traceback', response_json[ 'note' ] )
+        self.assertIn( 'Unknown', response_json[ 'note' ] )
+        self.assertIn( 'Traceback', response_json[ 'traceback' ] )
         
         # success as body
         
@@ -895,6 +980,8 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : hash.hex() , 'note' : 'test note' }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( response_json, expected_result )
         
         # do hydrus png as path
@@ -928,6 +1015,8 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_result = { 'status' : CC.STATUS_SUCCESSFUL_AND_NEW, 'hash' : hash.hex() , 'note' : 'test note' }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( response_json, expected_result )
         
     
@@ -941,8 +1030,12 @@ class TestClientAPI( unittest.TestCase ):
         
         #
         
+        file_id = random.randint( 10000, 15000 )
+        
         hash = HydrusData.GenerateKey()
         hashes = { HydrusData.GenerateKey() for i in range( 10 ) }
+        
+        file_ids_to_hashes = { file_id : hash for ( file_id, hash ) in zip( random.sample( range( 2000 ), 10 ), hashes ) }
         
         #
         
@@ -962,13 +1055,41 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash }, reason = 'Deleted via Client API.' ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash }, reason = 'Deleted via Client API.' ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
-        #
+        # with file_id
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { file_id : hash } )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'file_id' : file_id }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash }, reason = 'Deleted via Client API.' ) ] )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        HG.test_controller.ClearReads( 'hash_ids_to_hashes' )
+        
+        # with hashes
         
         HG.test_controller.ClearWrites( 'content_updates' )
         
@@ -986,11 +1107,39 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = 'Deleted via Client API.' ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = 'Deleted via Client API.' ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # with file_ids
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'file_ids' : list( file_ids_to_hashes.keys() ) }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = 'Deleted via Client API.' ) ] )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        HG.test_controller.ClearReads( 'hash_ids_to_hashes' )
         
         # now with a reason
         
@@ -1012,11 +1161,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, hashes, reason = reason ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # now test it not working
         
@@ -1042,6 +1191,42 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertIn( not_existing_service_hex, text ) # error message should be complaining about it
         
+        # test file lock, 409 response
+        
+        locked_hash = list( hashes )[0]
+        
+        media_result = HF.GetFakeMediaResult( locked_hash )
+        
+        media_result.GetLocationsManager().inbox = False
+        
+        HG.test_controller.new_options.SetBoolean( 'delete_lock_for_archived_files', True )
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        HG.test_controller.SetRead( 'media_results', [ media_result ] )
+        
+        path = '/add_files/delete_files'
+        
+        body_dict = { 'hashes' : [ h.hex() for h in hashes ] }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 409 )
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertIn( locked_hash.hex(), text ) # error message should be complaining about it
+        
+        CG.client_controller.new_options.SetBoolean( 'delete_lock_for_archived_files', False )
+        
+        HG.test_controller.ClearReads( 'media_results' )
+        
         #
         
         HG.test_controller.ClearWrites( 'content_updates' )
@@ -1060,11 +1245,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, { hash } ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, { hash } ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -1084,11 +1269,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, hashes ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -1130,11 +1315,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, { hash } ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, { hash } ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -1154,11 +1339,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, hashes ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -1178,11 +1363,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, { hash } ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, { hash } ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -1202,12 +1387,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes ) ] }
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_INBOX, hashes ) ] )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
+    
     def _test_add_notes( self, connection, set_up_permissions ):
         
         hash = os.urandom( 32 )
@@ -1247,13 +1433,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d[ 'notes' ], new_notes_dict )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in new_notes_dict.items() ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, name, note ) ) for ( name, note ) in new_notes_dict.items() ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # delete notes
         
@@ -1275,13 +1461,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( hash, name ) ) for name in delete_note_names ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_DELETE, ( hash, name ) ) for name in delete_note_names ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # set notes with merge
         
@@ -1299,17 +1485,19 @@ class TestClientAPI( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( file_id, hash, size = size, mime = mime, width = width, height = height, duration = duration )
         
-        service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
-        service_keys_to_statuses_to_display_tags =  { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue eyes', 'blonde hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit', 'clothing' ] } }
+        service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : { 'blue_eyes', 'blonde_hair' }, HC.CONTENT_STATUS_PENDING : { 'bodysuit' } } }
+        service_keys_to_statuses_to_display_tags =  { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : { 'blue eyes', 'blonde hair' }, HC.CONTENT_STATUS_PENDING : { 'bodysuit', 'clothing' } } }
         
         tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
         
-        locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set() )
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        locations_manager = ClientMediaManagers.LocationsManager( set(), set(), set(), set(), times_manager )
         ratings_manager = ClientMediaManagers.RatingsManager( {} )
         notes_manager = ClientMediaManagers.NotesManager( { 'abc' : '123' } )
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         from hydrus.client.importing.options import NoteImportOptions
         
@@ -1341,13 +1529,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d[ 'notes' ], new_notes_dict )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '1234' ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '1234' ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # no extend (rename)
         
@@ -1377,13 +1565,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d[ 'notes' ], { 'abc (1)' : '1234' } )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc (1)', '1234' ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc (1)', '1234' ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # ignore
         
@@ -1445,13 +1633,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d[ 'notes' ], { 'abc' : '123\n\n789' } )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '123\n\n789' ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '123\n\n789' ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # replace
         
@@ -1481,13 +1669,678 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d[ 'notes' ], { 'abc' : '789' } )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.LOCAL_NOTES_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '789' ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.LOCAL_NOTES_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_NOTES, HC.CONTENT_UPDATE_SET, ( hash, 'abc', '789' ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+    
+    def _test_edit_ratings( self, connection, set_up_permissions ):
+        
+        hash = os.urandom( 32 )
+        hash_hex = hash.hex()
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        # set like like
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_like_rating_service_key.hex(), 'rating' : True }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_like_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set like dislike
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_like_rating_service_key.hex(), 'rating' : False }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_like_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set like None
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_like_rating_service_key.hex(), 'rating' : None }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_like_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set numerical 0
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_numerical_rating_service_key.hex(), 'rating' : 0 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_numerical_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set numerical 2 (0.4)
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_numerical_rating_service_key.hex(), 'rating' : 2 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_numerical_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.4, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set numerical 5 (1.0)
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_numerical_rating_service_key.hex(), 'rating' : 5 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_numerical_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set numerical None
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_numerical_rating_service_key.hex(), 'rating' : None }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_numerical_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set incdec 0
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_incdec_rating_service_key.hex(), 'rating' : 0 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_incdec_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set incdec 5
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_incdec_rating_service_key.hex(), 'rating' : 5 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_incdec_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 5, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+        # set incdec -3
+        
+        HG.test_controller.ClearWrites( 'content_updates' )
+        
+        path = '/edit_ratings/set_rating'
+        
+        body_dict = { 'hash' : hash_hex, 'rating_service_key' : HG.test_controller.example_incdec_rating_service_key.hex(), 'rating' : -3 }
+        
+        body = json.dumps( body_dict )
+        
+        connection.request( 'POST', path, body = body, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_incdec_rating_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { hash } ) ) ] )
+        
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+    
+    def _test_edit_times( self, connection, set_up_permissions ):
+        
+        hash = os.urandom( 32 )
+        hash_hex = hash.hex()
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
+        
+        # set up jobs
+        
+        jobs = []
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_ARCHIVED,
+            'timestamp' : 123456
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetArchivedTimestampMS( HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_ARCHIVED, timestamp_ms = 123456000 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_ARCHIVED,
+            'timestamp' : 123456.789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetArchivedTimestampMS( HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_ARCHIVED, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_ARCHIVED,
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetArchivedTimestampMS( HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_ARCHIVED, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        # all timestamp params are now tested and good. let's now hit the different types
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_MODIFIED_FILE,
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetFileModifiedTimestampMS( HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_MODIFIED_FILE, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN,
+            'domain' : 'local',
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetFileModifiedTimestampMS( HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_MODIFIED_FILE, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN,
+            'domain' : 'site.com',
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetDomainModifiedTimestampMS( 'site.com', HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN, location = 'site.com', timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_LAST_VIEWED,
+            'canvas_type' : CC.CANVAS_MEDIA_VIEWER,
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetLastViewedTimestampMS( CC.CANVAS_MEDIA_VIEWER, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_LAST_VIEWED, location = CC.CANVAS_MEDIA_VIEWER, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_LAST_VIEWED,
+            'canvas_type' : CC.CANVAS_PREVIEW,
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetLastViewedTimestampMS( CC.CANVAS_PREVIEW, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_LAST_VIEWED, location = CC.CANVAS_PREVIEW, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_LAST_VIEWED,
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetLastViewedTimestampMS( CC.CANVAS_MEDIA_VIEWER, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_LAST_VIEWED, location = CC.CANVAS_MEDIA_VIEWER, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_IMPORTED,
+            'file_service_key' : CC.COMBINED_LOCAL_FILE_SERVICE_KEY.hex(),
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_IMPORTED, location = CC.COMBINED_LOCAL_FILE_SERVICE_KEY, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_DELETED,
+            'file_service_key' : CC.COMBINED_LOCAL_FILE_SERVICE_KEY.hex(),
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetDeletedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_DELETED, location = CC.COMBINED_LOCAL_FILE_SERVICE_KEY, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED,
+            'file_service_key' : CC.COMBINED_LOCAL_FILE_SERVICE_KEY.hex(),
+            'timestamp_ms' : 123456789
+        }
+        
+        media_result = HF.GetFakeMediaResult( hash )
+        
+        media_result.GetTimesManager().SetPreviouslyImportedTimestampMS( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, HydrusTime.GetNowMS() )
+        
+        result_timestamp_data = ClientTime.TimestampData( HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED, location = CC.COMBINED_LOCAL_FILE_SERVICE_KEY, timestamp_ms = 123456789 )
+        
+        jobs.append( ( request_args, media_result, HC.CONTENT_UPDATE_SET, result_timestamp_data ) )
+        
+        #
+        
+        for ( request_args, media_result, action, result_timestamp_data ) in jobs:
+            
+            HG.test_controller.SetRead( 'media_results', [ media_result ] )
+            
+            HG.test_controller.ClearWrites( 'content_updates' )
+            
+            path = '/edit_times/set_time'
+            
+            body_dict = { 'hash' : hash_hex }
+            body_dict.update( request_args )
+            
+            body = json.dumps( body_dict )
+            
+            connection.request( 'POST', path, body = body, headers = headers )
+            
+            response = connection.getresponse()
+            
+            data = response.read()
+            
+            self.assertEqual( response.status, 200 )
+            
+            content_update_package = ClientContentUpdates.ContentUpdatePackage()
+            
+            expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, action, ( [ media_result.GetHash() ], result_timestamp_data ) ) ] )
+            
+            [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+            
+            HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+            
+        
+        #
+        
+        problem_jobs = []
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_ARCHIVED
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_ms' : 123456789
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_MODIFIED_AGGREGATE,
+            'timestamp_ms' : 123456789
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        # wrong service type * 3
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_IMPORTED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_DELETED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : CC.DEFAULT_LOCAL_TAG_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        # missing service * 3
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_IMPORTED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : os.urandom( 32 ).hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_DELETED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : os.urandom( 32 ).hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED,
+            'timestamp_ms' : 123456789,
+            'file_service_key' : os.urandom( 32 ).hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        # trying to delete from file service * 3
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_IMPORTED,
+            'timestamp_ms' : None,
+            'file_service_key' : CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_DELETED,
+            'timestamp_ms' : None,
+            'file_service_key' : CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        #
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED,
+            'timestamp_ms' : None,
+            'file_service_key' : CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY.hex()
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        # no domain
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN,
+            'timestamp_ms' : 123456789
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+            
+        # wrong canvas type
+        
+        request_args = {
+            'timestamp_type' : HC.TIMESTAMP_TYPE_LAST_VIEWED,
+            'canvas_type' : CC.CANVAS_MEDIA_VIEWER_DUPLICATES,
+            'timestamp_ms' : 123456789
+        }
+        
+        problem_jobs.append( ( request_args, 400 ) )
+        
+        for ( request_args, expected_status ) in problem_jobs:
+            
+            HG.test_controller.ClearWrites( 'content_updates' )
+            
+            path = '/edit_times/set_time'
+            
+            body_dict = { 'hash' : hash_hex }
+            body_dict.update( request_args )
+            
+            body = json.dumps( body_dict )
+            
+            connection.request( 'POST', path, body = body, headers = headers )
+            
+            response = connection.getresponse()
+            
+            data = response.read()
+            
+            self.assertEqual( response.status, expected_status )
+            
         
     
     def _test_add_tags( self, connection, set_up_permissions ):
@@ -1518,15 +2371,17 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
         clean_tags = [ "bikini", "blue eyes", "character:samus aran", "::)", "10", "11", "9", "wew", "flower" ]
         
         clean_tags = HydrusTags.SortNumericTags( clean_tags )
         
-        expected_answer[ 'tags' ] = clean_tags
+        expected_result[ 'tags' ] = clean_tags
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # add tags
         
@@ -1594,13 +2449,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test', set( [ hash ] ) ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test2', set( [ hash ] ) ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test', { hash } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test2', { hash } ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # add tags to local complex
         
@@ -1620,18 +2475,18 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test_add', set( [ hash ] ) ) ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test_add2', set( [ hash ] ) ) ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test_delete', set( [ hash ] ) ) ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test_delete2', set( [ hash ] ) ) )
-        ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test_add', { hash } ) ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test_add2', { hash } ) ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test_delete', { hash } ) ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test_delete2', { hash } ) )
+        ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # pend tags to repo
         
@@ -1651,13 +2506,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ HG.test_controller.example_tag_repo_service_key ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test', set( [ hash ] ) ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test2', set( [ hash ] ) ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_tag_repo_service_key, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test', { hash } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test2', { hash } ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # pend tags to repo complex
         
@@ -1677,18 +2532,18 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ HG.test_controller.example_tag_repo_service_key ] = [
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test_add', set( [ hash ] ) ) ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test_add2', set( [ hash ] ) ) ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'test_delete', set( [ hash ] ) ), reason = 'muh reason' ),
-            HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'test_delete2', set( [ hash ] ) ), reason = 'Petitioned from API' )
-        ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( HG.test_controller.example_tag_repo_service_key, [
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test_add', { hash } ) ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'test_add2', { hash } ) ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'test_delete', { hash } ), reason = 'muh reason' ),
+            ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'test_delete2', { hash } ), reason = 'Petitioned from API' )
+        ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         # add to multiple files
         
@@ -1708,13 +2563,140 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test', set( [ hash, hash2 ] ) ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test2', set( [ hash, hash2 ] ) ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test', { hash, hash2 } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test2', { hash, hash2 } ) ) ] )
         
-        [ ( ( service_keys_to_content_updates, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        self._compare_content_updates( service_keys_to_content_updates, expected_service_keys_to_content_updates )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
+        
+    
+    def _test_add_tags_get_tag_siblings_and_parents( self, connection, set_up_permissions ):
+        
+        db_data = {}
+        
+        db_data[ 'blue eyes' ] = {
+            CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : [
+                {
+                    "blue eyes",
+                    "blue_eyes",
+                    "blue eye",
+                    "blue_eye"
+                },
+                'blue eyes',
+                set(),
+                set()
+            ],
+            HG.test_controller.example_tag_repo_service_key : [
+                { 'blue eyes' },
+                'blue eyes',
+                set(),
+                set()
+            ]
+        }
+        
+        db_data[ 'samus aran' ] = {
+            CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : [
+                {
+                    "samus aran",
+                    "samus_aran",
+                    "character:samus aran"
+                },
+                'character:samus aran',
+                {
+                    "character:samus aran (zero suit)"
+                    "cosplay:samus aran"
+                },
+                {
+                    "series:metroid",
+                    "studio:nintendo"
+                }
+            ],
+            HG.test_controller.example_tag_repo_service_key : [
+                { 'samus aran' },
+                'samus aran',
+                {
+                    "zero suit samus",
+                    "samus_aran_(cosplay)"
+                },
+                set()
+            ]
+        }
+        
+        HG.test_controller.SetRead( 'tag_siblings_and_parents_lookup', db_data )
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'add_urls' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/add_tags/get_siblings_and_parents?tags={}'.format( urllib.parse.quote( json.dumps( [ 'blue eyes', 'samus aran' ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 403 )
+        
+        #
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/add_tags/get_siblings_and_parents?tags={}'.format( urllib.parse.quote( json.dumps( [ 'blue eyes', 'samus aran' ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = {
+            'services' : GetExampleServicesDict(),
+            'tags' : {}
+        }
+        
+        for ( tag, data ) in db_data.items():
+            
+            tag_dict = {}
+            
+            for ( service_key, ( siblings, ideal_tag, descendants, ancestors ) ) in data.items():
+                
+                tag_dict[ service_key.hex() ] = {
+                    'siblings' : list( siblings ),
+                    'ideal_tag' : ideal_tag,
+                    'descendants' : list( descendants ),
+                    'ancestors' : list( ancestors )
+                }
+                
+            
+            expected_result[ 'tags' ][ tag ] = tag_dict
+            
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
     
     def _test_add_tags_search_tags( self, connection, set_up_permissions ):
@@ -1750,7 +2732,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {
+        expected_result = {
             'tags' : [
                 {
                     'value' : 'green',
@@ -1759,7 +2741,9 @@ class TestClientAPI( unittest.TestCase ):
             ]
         }
         
-        self.assertEqual( expected_answer, d )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( expected_result, d )
         
         #
         
@@ -1785,11 +2769,13 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {
+        expected_result = {
             'tags' : []
         }
         
-        self.assertEqual( expected_answer, d )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( expected_result, d )
         
         ( args, kwargs ) = HG.test_controller.GetRead( 'autocomplete_predicates' )[-1]
         
@@ -1812,7 +2798,7 @@ class TestClientAPI( unittest.TestCase ):
         d = json.loads( text )
         
         # note this also tests sort
-        expected_answer = {
+        expected_result = {
             'tags' : [
                 {
                     'value' : 'green car',
@@ -1825,7 +2811,9 @@ class TestClientAPI( unittest.TestCase ):
             ]
         }
         
-        self.assertEqual( expected_answer, d )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( expected_result, d )
         
         ( args, kwargs ) = HG.test_controller.GetRead( 'autocomplete_predicates' )[-1]
         
@@ -1848,7 +2836,7 @@ class TestClientAPI( unittest.TestCase ):
         d = json.loads( text )
         
         # note this also tests sort
-        expected_answer = {
+        expected_result = {
             'tags' : [
                 {
                     'value' : 'green car',
@@ -1861,11 +2849,13 @@ class TestClientAPI( unittest.TestCase ):
             ]
         }
         
-        self.assertEqual( expected_answer, d )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( expected_result, d )
         
         ( args, kwargs ) = HG.test_controller.GetRead( 'autocomplete_predicates' )[-1]
         
-        self.assertEqual( args[0], ClientTags.TAG_DISPLAY_ACTUAL )
+        self.assertEqual( args[0], ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
         
         #
         
@@ -1885,11 +2875,13 @@ class TestClientAPI( unittest.TestCase ):
         d = json.loads( text )
         
         # note this also tests sort
-        expected_answer = {
+        expected_result = {
             'tags' : []
         }
         
-        self.assertEqual( expected_answer, d )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( expected_result, d )
         
     
     def _test_add_urls( self, connection, set_up_permissions ):
@@ -1922,12 +2914,14 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = url
-        expected_answer[ 'url_file_statuses' ] = []
+        expected_result[ 'normalised_url' ] = url
+        expected_result[ 'url_file_statuses' ] = []
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # some
         
@@ -1955,12 +2949,14 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = normalised_url
-        expected_answer[ 'url_file_statuses' ] = json_url_file_statuses
+        expected_result[ 'normalised_url' ] = normalised_url
+        expected_result[ 'url_file_statuses' ] = json_url_file_statuses
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # get url info
         
@@ -1988,16 +2984,18 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = url
-        expected_answer[ 'url_type' ] = HC.URL_TYPE_UNKNOWN
-        expected_answer[ 'url_type_string' ] = 'unknown url'
-        expected_answer[ 'match_name' ] = 'unknown url'
-        expected_answer[ 'can_parse' ] = False
-        expected_answer[ 'cannot_parse_reason' ] = 'unknown url class'
+        expected_result[ 'normalised_url' ] = url
+        expected_result[ 'url_type' ] = HC.URL_TYPE_UNKNOWN
+        expected_result[ 'url_type_string' ] = 'unknown url'
+        expected_result[ 'match_name' ] = 'unknown url'
+        expected_result[ 'can_parse' ] = False
+        expected_result[ 'cannot_parse_reason' ] = 'unknown url class'
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # known
         
@@ -2019,15 +3017,17 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = normalised_url
-        expected_answer[ 'url_type' ] = HC.URL_TYPE_WATCHABLE
-        expected_answer[ 'url_type_string' ] = 'watchable url'
-        expected_answer[ 'match_name' ] = '8chan thread'
-        expected_answer[ 'can_parse' ] = True
+        expected_result[ 'normalised_url' ] = normalised_url
+        expected_result[ 'url_type' ] = HC.URL_TYPE_WATCHABLE
+        expected_result[ 'url_type_string' ] = 'watchable url'
+        expected_result[ 'match_name' ] = '8chan thread'
+        expected_result[ 'can_parse' ] = True
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # known post url
         
@@ -2050,15 +3050,17 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {}
+        expected_result = {}
         
-        expected_answer[ 'normalised_url' ] = normalised_url
-        expected_answer[ 'url_type' ] = HC.URL_TYPE_POST
-        expected_answer[ 'url_type_string' ] = 'post url'
-        expected_answer[ 'match_name' ] = 'safebooru file page'
-        expected_answer[ 'can_parse' ] = True
+        expected_result[ 'normalised_url' ] = normalised_url
+        expected_result[ 'url_type' ] = HC.URL_TYPE_POST
+        expected_result[ 'url_type_string' ] = 'post url'
+        expected_result[ 'match_name' ] = 'safebooru file page'
+        expected_result[ 'can_parse' ] = True
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         # add url
         
@@ -2217,15 +3219,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ] )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ]
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
-        
-        result = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -2246,15 +3244,13 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ]
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_ADD, ( [ url ], { hash } ) ) ] )
         
-        expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        result = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -2275,15 +3271,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ] )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ]
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
-        
-        result = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
         #
         
@@ -2304,15 +3296,11 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( response.status, 200 )
         
-        expected_service_keys_to_content_updates = collections.defaultdict( list )
+        expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ] )
         
-        expected_service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_URLS, HC.CONTENT_UPDATE_DELETE, ( [ url ], { hash } ) ) ]
+        [ ( ( content_update_package, ), kwargs ) ] = HG.test_controller.GetWrite( 'content_updates' )
         
-        expected_result = [ ( ( expected_service_keys_to_content_updates, ), {} ) ]
-        
-        result = HG.test_controller.GetWrite( 'content_updates' )
-        
-        self.assertEqual( result, expected_result )
+        HF.compare_content_update_packages( self, content_update_package, expected_content_update_package )
         
     
     def _test_manage_cookies( self, connection, set_up_permissions ):
@@ -2351,9 +3339,9 @@ class TestClientAPI( unittest.TestCase ):
         
         cookies = []
         
-        cookies.append( [ 'one', '1', '.somesite.com', '/', HydrusData.GetNow() + 86400 ] )
-        cookies.append( [ 'two', '2', 'somesite.com', '/', HydrusData.GetNow() + 86400 ] )
-        cookies.append( [ 'three', '3', 'wew.somesite.com', '/', HydrusData.GetNow() + 86400 ] )
+        cookies.append( [ 'one', '1', '.somesite.com', '/', HydrusTime.GetNow() + 86400 ] )
+        cookies.append( [ 'two', '2', 'somesite.com', '/', HydrusTime.GetNow() + 86400 ] )
+        cookies.append( [ 'three', '3', 'wew.somesite.com', '/', HydrusTime.GetNow() + 86400 ] )
         cookies.append( [ 'four', '4', '.somesite.com', '/', None ] )
         
         request_dict = { 'cookies' : cookies }
@@ -2429,8 +3417,8 @@ class TestClientAPI( unittest.TestCase ):
         
         expected_cookies = []
         
-        expected_cookies.append( [ 'two', '2', 'somesite.com', '/', HydrusData.GetNow() + 86400 ] )
-        expected_cookies.append( [ 'three', '3', 'wew.somesite.com', '/', HydrusData.GetNow() + 86400 ] )
+        expected_cookies.append( [ 'two', '2', 'somesite.com', '/', HydrusTime.GetNow() + 86400 ] )
+        expected_cookies.append( [ 'three', '3', 'wew.somesite.com', '/', HydrusTime.GetNow() + 86400 ] )
         expected_cookies.append( [ 'four', '4', '.somesite.com', '/', None ] )
         
         frozen_result_cookies = { tuple( row[:-1] ) for row in result_cookies }
@@ -2542,6 +3530,8 @@ class TestClientAPI( unittest.TestCase ):
             }
         }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( d, expected_result )
         
         #
@@ -2596,6 +3586,8 @@ class TestClientAPI( unittest.TestCase ):
                 }
             }
         }
+        
+        wash_example_json_response( expected_result )
         
         self.assertEqual( d, expected_result )
         
@@ -2652,6 +3644,8 @@ class TestClientAPI( unittest.TestCase ):
             }
         }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( d, expected_result )
         
         #
@@ -2681,6 +3675,8 @@ class TestClientAPI( unittest.TestCase ):
             },
             'headers' : {}
         }
+        
+        wash_example_json_response( expected_result )
         
         self.assertEqual( d, expected_result )
         
@@ -2728,6 +3724,8 @@ class TestClientAPI( unittest.TestCase ):
             }
         }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( d, expected_result )
         
         #
@@ -2774,6 +3772,8 @@ class TestClientAPI( unittest.TestCase ):
             }
         }
         
+        wash_example_json_response( expected_result )
+        
         self.assertEqual( d, expected_result )
         
         #
@@ -2817,6 +3817,8 @@ class TestClientAPI( unittest.TestCase ):
             },
             'headers' : {}
         }
+        
+        wash_example_json_response( expected_result )
         
         self.assertEqual( d, expected_result )
         
@@ -2894,6 +3896,40 @@ class TestClientAPI( unittest.TestCase ):
         boned_stats = d[ 'boned_stats' ]
         
         self.assertEqual( boned_stats, dict( expected_data ) )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'boned_stats' )
+        
+        file_search_context = kwargs[ 'file_search_context' ]
+        
+        self.assertEqual( len( file_search_context.GetPredicates() ), 0 )
+        
+        #
+        
+        HG.test_controller.SetRead( 'boned_stats', expected_data )
+        
+        path = '/manage_database/mr_bones?tags={}'.format( urllib.parse.quote( json.dumps( [ 'skirt', 'blue_eyes' ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        boned_stats = d[ 'boned_stats' ]
+        
+        self.assertEqual( boned_stats, dict( expected_data ) )
+        
+        [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'boned_stats' )
+        
+        file_search_context = kwargs[ 'file_search_context' ]
+        
+        self.assertEqual( len( file_search_context.GetPredicates() ), 2 )
         
     
     def _test_manage_duplicates( self, connection, set_up_permissions ):
@@ -3064,7 +4100,7 @@ class TestClientAPI( unittest.TestCase ):
         test_max_num_pairs = 20
         
         test_hash_pairs = [ ( os.urandom( 32 ), os.urandom( 32 ) ) for i in range( 10 ) ]
-        test_media_result_pairs = [ ( HelperFunctions.GetFakeMediaResult( h1 ), HelperFunctions.GetFakeMediaResult( h2 ) ) for ( h1, h2 ) in test_hash_pairs ]
+        test_media_result_pairs = [ ( HF.GetFakeMediaResult( h1 ), HF.GetFakeMediaResult( h2 ) ) for ( h1, h2 ) in test_hash_pairs ]
         test_hash_pairs_hex = [ [ h1.hex(), h2.hex() ] for ( h1, h2 ) in test_hash_pairs ]
         
         HG.test_controller.SetRead( 'duplicate_pairs_for_filtering', test_media_result_pairs )
@@ -3231,7 +4267,7 @@ class TestClientAPI( unittest.TestCase ):
         # TODO: populate the fakes here with real tags and test actual content merge
         # to test the content merge, we'd want to set some content merge options and populate these fakes with real tags
         # don't need to be too clever, just test one thing and we know it'll all be hooked up right
-        HG.test_controller.SetRead( 'media_results', [ HelperFunctions.GetFakeMediaResult( bytes.fromhex( hash_hex ) ) for hash_hex in hashes ] )
+        HG.test_controller.SetRead( 'media_results', [ HF.GetFakeMediaResult( bytes.fromhex( hash_hex ) ) for hash_hex in hashes ] )
         
         headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex, 'Content-Type' : HC.mime_mimetype_string_lookup[ HC.APPLICATION_JSON ] }
         
@@ -3276,25 +4312,33 @@ class TestClientAPI( unittest.TestCase ):
 
         ( written_rows, ) = args
         
-        def delete_thing( h, do_it ):
+        self.assertTrue( len( written_rows ) == 3 )
+        
+        for ( i, row ) in enumerate( written_rows ):
             
-            if do_it:
+            r_dict = request_dict[ 'relationships' ][i]
+            
+            self.assertEqual( row[0], r_dict[ 'relationship' ] )
+            self.assertEqual( row[1], bytes.fromhex( r_dict[ 'hash_a' ] ) )
+            self.assertEqual( row[2], bytes.fromhex( r_dict[ 'hash_b' ] ) )
+            
+            do_delete = 'delete_b' in r_dict and r_dict[ 'delete_b' ]
+            
+            content_update_packages = row[3]
+            
+            if do_delete:
                 
-                c = collections.defaultdict( list )
+                self.assertTrue( len( content_update_packages ) == 1 )
                 
-                c[ b'local files' ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { bytes.fromhex( h ) }, reason = 'From Client API (duplicates processing).' ) ]
+                expected_content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { bytes.fromhex( r_dict[ 'hash_b' ] ) }, reason = 'From Client API (duplicates processing).' ) )
                 
-                return [ c ]
+                HF.compare_content_update_packages( self, content_update_packages[0], expected_content_update_package )
                 
             else:
                 
-                return []
+                self.assertTrue( len( content_update_packages ) == 0 )
                 
             
-        
-        expected_written_rows = [ ( r_dict[ 'relationship' ], bytes.fromhex( r_dict[ 'hash_a' ] ), bytes.fromhex( r_dict[ 'hash_b' ] ), delete_thing( r_dict[ 'hash_b' ], 'delete_b' in r_dict and r_dict[ 'delete_b' ] ) ) for r_dict in request_dict[ 'relationships' ] ]
-        
-        self.assertEqual( written_rows, expected_written_rows )
         
         # set kings
         
@@ -3407,6 +4451,56 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( result, expected_result )
         
     
+    def _test_options( self, connection, set_up_permissions ):
+        
+        # first fail
+        
+        api_permissions = set_up_permissions[ 'add_urls' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/manage_database/get_client_options'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 403 )
+        
+        # now good
+        
+        api_permissions = set_up_permissions[ 'everything' ]
+        
+        access_key_hex = api_permissions.GetAccessKey().hex()
+        
+        headers = { 'Hydrus-Client-API-Access-Key' : access_key_hex }
+        
+        #
+        
+        path = '/manage_database/get_client_options'
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        text = str( data, 'utf-8' )
+        
+        d = json.loads( text )
+        
+        self.assertIn( 'old_options', d )
+        self.assertIn( 'options', d )
+        
+    
     def _test_search_files( self, connection, set_up_permissions ):
         
         hash_ids = [ 1, 2, 3, 4, 5, 10, 15, 16, 17, 18, 19, 20, 21, 25, 100, 101, 150 ]
@@ -3461,9 +4555,11 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = { 'file_ids' : list( sample_hash_ids ) }
+        expected_result = { 'file_ids' : list( sample_hash_ids ) }
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
         [ ( args, kwargs ) ] = HG.test_controller.GetRead( 'file_query_ids' )
         
@@ -4017,13 +5113,15 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        expected_answer = {
+        expected_result = {
             'hashes' : {
                 md5_hash.hex() : sha256_hash.hex()
             }
         }
         
-        self.assertEqual( d, expected_answer )
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
         
     
     def _test_file_metadata( self, connection, set_up_permissions ):
@@ -4052,7 +5150,9 @@ class TestClientAPI( unittest.TestCase ):
             metadata.append( metadata_row )
             
         
-        expected_identifier_result = { 'metadata' : metadata }
+        expected_identifier_result = { 'metadata' : metadata, 'services' : GetExampleServicesDict() }
+        
+        wash_example_json_response( expected_identifier_result )
         
         media_results = []
         file_info_managers = []
@@ -4064,11 +5164,11 @@ class TestClientAPI( unittest.TestCase ):
         random_file_service_hex_current = HG.test_controller.example_file_repo_service_key_1
         random_file_service_hex_deleted = HG.test_controller.example_file_repo_service_key_2
         
-        current_import_timestamp = 500
-        ipfs_import_timestamp = 123456
-        deleted_import_timestamp = 300
-        deleted_deleted_timestamp = 450
-        file_modified_timestamp = 20
+        current_import_timestamp_ms = 500127
+        ipfs_import_timestamp_ms = 123456126
+        previously_imported_timestamp_ms = 300125
+        deleted_deleted_timestamp_ms = 450124
+        file_modified_timestamp_ms = 20123
         
         done_a_multihash = False
         
@@ -4091,6 +5191,9 @@ class TestClientAPI( unittest.TestCase ):
             file_info_manager.has_exif = True
             file_info_manager.has_icc_profile = True
             
+            file_info_manager.blurhash = 'UBECh1xtFg-X-qxvxZ$*4mD%n3s*M_I9IVNG'
+            file_info_manager.pixel_hash = os.urandom( 32 )
+            
             file_info_managers.append( file_info_manager )
             
             service_keys_to_statuses_to_tags = { CC.DEFAULT_LOCAL_TAG_SERVICE_KEY : { HC.CONTENT_STATUS_CURRENT : [ 'blue_eyes', 'blonde_hair' ], HC.CONTENT_STATUS_PENDING : [ 'bodysuit' ] } }
@@ -4098,38 +5201,68 @@ class TestClientAPI( unittest.TestCase ):
             
             service_keys_to_filenames = {}
             
-            current_to_timestamps = { random_file_service_hex_current : current_import_timestamp }
+            current_to_timestamps_ms = { random_file_service_hex_current : current_import_timestamp_ms }
             
             if not done_a_multihash:
                 
                 done_a_multihash = True
                 
-                current_to_timestamps[ HG.test_controller.example_ipfs_service_key ] = ipfs_import_timestamp
+                current_to_timestamps_ms[ HG.test_controller.example_ipfs_service_key ] = ipfs_import_timestamp_ms
                 
                 service_keys_to_filenames[ HG.test_controller.example_ipfs_service_key ] = 'QmReHtaET3dsgh7ho5NVyHb5U13UgJoGipSWbZsnuuM8tb'
                 
             
             tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
             
-            timestamp_manager = ClientMediaManagers.TimestampManager()
+            times_manager = ClientMediaManagers.TimesManager()
             
-            timestamp_manager.SetFileModifiedTimestamp( file_modified_timestamp )
+            times_manager.SetFileModifiedTimestampMS( file_modified_timestamp_ms )
+            times_manager.SetImportedTimestampsMS( current_to_timestamps_ms )
+            
+            deleted_to_timestamps_ms = { random_file_service_hex_deleted : deleted_deleted_timestamp_ms }
+            deleted_to_previously_imported_timestamp_ms = { random_file_service_hex_deleted : previously_imported_timestamp_ms }
+            
+            times_manager.SetDeletedTimestampsMS( deleted_to_timestamps_ms )
+            times_manager.SetPreviouslyImportedTimestampsMS( deleted_to_previously_imported_timestamp_ms )
             
             locations_manager = ClientMediaManagers.LocationsManager(
-                current_to_timestamps,
-                { random_file_service_hex_deleted : ( deleted_deleted_timestamp, deleted_import_timestamp ) },
+                set( current_to_timestamps_ms.keys() ),
+                set( deleted_to_timestamps_ms.keys() ),
                 set(),
                 set(),
+                times_manager,
                 inbox = False,
                 urls = urls,
-                service_keys_to_filenames = service_keys_to_filenames,
-                timestamp_manager = timestamp_manager
+                service_keys_to_filenames = service_keys_to_filenames
             )
+            
+            ratings_dict = {}
+            
+            if random.random() > 0.6:
+                
+                ratings_dict[ HG.test_controller.example_like_rating_service_key ] = 0.0 if random.random() < 0 else 1.0
+                
+            
+            if random.random() > 0.6:
+                
+                ratings_dict[ HG.test_controller.example_numerical_rating_service_key ] = random.random()
+                
+            
+            if random.random() > 0.6:
+                
+                ratings_dict[ HG.test_controller.example_incdec_rating_service_key ] = int( random.random() * 16 )
+                
+            
+            if random.random() > 0.8:
+                
+                file_info_manager.original_mime = HC.IMAGE_PNG
+                
+            
             ratings_manager = ClientMediaManagers.RatingsManager( {} )
             notes_manager = ClientMediaManagers.NotesManager( { 'note' : 'hello', 'note2' : 'hello2' } )
-            file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+            file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
             
-            media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+            media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
             
             media_results.append( media_result )
             
@@ -4138,10 +5271,9 @@ class TestClientAPI( unittest.TestCase ):
         detailed_known_urls_metadata = []
         with_notes_metadata = []
         only_return_basic_information_metadata = []
+        only_return_basic_information_metadata_but_blurhash_too = []
         
-        services_manager = HG.client_controller.services_manager
-        
-        service_keys_to_names = {}
+        services_manager = CG.client_controller.services_manager
         
         for media_result in media_results:
             
@@ -4152,6 +5284,8 @@ class TestClientAPI( unittest.TestCase ):
                 'hash' : file_info_manager.hash.hex(),
                 'size' : file_info_manager.size,
                 'mime' : HC.mime_mimetype_string_lookup[ file_info_manager.mime ],
+                'filetype_human' : HC.mime_string_lookup[ file_info_manager.mime ],
+                'filetype_enum' : file_info_manager.mime,
                 'ext' : HC.mime_ext_lookup[ file_info_manager.mime ],
                 'width' : file_info_manager.width,
                 'height' : file_info_manager.height,
@@ -4161,15 +5295,28 @@ class TestClientAPI( unittest.TestCase ):
                 'num_words' : file_info_manager.num_words
             }
             
+            filetype_forced = file_info_manager.FiletypeIsForced()
+            
+            metadata_row[ 'filetype_forced' ] = filetype_forced
+            
+            if filetype_forced:
+                
+                metadata_row[ 'original_mime' ] = HC.mime_mimetype_string_lookup[ file_info_manager.original_mime ]
+                
+            
             only_return_basic_information_metadata.append( dict( metadata_row ) )
+            
+            metadata_row[ 'blurhash' ] = file_info_manager.blurhash
+            
+            only_return_basic_information_metadata_but_blurhash_too.append( dict( metadata_row ) )
             
             if file_info_manager.mime in HC.MIMES_WITH_THUMBNAILS:
                 
                 bounding_dimensions = HG.test_controller.options[ 'thumbnail_dimensions' ]
                 thumbnail_scale_type = HG.test_controller.new_options.GetInteger( 'thumbnail_scale_type' )
-                thumbnail_dpr_percent = HG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
+                thumbnail_dpr_percent = CG.client_controller.new_options.GetInteger( 'thumbnail_dpr_percent' )
                 
-                ( clip_rect, ( thumbnail_expected_width, thumbnail_expected_height ) ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( file_info_manager.width, file_info_manager.height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
+                ( thumbnail_expected_width, thumbnail_expected_height ) = HydrusImageHandling.GetThumbnailResolution( ( file_info_manager.width, file_info_manager.height ), bounding_dimensions, thumbnail_scale_type, thumbnail_dpr_percent )
                 
                 metadata_row[ 'thumbnail_width' ] = thumbnail_expected_width
                 metadata_row[ 'thumbnail_height' ] = thumbnail_expected_height
@@ -4179,7 +5326,7 @@ class TestClientAPI( unittest.TestCase ):
                 'file_services' : {
                     'current' : {
                         random_file_service_hex_current.hex() : {
-                            'time_imported' : current_import_timestamp,
+                            'time_imported' : HydrusTime.SecondiseMS( current_import_timestamp_ms ),
                             'name' : HG.test_controller.services_manager.GetName( random_file_service_hex_current ),
                             'type' : HG.test_controller.services_manager.GetServiceType( random_file_service_hex_current ),
                             'type_pretty' : HC.service_string_lookup[ HG.test_controller.services_manager.GetServiceType( random_file_service_hex_current ) ]
@@ -4187,8 +5334,8 @@ class TestClientAPI( unittest.TestCase ):
                     },
                     'deleted' : {
                         random_file_service_hex_deleted.hex() : {
-                            'time_deleted' : deleted_deleted_timestamp,
-                            'time_imported' : deleted_import_timestamp,
+                            'time_deleted' : HydrusTime.SecondiseMS( deleted_deleted_timestamp_ms ),
+                            'time_imported' : HydrusTime.SecondiseMS( previously_imported_timestamp_ms ),
                             'name' : HG.test_controller.services_manager.GetName( random_file_service_hex_deleted ),
                             'type' : HG.test_controller.services_manager.GetServiceType( random_file_service_hex_deleted ),
                             'type_pretty' : HC.service_string_lookup[ HG.test_controller.services_manager.GetServiceType( random_file_service_hex_deleted ) ]
@@ -4196,18 +5343,20 @@ class TestClientAPI( unittest.TestCase ):
                     }
                 },
                 'ipfs_multihashes' : {},
-                'time_modified' : file_modified_timestamp,
+                'time_modified' : HydrusTime.SecondiseMS( file_modified_timestamp_ms ),
                 'time_modified_details' : {
-                    'local' : file_modified_timestamp
+                    'local' : HydrusTime.SecondiseMS( file_modified_timestamp_ms )
                 },
                 'is_inbox' : False,
                 'is_local' : False,
                 'is_trashed' : False,
                 'is_deleted' : False,
+                'has_transparency' : False,
                 'has_exif' : True,
                 'has_human_readable_embedded_metadata' : False,
                 'has_icc_profile' : True,
-                'known_urls' : list( sorted_urls )
+                'known_urls' : list( sorted_urls ),
+                'pixel_hash' : file_info_manager.pixel_hash.hex()
             } )
             
             locations_manager = media_result.GetLocationsManager()
@@ -4217,7 +5366,7 @@ class TestClientAPI( unittest.TestCase ):
                 for ( i_s_k, multihash ) in locations_manager.GetServiceFilenames().items():
                     
                     metadata_row[ 'file_services' ][ 'current' ][ i_s_k.hex() ] = {
-                        'time_imported' : ipfs_import_timestamp,
+                        'time_imported' : HydrusTime.SecondiseMS( ipfs_import_timestamp_ms ),
                         'name' : HG.test_controller.services_manager.GetName( i_s_k ),
                         'type' : HG.test_controller.services_manager.GetServiceType( i_s_k ),
                         'type_pretty' : HC.service_string_lookup[ HG.test_controller.services_manager.GetServiceType( i_s_k ) ]
@@ -4226,6 +5375,19 @@ class TestClientAPI( unittest.TestCase ):
                     metadata_row[ 'ipfs_multihashes' ][ i_s_k.hex() ] = multihash
                     
                 
+            
+            ratings_manager = media_result.GetRatingsManager()
+            
+            ratings_dict = {}
+            
+            rating_service_keys = services_manager.GetServiceKeys( HC.RATINGS_SERVICES )
+            
+            for rating_service_key in rating_service_keys:
+                
+                ratings_dict[ rating_service_key.hex() ] = ratings_manager.GetRatingForAPI( rating_service_key )
+                
+            
+            metadata_row[ 'ratings' ] = ratings_dict
             
             tags_manager = media_result.GetTagsManager()
             
@@ -4241,7 +5403,7 @@ class TestClientAPI( unittest.TestCase ):
                 
                 storage_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in storage_statuses_to_tags.items() if len( tags ) > 0 }
                 
-                display_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_ACTUAL )
+                display_statuses_to_tags = tags_manager.GetStatusesToTags( tag_service_key, ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL )
                 
                 display_tags_json_serialisable = { str( status ) : sorted( tags, key = HydrusTags.ConvertTagToSortable ) for ( status, tags ) in display_statuses_to_tags.items() if len( tags ) > 0 }
                 
@@ -4276,10 +5438,17 @@ class TestClientAPI( unittest.TestCase ):
             with_notes_metadata.append( with_notes_metadata_row )
             
         
-        expected_metadata_result = { 'metadata' : metadata }
-        expected_detailed_known_urls_metadata_result = { 'metadata' : detailed_known_urls_metadata }
-        expected_notes_metadata_result = { 'metadata' : with_notes_metadata }
-        expected_only_return_basic_information_result = { 'metadata' : only_return_basic_information_metadata }
+        expected_metadata_result = { 'metadata' : metadata, 'services' : GetExampleServicesDict() }
+        expected_detailed_known_urls_metadata_result = { 'metadata' : detailed_known_urls_metadata, 'services' : GetExampleServicesDict() }
+        expected_notes_metadata_result = { 'metadata' : with_notes_metadata, 'services' : GetExampleServicesDict() }
+        expected_only_return_basic_information_result = { 'metadata' : only_return_basic_information_metadata, 'services' : GetExampleServicesDict() }
+        expected_only_return_basic_information_but_blurhash_too_result = { 'metadata' : only_return_basic_information_metadata_but_blurhash_too, 'services' : GetExampleServicesDict() }
+        
+        wash_example_json_response( expected_metadata_result )
+        wash_example_json_response( expected_detailed_known_urls_metadata_result )
+        wash_example_json_response( expected_notes_metadata_result )
+        wash_example_json_response( expected_only_return_basic_information_result )
+        wash_example_json_response( expected_only_return_basic_information_but_blurhash_too_result )
         
         HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
         HG.test_controller.SetRead( 'media_results', media_results )
@@ -4355,6 +5524,54 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d, expected_only_return_basic_information_result )
         
+        # basic metadata with blurhash
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
+        path = '/get_files/file_metadata?file_ids={}&only_return_basic_information=true&include_blurhash=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        self.assertEqual( d, expected_only_return_basic_information_but_blurhash_too_result )
+        
+        # same but diff order
+        
+        expected_order = [ 3, 1, 2 ]
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
+        path = '/get_files/file_metadata?file_ids={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ 3, 1, 2 ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = { 'metadata' : list( expected_only_return_basic_information_result[ 'metadata' ] ), 'services' : GetExampleServicesDict() }
+        
+        expected_result[ 'metadata' ].sort( key = lambda basic: expected_order.index( basic[ 'file_id' ] ) )
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
+        
         # metadata from file_ids
         
         HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
@@ -4388,9 +5605,9 @@ class TestClientAPI( unittest.TestCase ):
                 HydrusData.Print( ( j, file_post_e[j] ) )
                 
             
-        '''
         
         self.maxDiff = None
+        '''
         
         for ( row_a, row_b ) in zip( d[ 'metadata' ], expected_metadata_result[ 'metadata' ] ):
             
@@ -4400,6 +5617,86 @@ class TestClientAPI( unittest.TestCase ):
                 
                 self.assertEqual( row_a[ key ], row_b[ key ] )
                 
+            
+        
+        # same but diff order
+        
+        expected_order = [ 3, 1, 2 ]
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
+        path = '/get_files/file_metadata?file_ids={}'.format( urllib.parse.quote( json.dumps( expected_order ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        # quick print-inspect on what went wrong
+        '''
+        m = d[ 'metadata' ]
+        m_e = expected_metadata_result[ 'metadata' ]
+        
+        for ( i, file_post ) in enumerate( m ):
+            
+            file_post_e = m_e[ i ]
+            
+            for j in file_post.keys():
+                
+                HydrusData.Print( ( j, file_post[j] ) )
+                HydrusData.Print( ( j, file_post_e[j] ) )
+                
+            
+        
+        self.maxDiff = None
+        '''
+        
+        expected_result = { 'metadata' : list( expected_metadata_result[ 'metadata' ] ), 'services' : GetExampleServicesDict() }
+        
+        expected_result[ 'metadata' ].sort( key = lambda basic: expected_order.index( basic[ 'file_id' ] ) )
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
+        
+        for ( row_a, row_b ) in zip( d[ 'metadata' ], expected_result[ 'metadata' ] ):
+            
+            self.assertEqual( set( row_a.keys() ), set( row_b.keys() ) )
+            
+            for key in list( row_a.keys() ):
+                
+                self.assertEqual( row_a[ key ], row_b[ key ] )
+                
+            
+        
+        # metadata from file_ids, with milliseconds
+        
+        HG.test_controller.SetRead( 'hash_ids_to_hashes', { k : v for ( k, v ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] } )
+        
+        path = '/get_files/file_metadata?file_ids={}&include_milliseconds=true'.format( urllib.parse.quote( json.dumps( [ 1, 2, 3 ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        for file_row in d[ 'metadata' ]:
+            
+            self.assertEqual( file_row[ 'time_modified' ], float( file_modified_timestamp_ms / 1000 ) )
             
         
         # now from hashes
@@ -4412,7 +5709,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # identifiers from hashes
         
-        path = '/get_files/file_metadata?hashes={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4428,9 +5725,35 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d, expected_identifier_result )
         
+        # same but diff order
+        
+        expected_order = [ 3, 1, 2 ]
+        
+        path = '/get_files/file_metadata?hashes={}&only_return_identifiers=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in expected_order ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = { 'metadata' : list( expected_identifier_result[ 'metadata' ] ), 'services' : GetExampleServicesDict() }
+        
+        expected_result[ 'metadata' ].sort( key = lambda basic: expected_order.index( basic[ 'file_id' ] ) )
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
+        
         # basic metadata from hashes
         
-        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4446,9 +5769,35 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d, expected_only_return_basic_information_result )
         
+        # same but diff order
+        
+        expected_order = [ 3, 1, 2 ]
+        
+        path = '/get_files/file_metadata?hashes={}&only_return_basic_information=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in expected_order ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = { 'metadata' : list( expected_only_return_basic_information_result[ 'metadata' ] ), 'services' : GetExampleServicesDict() }
+        
+        expected_result[ 'metadata' ].sort( key = lambda basic: expected_order.index( basic[ 'file_id' ] ) )
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
+        
         # metadata from hashes
         
-        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
+        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4464,6 +5813,30 @@ class TestClientAPI( unittest.TestCase ):
         
         self.assertEqual( d, expected_metadata_result )
         
+        # same but diff order
+        
+        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in expected_order ] ) ) )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        text = str( data, 'utf-8' )
+        
+        self.assertEqual( response.status, 200 )
+        
+        d = json.loads( text )
+        
+        expected_result = { 'metadata' : list( expected_metadata_result[ 'metadata' ] ), 'services' : GetExampleServicesDict() }
+        
+        expected_result[ 'metadata' ].sort( key = lambda basic: expected_order.index( basic[ 'file_id' ] ) )
+        
+        wash_example_json_response( expected_result )
+        
+        self.assertEqual( d, expected_result )
+        
         # fails on borked hashes
         
         path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ 'deadbeef' ] ) ) )
@@ -4478,7 +5851,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # metadata from hashes with detailed url info
         
-        path = '/get_files/file_metadata?hashes={}&detailed_url_information=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&detailed_url_information=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4496,7 +5869,7 @@ class TestClientAPI( unittest.TestCase ):
         
         # metadata from hashes with notes info
         
-        path = '/get_files/file_metadata?hashes={}&include_notes=true'.format( urllib.parse.quote( json.dumps( [ hash.hex() for ( k, hash ) in file_ids_to_hashes.items() if k in [ 1, 2, 3 ] ] ) ) )
+        path = '/get_files/file_metadata?hashes={}&include_notes=true'.format( urllib.parse.quote( json.dumps( [ file_ids_to_hashes[ hash_id ].hex() for hash_id in [ 1, 2, 3 ] ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4540,13 +5913,28 @@ class TestClientAPI( unittest.TestCase ):
         HG.test_controller.SetRead( 'hash_ids_to_hashes', file_ids_to_hashes )
         HG.test_controller.SetRead( 'media_results_from_ids', media_results )
         
-        hashes_in_test = list( file_ids_to_hashes.values() )
+        hashes_in_test = [ mr.GetHash() for mr in media_results ]
         
         novel_hashes = [ os.urandom( 32 ) for i in range( 5 ) ]
         
         hashes_in_test.extend( novel_hashes )
         
-        path = '/get_files/file_metadata?hashes={}'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in hashes_in_test ] ) ) )
+        expected_result = {
+            'metadata' : expected_metadata_result[ 'metadata' ] + [
+                {
+                    'hash' : hash.hex(),
+                    'file_id' : None
+                } for hash in novel_hashes
+            ]
+        }
+        
+        random.shuffle( hashes_in_test )
+        
+        expected_result[ 'metadata' ].sort( key = lambda m_dict: hashes_in_test.index( bytes.fromhex( m_dict[ 'hash' ] ) ) )
+        
+        wash_example_json_response( expected_result )
+        
+        path = '/get_files/file_metadata?hashes={}&include_services_object=false'.format( urllib.parse.quote( json.dumps( [ hash.hex() for hash in hashes_in_test ] ) ) )
         
         connection.request( 'GET', path, headers = headers )
         
@@ -4560,22 +5948,7 @@ class TestClientAPI( unittest.TestCase ):
         
         d = json.loads( text )
         
-        metadata = d[ 'metadata' ]
-        
-        for hash in novel_hashes:
-            
-            self.assertTrue( True in [ hash.hex() == row[ 'hash' ] for row in metadata ] )
-            
-            for row in metadata:
-                
-                if row[ 'hash' ] == hash.hex():
-                    
-                    self.assertEqual( len( row ), 2 )
-                    
-                    self.assertEqual( row[ 'file_id' ], None )
-                    
-                
-            
+        self.assertEqual( d, expected_result )
         
     
     def _test_get_files( self, connection, set_up_permissions ):
@@ -4599,12 +5972,14 @@ class TestClientAPI( unittest.TestCase ):
         
         tags_manager = ClientMediaManagers.TagsManager( service_keys_to_statuses_to_tags, service_keys_to_statuses_to_display_tags )
         
-        locations_manager = ClientMediaManagers.LocationsManager( dict(), dict(), set(), set() )
+        times_manager = ClientMediaManagers.TimesManager()
+        
+        locations_manager = ClientMediaManagers.LocationsManager( set(), set(), set(), set(), times_manager )
         ratings_manager = ClientMediaManagers.RatingsManager( {} )
         notes_manager = ClientMediaManagers.NotesManager( {} )
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( times_manager )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         HG.test_controller.SetRead( 'media_result', media_result )
         HG.test_controller.SetRead( 'media_results_from_ids', ( media_result, ) )
@@ -4613,7 +5988,7 @@ class TestClientAPI( unittest.TestCase ):
         
         file_path = HG.test_controller.client_files_manager.GetFilePath( hash, HC.IMAGE_PNG, check_file_exists = False )
         
-        shutil.copy2( path, file_path )
+        HydrusPaths.safe_copy2( path, file_path )
         
         thumb_hash = b'\x17\xde\xd6\xee\x1b\xfa\x002\xbdj\xc0w\x92\xce5\xf0\x12~\xfe\x915\xb3\xb3tA\xac\x90F\x95\xc2T\xc5'
         
@@ -4621,7 +5996,7 @@ class TestClientAPI( unittest.TestCase ):
         
         thumb_path = HG.test_controller.client_files_manager._GenerateExpectedThumbnailPath( hash )
         
-        shutil.copy2( path, thumb_path )
+        HydrusPaths.safe_copy2( path, thumb_path )
         
         api_permissions = set_up_permissions[ 'search_green_files' ]
         
@@ -4690,6 +6065,24 @@ class TestClientAPI( unittest.TestCase ):
         self.assertEqual( response.status, 200 )
         
         self.assertEqual( hashlib.sha256( data ).digest(), hash )
+        
+        self.assertIn( 'inline', response.headers[ 'Content-Disposition' ] )
+        
+        # succeed with attachment
+        
+        path = '/get_files/file?file_id={}&download=true'.format( 1 )
+        
+        connection.request( 'GET', path, headers = headers )
+        
+        response = connection.getresponse()
+        
+        data = response.read()
+        
+        self.assertEqual( response.status, 200 )
+        
+        self.assertEqual( hashlib.sha256( data ).digest(), hash )
+        
+        self.assertIn( 'attachment', response.headers[ 'Content-Disposition' ] )
         
         # range request
         
@@ -4861,7 +6254,7 @@ class TestClientAPI( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 123456, hash_404, size = size, mime = mime, width = width, height = height, duration = duration )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, tags_manager, times_manager, locations_manager, ratings_manager, notes_manager, file_viewing_stats_manager )
         
         HG.test_controller.SetRead( 'media_result', media_result )
         HG.test_controller.SetRead( 'media_results_from_ids', ( media_result, ) )
@@ -4888,7 +6281,7 @@ class TestClientAPI( unittest.TestCase ):
         
         data = response.read()
         
-        with open( os.path.join( HC.STATIC_DIR, 'hydrus.png' ), 'rb' ) as f:
+        with open( os.path.join( HC.STATIC_DIR, 'image.png' ), 'rb' ) as f:
             
             expected_data = f.read()
             
@@ -4921,11 +6314,15 @@ class TestClientAPI( unittest.TestCase ):
         set_up_permissions = self._test_client_api_basics( connection )
         self._test_get_services( connection, set_up_permissions )
         self._test_manage_database( connection, set_up_permissions )
+        self._test_options( connection, set_up_permissions )
         self._test_add_files_add_file( connection, set_up_permissions )
         self._test_add_files_other_actions( connection, set_up_permissions )
         self._test_add_notes( connection, set_up_permissions )
+        self._test_edit_ratings( connection, set_up_permissions )
+        self._test_edit_times( connection, set_up_permissions )
         self._test_add_tags( connection, set_up_permissions )
         self._test_add_tags_search_tags( connection, set_up_permissions )
+        self._test_add_tags_get_tag_siblings_and_parents( connection, set_up_permissions )
         self._test_add_urls( connection, set_up_permissions )
         self._test_manage_duplicates( connection, set_up_permissions )
         self._test_manage_cookies( connection, set_up_permissions )

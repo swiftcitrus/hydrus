@@ -4,13 +4,13 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientDefaults
 from hydrus.client import ClientDuplicates
-from hydrus.client import ClientSearch
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.importing import ClientImportSubscriptions
 from hydrus.client.importing import ClientImportSubscriptionQuery
@@ -20,8 +20,10 @@ from hydrus.client.importing.options import TagImportOptions
 from hydrus.client.media import ClientMedia
 from hydrus.client.media import ClientMediaManagers
 from hydrus.client.media import ClientMediaResult
-from hydrus.client.metadata import ClientTags
+from hydrus.client.metadata import ClientContentUpdates
+from hydrus.client.search import ClientSearch
 
+from hydrus.test import HelperFunctions as HF
 from hydrus.test import TestController as TC
 
 class TestSerialisables( unittest.TestCase ):
@@ -193,9 +195,31 @@ class TestSerialisables( unittest.TestCase ):
         has_audio = False
         num_words = None
         
-        local_locations_manager = ClientMediaManagers.LocationsManager( { CC.LOCAL_FILE_SERVICE_KEY : 123, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123 }, dict(), set(), set(), inbox )
-        trash_locations_manager = ClientMediaManagers.LocationsManager( { CC.TRASH_SERVICE_KEY : 123, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 12 }, dict(), set(), set(), inbox )
-        deleted_locations_manager = ClientMediaManagers.LocationsManager( dict(), { CC.LOCAL_FILE_SERVICE_KEY : 120, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123 }, set(), set(), inbox )
+        local_times_manager = ClientMediaManagers.TimesManager()
+        
+        current_to_timestamps_ms = { CC.LOCAL_FILE_SERVICE_KEY : 123000, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123000 }
+        
+        local_times_manager.SetImportedTimestampsMS( current_to_timestamps_ms )
+        
+        local_locations_manager = ClientMediaManagers.LocationsManager( set( current_to_timestamps_ms.keys() ), set(), set(), set(), local_times_manager, inbox )
+        
+        trash_times_manager = ClientMediaManagers.TimesManager()
+        
+        current_to_timestamps_ms = { CC.TRASH_SERVICE_KEY : 123000, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 12000 }
+        
+        local_times_manager.SetImportedTimestampsMS( current_to_timestamps_ms )
+        
+        trash_locations_manager = ClientMediaManagers.LocationsManager( set( current_to_timestamps_ms.keys() ), set(), set(), set(), trash_times_manager, inbox )
+        
+        deleted_times_manager = ClientMediaManagers.TimesManager()
+        
+        deleted_to_previously_imported_timestamps_ms = { CC.LOCAL_FILE_SERVICE_KEY : 10000, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 118000 }
+        deleted_to_timestamps_ms = { CC.LOCAL_FILE_SERVICE_KEY : 120000, CC.COMBINED_LOCAL_FILE_SERVICE_KEY : 123000 }
+        
+        deleted_times_manager.SetDeletedTimestampsMS( deleted_to_timestamps_ms )
+        deleted_times_manager.SetPreviouslyImportedTimestampsMS( deleted_to_previously_imported_timestamps_ms )
+        
+        deleted_locations_manager = ClientMediaManagers.LocationsManager( set(), set( deleted_to_timestamps_ms.keys() ), set(), set(), deleted_times_manager, inbox )
         
         # duplicate to generate proper dicts
         
@@ -211,7 +235,7 @@ class TestSerialisables( unittest.TestCase ):
         
         notes_manager = ClientMediaManagers.NotesManager( {} )
         
-        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager()
+        file_viewing_stats_manager = ClientMediaManagers.FileViewingStatsManager.STATICGenerateEmptyManager( ClientMediaManagers.TimesManager() )
         
         #
         
@@ -219,7 +243,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 1, local_hash_has_values, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, substantial_tags_manager, local_locations_manager, substantial_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, substantial_tags_manager, local_times_manager, local_locations_manager, substantial_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         local_media_has_values = ClientMedia.MediaSingleton( media_result )
         
@@ -229,7 +253,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 2, other_local_hash_has_values, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, substantial_tags_manager, local_locations_manager, substantial_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, substantial_tags_manager, local_times_manager, local_locations_manager, substantial_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         other_local_media_has_values = ClientMedia.MediaSingleton( media_result )
         
@@ -239,7 +263,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 3, local_hash_empty, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, local_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, local_times_manager, local_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         local_media_empty = ClientMedia.MediaSingleton( media_result )
         
@@ -249,7 +273,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 4, trashed_hash_empty, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, trash_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, deleted_times_manager, trash_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         trashed_media_empty = ClientMedia.MediaSingleton( media_result )
         
@@ -259,7 +283,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 5, deleted_hash_empty, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, deleted_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, empty_tags_manager, deleted_times_manager, deleted_locations_manager, empty_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         deleted_media_empty = ClientMedia.MediaSingleton( media_result )
         
@@ -269,7 +293,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 6, one_hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, one_tags_manager, local_locations_manager, one_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, one_tags_manager, local_times_manager, local_locations_manager, one_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         one_media = ClientMedia.MediaSingleton( media_result )
         
@@ -279,7 +303,7 @@ class TestSerialisables( unittest.TestCase ):
         
         file_info_manager = ClientMediaManagers.FileInfoManager( 7, two_hash, size, mime, width, height, duration, num_frames, has_audio, num_words )
         
-        media_result = ClientMediaResult.MediaResult( file_info_manager, two_tags_manager, local_locations_manager, two_ratings_manager, notes_manager, file_viewing_stats_manager )
+        media_result = ClientMediaResult.MediaResult( file_info_manager, two_tags_manager, local_times_manager, local_locations_manager, two_ratings_manager, notes_manager, file_viewing_stats_manager )
         
         two_media = ClientMedia.MediaSingleton( media_result )
         
@@ -291,136 +315,121 @@ class TestSerialisables( unittest.TestCase ):
         
         #
         
-        def assertSCUEqual( one, two ):
-            
-            self.maxDiff = None
-            
-            one = TC.ConvertServiceKeysToContentUpdatesToComparable( one )
-            two = TC.ConvertServiceKeysToContentUpdatesToComparable( two )
-            
-            self.assertEqual( set( one.keys() ), set( two.keys() ) )
-            
-            for key in set( one.keys() ):
-                
-                self.assertEqual( one[ key ], two[ key ] )
-                
-            
-        
         file_deletion_reason = 'test delete'
         
         #
         
-        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdates( local_media_has_values, local_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdatePackage( local_media_has_values, local_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        scu[ CC.LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { local_hash_empty }, reason = file_deletion_reason ) ]
+        content_update_package.AddContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { local_hash_empty }, reason = file_deletion_reason ) )
         
-        assertSCUEqual( result, scu )
-        
-        #
-        
-        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdates( local_media_has_values, trashed_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
-        
-        scu = {}
-        
-        scu[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { trashed_hash_empty }, reason = file_deletion_reason ) ]
-        
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, content_update_package )
         
         #
         
-        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdates( local_media_has_values, deleted_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdatePackage( local_media_has_values, trashed_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
         
-        self.assertEqual( result, {} )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        #
+        content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { trashed_hash_empty }, reason = file_deletion_reason ) )
         
-        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdates( local_media_has_values, other_local_media_has_values, delete_second = True, file_deletion_reason = file_deletion_reason )
-        
-        scu = {}
-        
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'series:namespaced test tag', { other_local_hash_has_values } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test tag', { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 12, { local_hash_has_values } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { other_local_hash_has_values } ) ) ]
-        scu[ CC.LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { other_local_hash_has_values }, reason = file_deletion_reason ) ]
-        
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, content_update_package )
         
         #
         
-        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdates( local_media_empty, other_local_media_has_values, delete_second = True, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdatePackage( local_media_has_values, deleted_media_empty, delete_second = True, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
-        
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test tag', { other_local_hash_has_values } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'series:namespaced test tag', { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { other_local_hash_has_values } ) ) ]
-        scu[ CC.LOCAL_FILE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { other_local_hash_has_values }, reason = file_deletion_reason ) ]
-        
-        assertSCUEqual( result, scu )
-        
-        #
-        #
-        
-        result = duplicate_content_merge_options_copy.ProcessPairIntoContentUpdates( local_media_has_values, local_media_empty, file_deletion_reason = file_deletion_reason )
-        
-        self.assertEqual( result, {} )
+        HF.compare_content_update_packages( self, result, ClientContentUpdates.ContentUpdatePackage() )
         
         #
         
-        result = duplicate_content_merge_options_copy.ProcessPairIntoContentUpdates( local_media_empty, other_local_media_has_values, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdatePackage( local_media_has_values, other_local_media_has_values, delete_second = True, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) ]
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'series:namespaced test tag', { other_local_hash_has_values } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test tag', { other_local_hash_has_values } ) ) ] )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_LIKE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) )
+        content_update_package.AddContentUpdates( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 12, { local_hash_has_values } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { other_local_hash_has_values } ) ) ] )
+        content_update_package.AddContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { other_local_hash_has_values }, reason = file_deletion_reason ) )
         
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, content_update_package )
+        
+        #
+        
+        result = duplicate_content_merge_options_delete_and_move.ProcessPairIntoContentUpdatePackage( local_media_empty, other_local_media_has_values, delete_second = True, file_deletion_reason = file_deletion_reason )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'test tag', { other_local_hash_has_values } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'series:namespaced test tag', { other_local_hash_has_values } ) ) ] )
+        content_update_package.AddContentUpdates( TC.LOCAL_RATING_LIKE_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) ) ] )
+        content_update_package.AddContentUpdates( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( None, { other_local_hash_has_values } ) )  ])
+        content_update_package.AddContentUpdates( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0, { other_local_hash_has_values } ) ) ] )
+        content_update_package.AddContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { other_local_hash_has_values }, reason = file_deletion_reason ) )
+        
+        HF.compare_content_update_packages( self, result, content_update_package )
         
         #
         #
         
-        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdates( local_media_has_values, local_media_empty, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_copy.ProcessPairIntoContentUpdatePackage( local_media_has_values, local_media_empty, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
-        
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) ]
-        
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, ClientContentUpdates.ContentUpdatePackage() )
         
         #
         
-        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdates( local_media_empty, other_local_media_has_values, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_copy.ProcessPairIntoContentUpdatePackage( local_media_empty, other_local_media_has_values, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) ]
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ] )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_LIKE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) )
         
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, content_update_package )
+        
+        #
+        #
+        
+        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdatePackage( local_media_has_values, local_media_empty, file_deletion_reason = file_deletion_reason )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ] )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_LIKE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) )
+        
+        HF.compare_content_update_packages( self, result, content_update_package )
         
         #
         
-        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdates( one_media, two_media, file_deletion_reason = file_deletion_reason )
+        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdatePackage( local_media_empty, other_local_media_has_values, file_deletion_reason = file_deletion_reason )
         
-        scu = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        scu[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'one', { two_hash } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'two', { one_hash } ) ) ]
-        scu[ TC.LOCAL_RATING_LIKE_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { two_hash } ) ) ]
-        scu[ TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { two_hash } ) ) ]
-        scu[ TC.LOCAL_RATING_INCDEC_SERVICE_KEY ] = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 8, { one_hash } ) ), HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 8, { two_hash } ) ) ]
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'test tag', { local_hash_empty } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:namespaced test tag', { local_hash_empty } ) ) ] )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_LIKE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { local_hash_empty } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 6, { local_hash_empty } ) ) )
         
-        assertSCUEqual( result, scu )
+        HF.compare_content_update_packages( self, result, content_update_package )
+        
+        #
+        
+        result = duplicate_content_merge_options_merge.ProcessPairIntoContentUpdatePackage( one_media, two_media, file_deletion_reason = file_deletion_reason )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'one', { two_hash } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'two', { one_hash } ) ) ] )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_LIKE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, { two_hash } ) ) )
+        content_update_package.AddContentUpdate( TC.LOCAL_RATING_NUMERICAL_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.8, { two_hash } ) ) )
+        content_update_package.AddContentUpdates( TC.LOCAL_RATING_INCDEC_SERVICE_KEY, [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 8, { one_hash } ) ), ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 8, { two_hash } ) ) ] )
+        
+        HF.compare_content_update_packages( self, result, content_update_package )
         
     
     def test_SERIALISABLE_TYPE_SHORTCUT( self ):
@@ -553,7 +562,7 @@ class TestSerialisables( unittest.TestCase ):
         
         tag_import_options = TagImportOptions.TagImportOptions( service_keys_to_service_tag_import_options = { HydrusData.GenerateKey() : service_tag_import_options } )
         
-        no_work_until = HydrusData.GetNow() - 86400 * 20
+        no_work_until = HydrusTime.GetNow() - 86400 * 20
         
         sub.SetTuple( gug_key_and_name, checker_options, initial_file_limit, periodic_file_limit, paused, file_import_options, tag_import_options, no_work_until )
         

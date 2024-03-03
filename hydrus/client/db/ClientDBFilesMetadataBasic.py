@@ -2,10 +2,8 @@ import sqlite3
 import typing
 
 from hydrus.core import HydrusConstants as HC
-from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 
-from hydrus.client import ClientTime
 from hydrus.client.db import ClientDBModule
 
 class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
@@ -28,8 +26,8 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
             ( [ 'num_frames' ], False, 400 )
         ]
         
-        index_generation_dict[ 'main.file_domain_modified_timestamps' ] = [
-            ( [ 'file_modified_timestamp' ], False, 476 )
+        index_generation_dict[ 'main.files_info_forced_filetypes' ] = [
+            ( [ 'forced_mime' ], False, 556 )
         ]
         
         return index_generation_dict
@@ -39,10 +37,12 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         
         return {
             'main.files_info' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, size INTEGER, mime INTEGER, width INTEGER, height INTEGER, duration INTEGER, num_frames INTEGER, has_audio INTEGER_BOOLEAN, num_words INTEGER );', 400 ),
+            'main.files_info_forced_filetypes' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, forced_mime INTEGER );', 556 ),
             'main.has_icc_profile' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 465 ),
             'main.has_exif' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 505 ),
             'main.has_human_readable_embedded_metadata' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 505 ),
-            'main.file_domain_modified_timestamps' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER, domain_id INTEGER, file_modified_timestamp INTEGER, PRIMARY KEY ( hash_id, domain_id ) );', 476 )
+            'main.has_transparency' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY );', 552 ),
+            'external_master.blurhashes' : ( 'CREATE TABLE IF NOT EXISTS {} ( hash_id INTEGER PRIMARY KEY, blurhash TEXT );', 545 )
         }
         
     
@@ -61,23 +61,84 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
         self._ExecuteMany( insert_phrase + ' files_info ( hash_id, size, mime, width, height, duration, num_frames, has_audio, num_words ) VALUES ( ?, ?, ?, ?, ?, ?, ?, ?, ? );', rows )
         
     
-    def ClearDomainModifiedTimestamp( self, hash_id: int, domain_id: int ):
+    def GetBlurhash( self, hash_id: int ) -> str:
         
-        self._Execute( 'DELETE FROM file_domain_modified_timestamps WHERE hash_id = ? AND domain_id = ?;', ( hash_id, domain_id ) )
-        
-    
-    def GetDomainModifiedTimestamp( self, hash_id: int, domain_id: int ) -> typing.Optional[ int ]:
-        
-        result = self._Execute( 'SELECT file_modified_timestamp FROM file_domain_modified_timestamps WHERE hash_id = ? AND domain_id = ?;', ( hash_id, domain_id ) ).fetchone()
+        result = self._Execute( 'SELECT blurhash FROM blurhashes WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
         
         if result is None:
             
-            return None
+            raise HydrusExceptions.DataMissing( 'Did not have blurhash information for that file!' )
             
         
-        ( timestamp, ) = result
+        ( blurhash, ) = result
         
-        return timestamp
+        return blurhash
+        
+    
+    def GetHasEXIF( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_exif WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasEXIFHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_exif_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_exif USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_exif_hash_ids
+        
+    
+    def GetHasHumanReadableEmbeddedMetadata( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_human_readable_embedded_metadata WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasHumanReadableEmbeddedMetadataHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_human_readable_embedded_metadata_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_human_readable_embedded_metadata USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_human_readable_embedded_metadata_hash_ids
+        
+    
+    def GetHashIdsToBlurhashes( self, hash_ids_table_name: str ):
+        
+        return dict( self._Execute( 'SELECT hash_id, blurhash FROM {} CROSS JOIN blurhashes USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+    
+    def GetHashIdsToForcedFiletypes( self, hash_ids_table_name: str ):
+        
+        return dict( self._Execute( 'SELECT hash_id, forced_mime FROM {} CROSS JOIN files_info_forced_filetypes USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+    
+    def GetHasICCProfile( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_icc_profile WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasICCProfileHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_icc_profile_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_icc_profile USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_icc_profile_hash_ids
+        
+    
+    def GetHasTransparency( self, hash_id: int ):
+        
+        result = self._Execute( 'SELECT hash_id FROM has_transparency WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        
+        return result is not None
+        
+    
+    def GetHasTransparencyHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
+        
+        has_transparency_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_transparency USING ( hash_id );'.format( hash_ids_table_name ) ) )
+        
+        return has_transparency_hash_ids
         
     
     def GetMime( self, hash_id: int ) -> int:
@@ -131,9 +192,12 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
             
             return [
                 ( 'files_info', 'hash_id' ),
+                ( 'files_info_forced_filetypes', 'hash_id' ),
                 ( 'has_exif', 'hash_id' ),
                 ( 'has_human_readable_embedded_metadata', 'hash_id' ),
-                ( 'has_icc_profile', 'hash_id' )
+                ( 'has_icc_profile', 'hash_id' ),
+                ( 'has_transparency', 'hash_id' ),
+                ( 'blurhashes', 'hash_id' )
             ]
             
         
@@ -156,61 +220,31 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
                 
             
         
-        if result is None:
-            
-            return 0
-            
-        
-        ( total_size, ) = result
+        total_size = self._GetSumResult( result )
         
         return total_size
         
     
-    def GetHasEXIF( self, hash_id: int ):
+    def SetForcedFiletype( self, hash_id: int, forced_mime: typing.Optional[ int ] ):
         
-        result = self._Execute( 'SELECT hash_id FROM has_exif WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+        self._Execute( 'DELETE FROM files_info_forced_filetypes WHERE hash_id = ?;', ( hash_id, ) )
         
-        return result is not None
-        
-    
-    def GetHasEXIFHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
-        
-        has_exif_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_exif USING ( hash_id );'.format( hash_ids_table_name ) ) )
-        
-        return has_exif_hash_ids
-        
-    
-    def GetHasHumanReadableEmbeddedMetadata( self, hash_id: int ):
-        
-        result = self._Execute( 'SELECT hash_id FROM has_human_readable_embedded_metadata WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
-        
-        return result is not None
-        
-    
-    def GetHasHumanReadableEmbeddedMetadataHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
-        
-        has_human_readable_embedded_metadata_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_human_readable_embedded_metadata USING ( hash_id );'.format( hash_ids_table_name ) ) )
-        
-        return has_human_readable_embedded_metadata_hash_ids
-        
-    
-    def GetHasICCProfile( self, hash_id: int ):
-        
-        result = self._Execute( 'SELECT hash_id FROM has_icc_profile WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
-        
-        return result is not None
-        
-    
-    def GetHasICCProfileHashIds( self, hash_ids_table_name: str ) -> typing.Set[ int ]:
-        
-        has_icc_profile_hash_ids = self._STS( self._Execute( 'SELECT hash_id FROM {} CROSS JOIN has_icc_profile USING ( hash_id );'.format( hash_ids_table_name ) ) )
-        
-        return has_icc_profile_hash_ids
-        
-    
-    def SetDomainModifiedTimestamp( self, hash_id: int, domain_id: int, timestamp: int ):
-        
-        self._Execute( 'REPLACE INTO file_domain_modified_timestamps ( hash_id, domain_id, file_modified_timestamp ) VALUES ( ?, ?, ? );', ( hash_id, domain_id, timestamp ) )
+        if forced_mime is not None:
+            
+            result = self._Execute( 'SELECT mime FROM files_info WHERE hash_id = ?;', ( hash_id, ) ).fetchone()
+            
+            if result is not None:
+                
+                ( original_mime, ) = result
+                
+                if original_mime == forced_mime:
+                    
+                    return
+                    
+                
+            
+            self._Execute( 'INSERT INTO files_info_forced_filetypes ( hash_id, forced_mime ) VALUES ( ?, ? );', ( hash_id, forced_mime ) )
+            
         
     
     def SetHasEXIF( self, hash_id: int, has_exif: bool ):
@@ -249,20 +283,20 @@ class ClientDBFilesMetadataBasic( ClientDBModule.ClientDBModule ):
             
         
     
-    def UpdateDomainModifiedTimestamp( self, hash_id: int, domain_id: int, timestamp: int ):
+    def SetHasTransparency( self, hash_id: int, has_transparency: bool ):
         
-        should_update = True
+        if has_transparency:
+            
+            self._Execute( 'INSERT OR IGNORE INTO has_transparency ( hash_id ) VALUES ( ? );', ( hash_id, ) )
+            
+        else:
+            
+            self._Execute( 'DELETE FROM has_transparency WHERE hash_id = ?;', ( hash_id, ) )
+            
         
-        existing_timestamp = self.GetDomainModifiedTimestamp( hash_id, domain_id )
+    
+    def SetBlurhash( self, hash_id: int, blurhash: str ):
         
-        if existing_timestamp is not None:
-            
-            should_update = ClientTime.ShouldUpdateDomainModifiedTime( existing_timestamp, timestamp )
-            
-        
-        if should_update:
-            
-            self.SetDomainModifiedTimestamp( hash_id, domain_id, timestamp )
-            
+        self._Execute('INSERT OR REPLACE INTO blurhashes ( hash_id, blurhash ) VALUES ( ?, ?);', ( hash_id, blurhash ) )
         
     

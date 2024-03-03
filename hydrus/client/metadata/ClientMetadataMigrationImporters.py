@@ -1,13 +1,17 @@
 import os
 import typing
 
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
 from hydrus.client import ClientStrings
+from hydrus.client import ClientTime
 from hydrus.client.media import ClientMediaResult
 from hydrus.client.metadata import ClientMetadataMigrationCore
 from hydrus.client.metadata import ClientTags
@@ -74,7 +78,7 @@ class SingleFileMetadataImporterSidecar( SingleFileMetadataImporter, ClientMetad
         
     
 
-class SingleFileMetadataImporterMediaNotes( HydrusSerialisable.SerialisableBase, SingleFileMetadataImporterMedia ):
+class SingleFileMetadataImporterMediaNotes( SingleFileMetadataImporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_NOTES
     SERIALISABLE_NAME = 'Metadata Single File Importer Media Notes'
@@ -146,13 +150,13 @@ class SingleFileMetadataImporterMediaNotes( HydrusSerialisable.SerialisableBase,
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_NOTES ] = SingleFileMetadataImporterMediaNotes
 
-class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, SingleFileMetadataImporterMedia ):
+class SingleFileMetadataImporterMediaTags( SingleFileMetadataImporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_TAGS
     SERIALISABLE_NAME = 'Metadata Single File Importer Media Tags'
-    SERIALISABLE_VERSION = 2
+    SERIALISABLE_VERSION = 3
     
-    def __init__( self, string_processor = None, service_key = None ):
+    def __init__( self, string_processor = None, service_key = None, tag_display_type = None ):
         
         if string_processor is None:
             
@@ -167,6 +171,12 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
             service_key = CC.COMBINED_TAG_SERVICE_KEY
             
         
+        if tag_display_type is None:
+            
+            tag_display_type = ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL
+            
+        
+        self._tag_display_type = tag_display_type
         self._service_key = service_key
         
     
@@ -175,12 +185,12 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
         serialisable_string_processor = self._string_processor.GetSerialisableTuple()
         serialisable_service_key = self._service_key.hex()
         
-        return ( serialisable_string_processor, serialisable_service_key )
+        return ( serialisable_string_processor, serialisable_service_key, self._tag_display_type )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
     
-        ( serialisable_string_processor, serialisable_service_key ) = serialisable_info
+        ( serialisable_string_processor, serialisable_service_key, self._tag_display_type ) = serialisable_info
         
         self._string_processor = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_string_processor )
         self._service_key = bytes.fromhex( serialisable_service_key )
@@ -201,6 +211,17 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
             return ( 2, new_serialisable_info )
             
         
+        if version == 2:
+            
+            ( serialisable_string_processor, serialisable_service_key ) = old_serialisable_info
+            
+            tag_display_type = ClientTags.TAG_DISPLAY_STORAGE
+            
+            new_serialisable_info = ( serialisable_string_processor, serialisable_service_key, tag_display_type )
+            
+            return ( 3, new_serialisable_info )
+            
+        
     
     def GetExampleStrings( self ):
         
@@ -209,9 +230,13 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
             'blonde hair',
             'skirt',
             'character:jane smith',
-            'series:jane smith adventures',
             'creator:some guy'
         ]
+        
+        if self._tag_display_type == ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL:
+            
+            examples.append( 'series:jane smith adventures' )
+            
         
         return examples
         
@@ -221,9 +246,14 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
         return self._service_key
         
     
+    def GetTagDisplayType( self ) -> int:
+        
+        return self._tag_display_type
+        
+    
     def Import( self, media_result: ClientMediaResult.MediaResult ):
         
-        tags = media_result.GetTagsManager().GetCurrent( self._service_key, ClientTags.TAG_DISPLAY_STORAGE )
+        tags = media_result.GetTagsManager().GetCurrent( self._service_key, self._tag_display_type )
         
         # turning ::) into :)
         tags = { HydrusText.re_leading_double_colon.sub( ':', tag ) for tag in tags }
@@ -245,7 +275,7 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
         
         try:
             
-            name = HG.client_controller.services_manager.GetName( self._service_key )
+            name = CG.client_controller.services_manager.GetName( self._service_key )
             
         except:
             
@@ -261,13 +291,108 @@ class SingleFileMetadataImporterMediaTags( HydrusSerialisable.SerialisableBase, 
             full_munge_text = ''
             
         
-        return '"{}" tags from media{}'.format( name, full_munge_text )
+        return f'"{name}" {ClientTags.tag_display_str_lookup[ self._tag_display_type ]}{full_munge_text}'
         
     
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_TAGS ] = SingleFileMetadataImporterMediaTags
 
-class SingleFileMetadataImporterMediaURLs( HydrusSerialisable.SerialisableBase, SingleFileMetadataImporterMedia ):
+class SingleFileMetadataImporterMediaTimestamps( SingleFileMetadataImporterMedia, HydrusSerialisable.SerialisableBase ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_TIMESTAMPS
+    SERIALISABLE_NAME = 'Metadata Single File Importer Media Timestamps'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, string_processor = None, timestamp_data_stub = None ):
+        
+        if string_processor is None:
+            
+            string_processor = ClientStrings.StringProcessor()
+            
+        
+        HydrusSerialisable.SerialisableBase.__init__( self )
+        SingleFileMetadataImporterMedia.__init__( self, string_processor )
+        
+        if timestamp_data_stub is None:
+            
+            timestamp_data_stub = ClientTime.TimestampData.STATICSimpleStub( HC.TIMESTAMP_TYPE_ARCHIVED )
+            
+        
+        self._timestamp_data_stub = timestamp_data_stub
+        
+    
+    def _GetSerialisableInfo( self ):
+    
+        serialisable_string_processor = self._string_processor.GetSerialisableTuple()
+        serialisable_timestamp_data_stub = self._timestamp_data_stub.GetSerialisableTuple()
+        
+        return ( serialisable_string_processor, serialisable_timestamp_data_stub )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( serialisable_string_processor, serialisable_timestamp_data_stub ) = serialisable_info
+        
+        self._string_processor = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_string_processor )
+        self._timestamp_data_stub = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_timestamp_data_stub )
+        
+    
+    def GetExampleStrings( self ):
+        
+        examples = [
+            '1681682717'
+        ]
+        
+        return examples
+        
+    
+    def GetTimestampDataStub( self ) -> ClientTime.TimestampData:
+        
+        return self._timestamp_data_stub
+        
+    
+    def Import( self, media_result: ClientMediaResult.MediaResult ):
+        
+        rows = []
+        
+        timestamp = HydrusTime.SecondiseMS( media_result.GetTimesManager().GetTimestampMSFromStub( self._timestamp_data_stub ) )
+        
+        if timestamp is not None:
+            
+            rows.append( str( timestamp ) )
+            
+        
+        if self._string_processor.MakesChanges():
+            
+            rows = self._string_processor.ProcessStrings( rows )
+            
+        
+        return rows
+        
+    
+    def SetTimestampDataStub( self, timestamp_data_stub: ClientTime.TimestampData ):
+        
+        self._timestamp_data_stub = timestamp_data_stub
+        
+    
+    def ToString( self ) -> str:
+        
+        if self._string_processor.MakesChanges():
+            
+            full_munge_text = ', applying {}'.format( self._string_processor.ToString() )
+            
+        else:
+            
+            full_munge_text = ''
+            
+        
+        return '{} from media{}'.format( self._timestamp_data_stub, full_munge_text )
+        
+    
+
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_TIMESTAMPS ] = SingleFileMetadataImporterMediaTimestamps
+
+class SingleFileMetadataImporterMediaURLs( SingleFileMetadataImporterMedia, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_URLS
     SERIALISABLE_NAME = 'Metadata Single File Importer Media URLs'
@@ -353,7 +478,7 @@ class SingleFileMetadataImporterMediaURLs( HydrusSerialisable.SerialisableBase, 
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_URLS ] = SingleFileMetadataImporterMediaURLs
 
-class SingleFileMetadataImporterJSON( HydrusSerialisable.SerialisableBase, SingleFileMetadataImporterSidecar ):
+class SingleFileMetadataImporterJSON( SingleFileMetadataImporterSidecar, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_JSON
     SERIALISABLE_NAME = 'Metadata Single File Importer JSON'
@@ -508,7 +633,7 @@ class SingleFileMetadataImporterJSON( HydrusSerialisable.SerialisableBase, Singl
 
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_JSON ] = SingleFileMetadataImporterJSON
 
-class SingleFileMetadataImporterTXT( HydrusSerialisable.SerialisableBase, SingleFileMetadataImporterSidecar ):
+class SingleFileMetadataImporterTXT( SingleFileMetadataImporterSidecar, HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_TXT
     SERIALISABLE_NAME = 'Metadata Single File Importer TXT'
@@ -669,7 +794,7 @@ class SingleFileMetadataImporterTXT( HydrusSerialisable.SerialisableBase, Single
             full_munge_text = ''
             
         
-        return 'from .txt sidecar'.format( full_munge_text )
+        return 'from .txt sidecar{}'.format( full_munge_text )
         
     
 

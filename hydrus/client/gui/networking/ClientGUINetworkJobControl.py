@@ -3,13 +3,14 @@ import typing
 from qtpy import QtCore as QC
 from qtpy import QtWidgets as QW
 
-from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUICore as CGC
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
@@ -26,6 +27,8 @@ class NetworkJobControl( QW.QFrame ):
         QW.QFrame.__init__( self, parent )
         
         self.setFrameStyle( QW.QFrame.Box | QW.QFrame.Raised )
+        
+        self._should_update_freely = False
         
         self._network_job = None
         
@@ -79,7 +82,7 @@ class NetworkJobControl( QW.QFrame ):
         
         with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit bandwidth rules for {}'.format( network_context.ToString() ) ) as dlg:
             
-            bandwidth_rules = HG.client_controller.network_engine.bandwidth_manager.GetRules( network_context )
+            bandwidth_rules = CG.client_controller.network_engine.bandwidth_manager.GetRules( network_context )
             
             summary = network_context.GetSummary()
             
@@ -91,14 +94,14 @@ class NetworkJobControl( QW.QFrame ):
                 
                 bandwidth_rules = panel.GetValue()
                 
-                HG.client_controller.network_engine.bandwidth_manager.SetRules( network_context, bandwidth_rules )
+                CG.client_controller.network_engine.bandwidth_manager.SetRules( network_context, bandwidth_rules )
                 
             
         
     
     def _ShowCogMenu( self ):
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         if self._network_job is not None and self._network_job.engine is not None:
             
@@ -114,7 +117,7 @@ class NetworkJobControl( QW.QFrame ):
                 
                 bandwidth_manager = self._network_job.engine.bandwidth_manager
                 
-                submenu = QW.QMenu( menu )
+                submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 menu_network_contexts = []
                 
@@ -158,7 +161,7 @@ class NetworkJobControl( QW.QFrame ):
                         
                         if waiting_estimate > 0:
                             
-                            network_context_text = '{} ({})'.format( network_context_text, HydrusData.TimeDeltaToPrettyTimeDelta( waiting_estimate ) )
+                            network_context_text = '{} ({})'.format( network_context_text, HydrusTime.TimeDeltaToPrettyTimeDelta( waiting_estimate ) )
                             
                         
                     
@@ -210,7 +213,7 @@ class NetworkJobControl( QW.QFrame ):
             return
             
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         ClientGUIMenus.AppendMenuItem( menu, 'show error', 'Show the recent error in a messagebox.', self.ShowError )
         ClientGUIMenus.AppendMenuItem( menu, 'copy error', 'Copy the recent error to the clipboard.', self.CopyError )
@@ -226,7 +229,7 @@ class NetworkJobControl( QW.QFrame ):
             
         else:
             
-            if self._auto_override_bandwidth_rules and HydrusData.TimeHasPassed( self._network_job.GetCreationTime() + 5 ):
+            if self._auto_override_bandwidth_rules and HydrusTime.TimeHasPassed( self._network_job.GetCreationTime() + 5 ):
                 
                 self._network_job.OverrideBandwidth()
                 
@@ -330,7 +333,7 @@ class NetworkJobControl( QW.QFrame ):
             return
             
         
-        HG.client_controller.pub( 'clipboard', 'text', self._error_text )
+        CG.client_controller.pub( 'clipboard', 'text', self._error_text )
         
     
     def ClearNetworkJob( self ):
@@ -343,7 +346,7 @@ class NetworkJobControl( QW.QFrame ):
             
             self._Update()
             
-            HG.client_controller.gui.UnregisterUIUpdateWindow( self )
+            CG.client_controller.gui.UnregisterUIUpdateWindow( self )
             
         
     
@@ -367,7 +370,7 @@ class NetworkJobControl( QW.QFrame ):
             
             self._Update()
             
-            HG.client_controller.gui.RegisterUIUpdateWindow( self )
+            CG.client_controller.gui.RegisterUIUpdateWindow( self )
             
         
     
@@ -378,6 +381,11 @@ class NetworkJobControl( QW.QFrame ):
         self._error_button.show()
         
     
+    def SetShouldUpdateFreely( self, should: bool ):
+        
+        self._should_update_freely = should
+        
+    
     def ShowError( self ):
         
         if self._error_text is None:
@@ -385,14 +393,14 @@ class NetworkJobControl( QW.QFrame ):
             return
             
         
-        QW.QMessageBox.critical( self, 'network error', self._error_text )
+        ClientGUIDialogsMessage.ShowCritical( self, 'Network Error', self._error_text )
         
     
     def TIMERUIUpdate( self ):
         
         self._OverrideBandwidthIfAppropriate()
         
-        if HG.client_controller.gui.IShouldRegularlyUpdate( self ):
+        if self._should_update_freely or CG.client_controller.gui.IShouldRegularlyUpdate( self ):
             
             self._Update()
             

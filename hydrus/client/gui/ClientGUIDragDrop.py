@@ -6,10 +6,11 @@ from qtpy import QtWidgets as QW
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusTemp
 from hydrus.core import HydrusText
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.exporting import ClientExportingFiles
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import QtPorting as QP
@@ -44,13 +45,13 @@ def DoFileExportDragDrop( window, page_key, media, alt_down ):
     
     #
     
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     do_secret_discord_dnd_fix = new_options.GetBoolean( 'secret_discord_dnd_fix' ) and alt_down
     
     #
     
-    client_files_manager = HG.client_controller.client_files_manager
+    client_files_manager = CG.client_controller.client_files_manager
     
     original_paths = []
     media_and_original_paths = []
@@ -74,7 +75,11 @@ def DoFileExportDragDrop( window, page_key, media, alt_down ):
     
     discord_dnd_fix_possible = new_options.GetBoolean( 'discord_dnd_fix' ) and len( original_paths ) <= 50 and total_size < 200 * 1048576
     
-    temp_dir = HG.client_controller.temp_dir
+    # TODO: figure out regular cleaning of these DnD subfolders
+    # ok I don't want to leave hundreds of MB of no-longer-useful files in our temp dir. we want to delete them regularly
+    # HOWEVER, we can't do it on every DnD because what if a user is setting up a bulk upload of ten files with four separate DnDs? if the browser doesn't copy the files to its cache immediately, we'd be killing the original source
+    # so I think we'd probably be looking at some sort of thing that regularly runs, scans the temp dir for 'DnDxxxx' folders, and deletes any with a creation date more than twelve hours or something. tricky question
+    dnd_temp_dir = HydrusTemp.GetSubTempDir( prefix = 'DnD' )
     
     if do_secret_discord_dnd_fix:
         
@@ -82,7 +87,9 @@ def DoFileExportDragDrop( window, page_key, media, alt_down ):
         
         flags = QC.Qt.MoveAction
         
-    elif discord_dnd_fix_possible and os.path.exists( temp_dir ):
+    elif discord_dnd_fix_possible and os.path.exists( dnd_temp_dir ):
+        
+        seen_export_filenames = set()
         
         fallback_filename_terms = ClientExportingFiles.ParseExportPhrase( '{hash}' )
         
@@ -105,19 +112,25 @@ def DoFileExportDragDrop( window, page_key, media, alt_down ):
         
         for ( i, ( m, original_path ) ) in enumerate( media_and_original_paths ):
             
-            filename = ClientExportingFiles.GenerateExportFilename( temp_dir, m, filename_terms, i + 1 )
+            try:
+                
+                filename = ClientExportingFiles.GenerateExportFilename( dnd_temp_dir, m, filename_terms, i + 1, do_not_use_filenames = seen_export_filenames )
+                
+                if filename == HC.mime_ext_lookup[ m.GetMime() ]:
+                    
+                    raise Exception()
+                    
+                
+            except:
+                
+                filename = ClientExportingFiles.GenerateExportFilename( dnd_temp_dir, m, fallback_filename_terms, i + 1, do_not_use_filenames = seen_export_filenames )
+                
             
-            if filename == HC.mime_ext_lookup[ m.GetMime() ]:
-                
-                filename = ClientExportingFiles.GenerateExportFilename( temp_dir, m, fallback_filename_terms, i + 1 )
-                
+            seen_export_filenames.add( filename )
             
-            dnd_path = os.path.join( temp_dir, filename )
+            dnd_path = os.path.join( dnd_temp_dir, filename )
             
-            if not os.path.exists( dnd_path ):
-                
-                HydrusPaths.MirrorFile( original_path, dnd_path )
-                
+            HydrusPaths.MirrorFile( original_path, dnd_path )
             
             dnd_paths.append( dnd_path )
             
@@ -190,21 +203,31 @@ class FileDropTarget( QC.QObject ):
         self._media_callable = media_callable
         
     
-    def eventFilter( self, object, event ):
+    def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.Drop:
+        try:
             
-            if self.OnDrop( event.position().toPoint().x(), event.position().toPoint().y() ):
+            if event.type() == QC.QEvent.Drop:
                 
-                event.setDropAction( self.OnData( event.mimeData(), event.proposedAction() ) )
+                if self.OnDrop( event.position().toPoint().x(), event.position().toPoint().y() ):
+                    
+                    event.setDropAction( self.OnData( event.mimeData(), event.proposedAction() ) )
+                    
+                    event.accept()
+                    
+                
+            elif event.type() == QC.QEvent.DragEnter:
                 
                 event.accept()
                 
             
-        elif event.type() == QC.QEvent.DragEnter:
+        except Exception as e:
             
-            event.accept()
+            HydrusData.ShowException( e )
             
+            return True
+            
+        
         
         return False
         

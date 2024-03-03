@@ -3,7 +3,9 @@ import tempfile
 import threading
 
 from hydrus.core import HydrusData
+from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+from hydrus.core import HydrusTime
 
 TEMP_PATH_LOCK = threading.Lock()
 IN_USE_TEMP_PATHS = set()
@@ -36,10 +38,11 @@ def CleanUpTempPath( os_file_handle, temp_path ):
         
         with TEMP_PATH_LOCK:
             
-            IN_USE_TEMP_PATHS.add( ( HydrusData.GetNow(), temp_path ) )
+            IN_USE_TEMP_PATHS.add( ( HydrusTime.GetNow(), temp_path ) )
             
         
     
+
 def CleanUpOldTempPaths():
     
     with TEMP_PATH_LOCK:
@@ -50,7 +53,7 @@ def CleanUpOldTempPaths():
             
             ( time_failed, temp_path ) = row
             
-            if HydrusData.TimeHasPassed( time_failed + 60 ):
+            if HydrusTime.TimeHasPassed( time_failed + 60 ):
                 
                 try:
                     
@@ -60,7 +63,7 @@ def CleanUpOldTempPaths():
                     
                 except OSError:
                     
-                    if HydrusData.TimeHasPassed( time_failed + 600 ):
+                    if HydrusTime.TimeHasPassed( time_failed + 1200 ):
                         
                         IN_USE_TEMP_PATHS.discard( row )
                         
@@ -69,20 +72,18 @@ def CleanUpOldTempPaths():
             
         
     
+
 def GetCurrentTempDir():
     
     return tempfile.gettempdir()
     
-def GetTempDir( dir = None ):
+
+def InitialiseHydrusTempDir():
     
-    return tempfile.mkdtemp( prefix = 'hydrus', dir = dir )
+    return tempfile.mkdtemp( prefix = 'hydrus' )
     
+
 def SetEnvTempDir( path ):
-    
-    if os.path.exists( path ) and not os.path.isdir( path ):
-        
-        raise Exception( 'The given temp directory, "{}", does not seem to be a directory!'.format( path ) )
-        
     
     try:
         
@@ -90,12 +91,12 @@ def SetEnvTempDir( path ):
         
     except Exception as e:
         
-        raise Exception( 'Could not create the temp dir: {}'.format( e ) )
+        raise Exception( f'Could not create the temp dir "{path}"!' )
         
     
     if not HydrusPaths.DirectoryIsWriteable( path ):
         
-        raise Exception( 'The given temp directory, "{}", does not seem to be writeable-to!'.format( path ) )
+        raise Exception( f'The given temp directory, "{path}", does not seem to be writeable-to!' )
         
     
     for tmp_name in ( 'TMPDIR', 'TEMP', 'TMP' ):
@@ -108,7 +109,20 @@ def SetEnvTempDir( path ):
     
     tempfile.tempdir = path
     
+
+def GetSubTempDir( prefix = '' ):
+    
+    hydrus_temp_dir = HG.controller.GetHydrusTempDir()
+    
+    return tempfile.mkdtemp( prefix = prefix, dir = hydrus_temp_dir )
+    
+
 def GetTempPath( suffix = '', dir = None ):
+    
+    if dir is None:
+        
+        dir = HG.controller.GetHydrusTempDir()
+        
     
     return tempfile.mkstemp( suffix = suffix, prefix = 'hydrus', dir = dir )
     

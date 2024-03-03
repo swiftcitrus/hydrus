@@ -2,6 +2,7 @@ import sqlite3
 import typing
 
 from hydrus.client.db import ClientDBDefinitionsCache
+from hydrus.client.db import ClientDBMaintenance
 from hydrus.client.db import ClientDBMappingsCounts
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBServices
@@ -11,8 +12,9 @@ from hydrus.client.metadata import ClientTags
 
 class ClientDBMappingsCountsUpdate( ClientDBModule.ClientDBModule ):
     
-    def __init__( self, cursor: sqlite3.Cursor, modules_services: ClientDBServices.ClientDBMasterServices, modules_mappings_counts: ClientDBMappingsCounts.ClientDBMappingsCounts, modules_tags_local_cache: ClientDBDefinitionsCache.ClientDBCacheLocalTags, modules_tag_display: ClientDBTagDisplay.ClientDBTagDisplay, modules_tag_search: ClientDBTagSearch.ClientDBTagSearch ):
+    def __init__( self, cursor: sqlite3.Cursor, modules_db_maintenance: ClientDBMaintenance.ClientDBMaintenance, modules_services: ClientDBServices.ClientDBMasterServices, modules_mappings_counts: ClientDBMappingsCounts.ClientDBMappingsCounts, modules_tags_local_cache: ClientDBDefinitionsCache.ClientDBCacheLocalTags, modules_tag_display: ClientDBTagDisplay.ClientDBTagDisplay, modules_tag_search: ClientDBTagSearch.ClientDBTagSearch ):
         
+        self.modules_db_maintenance = modules_db_maintenance
         self.modules_services = modules_services
         self.modules_mappings_counts = modules_mappings_counts
         self.modules_tags_local_cache = modules_tags_local_cache
@@ -79,7 +81,7 @@ class ClientDBMappingsCountsUpdate( ClientDBModule.ClientDBModule ):
                 
                 # we don't want to delete chained stuff from definitions cache, even if count goes to zero!
                 
-                chained_tag_ids = self.modules_tag_display.FilterChained( ClientTags.TAG_DISPLAY_ACTUAL, tag_service_id, deleted_tag_ids )
+                chained_tag_ids = self.modules_tag_display.FilterChained( ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL, tag_service_id, deleted_tag_ids )
                 
                 deleted_tag_ids.difference_update( chained_tag_ids )
                 
@@ -156,3 +158,4 @@ class ClientDBMappingsCountsUpdate( ClientDBModule.ClientDBModule ):
             self.ReduceCounts( tag_display_type, file_service_id, tag_service_id, reduce_ac_cache_changes )
             
         
+    

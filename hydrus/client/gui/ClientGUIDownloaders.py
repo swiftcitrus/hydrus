@@ -12,9 +12,10 @@ from hydrus.core import HydrusSerialisable
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
-from hydrus.client import ClientPaths
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientStrings
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -365,7 +366,7 @@ class EditGUGPanel( ClientGUIScrolledPanels.EditPanel ):
             
             example_url = gug.GetExampleURL()
             
-            example_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( example_url )
+            example_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( example_url )
             
             self._example_url.setText( example_url )
             
@@ -386,7 +387,7 @@ class EditGUGPanel( ClientGUIScrolledPanels.EditPanel ):
             
             try:
                 
-                url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( example_url )
+                url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( example_url )
                 
                 if url_class is None:
                     
@@ -496,7 +497,7 @@ class EditNGUGPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( choice_tuples ) == 0:
             
-            QW.QMessageBox.critical( self, 'Error', 'No remaining gugs available!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'No remaining gugs available!' )
             
             return
             
@@ -563,7 +564,7 @@ class EditGUGsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        call = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_gugs.html' ) )
+        call = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_GUGS )
         
         menu_items.append( ( 'normal', 'open the gugs help', 'Open the help page for gugs in your web browser.', call ) )
         
@@ -706,9 +707,9 @@ class EditGUGsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         try:
             
-            example_url = HG.client_controller.network_engine.domain_manager.NormaliseURL( example_url )
+            example_url = CG.client_controller.network_engine.domain_manager.NormaliseURL( example_url )
             
-            url_class = HG.client_controller.network_engine.domain_manager.GetURLClass( example_url )
+            url_class = CG.client_controller.network_engine.domain_manager.GetURLClass( example_url )
             
         except:
             
@@ -1135,7 +1136,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
         
         tt = 'The same url can be expressed in different ways. The parameters can be reordered, and descriptive \'sugar\' like "/123456/bodysuit-samus_aran" can be altered at a later date, say to "/123456/bodysuit-green_eyes-samus_aran". In order to collapse all the different expressions of a url down to a single comparable form, the client will \'normalise\' them based on the essential definitions in their url class. Parameters will be alphebatised and non-defined elements will be removed.'
         tt += os.linesep * 2
-        tt += 'All normalisation will switch to the preferred scheme (http/https). The alphabetisation of parameters and stripping out of non-defined elements will occur for all URLs except Gallery URLs or Watchable URLs that do not use an API Lookup. (In general, you can define gallery and watchable urls a little more loosely since they generally do not need to be compared, but if you will be saving it with a file or need to perform some regex conversion into an API URL, you\'ll want a rigorously defined url class that will normalise to something reliable and pretty.)'
+        tt += 'All normalisation will switch to the preferred scheme (http/https). The alphabetisation of parameters and stripping out of non-defined elements will occur for all URLs except Gallery URLs or Watchable URLs that do not use an API Lookup. (In general, you can define gallery and watchable urls a little more loosely since they generally do not need to be compared, but if you will be saving it with a file or need to perform some regex conversion into an API/Redirect URL, you\'ll want a rigorously defined url class that will normalise to something reliable and pretty.)'
         
         self._normalised_url.setToolTip( tt )
         
@@ -1249,8 +1250,8 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
         
         rows = []
         
-        rows.append( ( 'optional api url converter: ', self._api_lookup_converter ) )
-        rows.append( ( 'api url: ', self._api_url ) )
+        rows.append( ( 'optional api/redirect url converter: ', self._api_lookup_converter ) )
+        rows.append( ( 'api/redirect url: ', self._api_url ) )
         
         gridbox = ClientGUICommon.WrapInGrid( self._api_url_panel, rows )
         
@@ -1342,7 +1343,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if key in existing_keys:
             
-            QW.QMessageBox.critical( self, 'Error', 'That key already exists!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'That key already exists!' )
             
             return
             
@@ -1373,7 +1374,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                             
                         elif not string_match.Matches( default ):
                             
-                            QW.QMessageBox.warning( self, 'Warning', 'That default does not match the given rule! Clearing it to none!' )
+                            ClientGUIDialogsMessage.ShowWarning( self, 'That default does not match the given rule! Clearing it to none!' )
                             
                             default = None
                             
@@ -1477,7 +1478,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 if key in existing_keys:
                     
-                    QW.QMessageBox.critical( self, 'Error', 'That key already exists!' )
+                    ClientGUIDialogsMessage.ShowWarning( self, 'That key already exists!' )
                     
                     return
                     
@@ -1512,7 +1513,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                                 
                             elif not string_match.Matches( default ):
                                 
-                                QW.QMessageBox.warning( self, 'Warning', 'That default does not match the given rule! Clearing it to none!' )
+                                ClientGUIDialogsMessage.ShowWarning( self, 'That default does not match the given rule! Clearing it to none!' )
                                 
                                 default = None
                                 
@@ -1578,7 +1579,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                             
                         elif not string_match.Matches( new_default ):
                             
-                            QW.QMessageBox.warning( self, 'Warning', 'That default does not match the given rule! Clearing it to none!' )
+                            ClientGUIDialogsMessage.ShowWarning( self, 'That default does not match the given rule! Clearing it to none!' )
                             
                             new_default = None
                             
@@ -1832,7 +1833,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                     
                     if url_class.Matches( api_lookup_url ):
                         
-                        self._example_url_classes.setText( 'Matches own API URL!' )
+                        self._example_url_classes.setText( 'Matches own API/Redirect URL!' )
                         self._example_url_classes.setObjectName( 'HydrusInvalid' )
                         
                     
@@ -1849,7 +1850,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 self._api_url.setText( 'Could not convert - ' + reason )
                 
-                self._example_url_classes.setText( 'API URL Problem!' )
+                self._example_url_classes.setText( 'API/Redirect URL Problem!' )
                 self._example_url_classes.setObjectName( 'HydrusInvalid' )
                 
             
@@ -1899,7 +1900,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                 message += os.linesep * 2
                 message += 'If you are not sure what this means, turn this back off.'
                 
-                QW.QMessageBox.information( self, 'Information', message )
+                ClientGUIDialogsMessage.ShowInformation( self, message )
                 
             
         else:
@@ -1910,7 +1911,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                 message += os.linesep * 2
                 message += 'If you are not sure what this means, turn this back on.'
                 
-                QW.QMessageBox.information( self, 'Information', message )
+                ClientGUIDialogsMessage.ShowInformation( self, message )
             
         
     
@@ -1953,7 +1954,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             except HydrusExceptions.StringConvertException as e:
                 
-                raise HydrusExceptions.VetoException( 'Problem making API URL!' )
+                raise HydrusExceptions.VetoException( 'Problem making API/Redirect URL!' )
                 
             
         
@@ -1979,7 +1980,7 @@ class EditURLClassPanel( ClientGUIScrolledPanels.EditPanel ):
             
             if url_class.Matches( api_lookup_url ):
                 
-                message = 'This URL class matches its own API URL! This can break a downloader unless there is a more specific URL Class the matches the API URL before this. I recommend you fix this here, but you do not have to. Exit now?'
+                message = 'This URL class matches its own API/Redirect URL! This can break a downloader unless there is a more specific URL Class the matches the API URL before this. I recommend you fix this here, but you do not have to. Exit now?'
                 
                 result = ClientGUIDialogsQuick.GetYesNo( self, message )
                 
@@ -2001,7 +2002,7 @@ class EditURLClassesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        call = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_url_classes.html' ) )
+        call = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_URL_CLASSES )
         
         menu_items.append( ( 'normal', 'open the url classes help', 'Open the help page for url classes in your web browser.', call ) )
         
@@ -2279,7 +2280,7 @@ class EditURLClassLinksPanel( ClientGUIScrolledPanels.EditPanel ):
         #
         
         self._notebook.addTab( self._parser_list_ctrl_panel, 'parser links' )
-        self._notebook.addTab( self._api_pairs_list_ctrl, 'api link review' )
+        self._notebook.addTab( self._api_pairs_list_ctrl, 'api/redirect link review' )
         
         #
         
@@ -2370,7 +2371,7 @@ class EditURLClassLinksPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( self._parsers ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'Unfortunately, you do not have any parsers, so none can be linked to your url classes. Please create some!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Unfortunately, you do not have any parsers, so none can be linked to your url classes. Please create some!' )
             
             return
             
@@ -2459,7 +2460,7 @@ class EditURLClassLinksPanel( ClientGUIScrolledPanels.EditPanel ):
             
             self._parser_list_ctrl.AddDatas( new_datas )
             
-            self._parser_list_ctrl_listctrl.SelectDatas( new_datas )
+            self._parser_list_ctrl.SelectDatas( new_datas )
             
             self._parser_list_ctrl.Sort()
             

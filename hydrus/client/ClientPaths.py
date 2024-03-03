@@ -1,12 +1,15 @@
 import webbrowser
 
 from hydrus.core import HydrusConstants as HC
-from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
+
+from hydrus.client import ClientGlobals as CG
 
 def DeletePath( path, always_delete_fully = False ):
     
-    if HC.options[ 'delete_to_recycle_bin' ] == True and not always_delete_fully:
+    delete_to_recycle_bin = HC.options[ 'delete_to_recycle_bin' ]
+    
+    if delete_to_recycle_bin and not always_delete_fully:
         
         HydrusPaths.RecyclePath( path )
         
@@ -15,13 +18,15 @@ def DeletePath( path, always_delete_fully = False ):
         HydrusPaths.DeletePath( path )
         
     
+
 def LaunchPathInWebBrowser( path ):
     
     LaunchURLInWebBrowser( 'file:///' + path )
     
+
 def LaunchURLInWebBrowser( url ):
     
-    web_browser_path = HG.client_controller.new_options.GetNoneableString( 'web_browser_path' )
+    web_browser_path = CG.client_controller.new_options.GetNoneableString( 'web_browser_path' )
     
     if web_browser_path is None:
         

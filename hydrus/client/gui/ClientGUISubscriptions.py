@@ -12,12 +12,14 @@ from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
-from hydrus.client import ClientPaths
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientTime
 from hydrus.client.gui import ClientGUIAsync
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -45,7 +47,7 @@ def GetQueryHeadersQualityInfo( query_headers: typing.Iterable[ ClientImportSubs
         
         try:
             
-            query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
+            query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
             
         except HydrusExceptions.DataMissing:
             
@@ -56,7 +58,7 @@ def GetQueryHeadersQualityInfo( query_headers: typing.Iterable[ ClientImportSubs
         
         hashes = fsc.GetHashes()
         
-        media_results = HG.client_controller.Read( 'media_results', hashes )
+        media_results = CG.client_controller.Read( 'media_results', hashes )
         
         num_inbox = 0
         num_archived = 0
@@ -96,7 +98,7 @@ def GetQueryLogContainers( query_headers: typing.Iterable[ ClientImportSubscript
         
         try:
             
-            query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
+            query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_header.GetQueryLogContainerName() )
             
         except HydrusExceptions.DBException as e:
             
@@ -131,7 +133,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'getting_started_subscriptions.html' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_GETTING_STARTED_SUBSCRIPTIONS )
         
         menu_items.append( ( 'normal', 'open the html subscriptions help', 'Open the help page for subscriptions in your web browser.', page_func ) )
         
@@ -171,7 +173,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         queries_panel.AddButton( 'check now', self._CheckNow, enabled_check_func = self._ListCtrlCanCheckNow )
         queries_panel.AddButton( 'reset', self._STARTReset, enabled_check_func = self._ListCtrlCanResetCache )
         
-        if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             queries_panel.AddSeparator()
             
@@ -187,7 +189,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._file_limits_panel = ClientGUICommon.StaticBox( self, 'synchronisation' )
         
-        if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             limits_max = 50000
             
@@ -342,7 +344,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         gug_key_and_name = self._gug_key_and_name.GetValue()
         
-        initial_search_text = HG.client_controller.network_engine.domain_manager.GetInitialSearchText( gug_key_and_name )
+        initial_search_text = CG.client_controller.network_engine.domain_manager.GetInitialSearchText( gug_key_and_name )
         
         query_header = ClientImportSubscriptionQuery.SubscriptionQueryHeader()
         
@@ -364,7 +366,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 if query_text in self._GetCurrentQueryTexts():
                     
-                    QW.QMessageBox.warning( self, 'Warning', 'You already have a query for "{}", so nothing new has been added.'.format( query_text ) )
+                    ClientGUIDialogsMessage.ShowWarning( self, f'You already have a query for "{query_text}", so nothing new has been added.' )
                     
                     return
                     
@@ -392,7 +394,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             else:
                 
-                query_header.SetQueryLogContainerStatus( ClientImportSubscriptionQuery.LOG_CONTAINER_UNSYNCED, pretty_velocity_override = 'will recalculate on next run' )
+                query_header.SetQueryLogContainerStatus( ClientImportSubscriptionQuery.LOG_CONTAINER_UNSYNCED, pretty_velocity_override = 'will recalculate when next fully loaded' )
                 
             
         
@@ -455,7 +457,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_latest_new_file_time = ClientData.TimestampToPrettyTimeDelta( latest_new_file_time )
+            pretty_latest_new_file_time = ClientTime.TimestampToPrettyTimeDelta( latest_new_file_time )
             
         
         if last_check_time is None or last_check_time == 0:
@@ -464,7 +466,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_last_check_time = ClientData.TimestampToPrettyTimeDelta( last_check_time )
+            pretty_last_check_time = ClientTime.TimestampToPrettyTimeDelta( last_check_time )
             
         
         pretty_next_check_time = query_header.GetNextCheckStatusString()
@@ -475,7 +477,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         try:
             
-            estimate = query_header.GetBandwidthWaitingEstimate( HG.client_controller.network_engine.bandwidth_manager, self._original_subscription.GetName() )
+            estimate = query_header.GetBandwidthWaitingEstimate( CG.client_controller.network_engine.bandwidth_manager, self._original_subscription.GetName() )
             
             if estimate == 0:
                 
@@ -484,7 +486,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             else:
                 
-                pretty_delay = 'bandwidth: ' + HydrusData.TimeDeltaToPrettyTimeDelta( estimate )
+                pretty_delay = 'bandwidth: ' + HydrusTime.TimeDeltaToPrettyTimeDelta( estimate )
                 delay = estimate
                 
             
@@ -523,7 +525,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( clipboard_text ) > 0:
             
-            HG.client_controller.pub( 'clipboard', 'text', clipboard_text )
+            CG.client_controller.pub( 'clipboard', 'text', clipboard_text )
             
         
     
@@ -580,11 +582,11 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 try:
                     
-                    old_query_log_container = HG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_log_container_name )
+                    old_query_log_container = CG.client_controller.Read( 'serialisable_named', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_QUERY_LOG_CONTAINER, query_log_container_name )
                     
                 except HydrusExceptions.DataMissing:
                     
-                    QW.QMessageBox.critical( self, 'Error', 'Some data for this query, "{}" was missing! This should have been dealt with when the dialog launched, so something is very wrong! Please exit the manage subscriptions dialog immediately, pause your subs, and contact hydrus dev!' )
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Important Error!', f'Some data for this query, "{old_query_header.GetQueryText()}" was missing! This should have been dealt with when the dialog launched, so something is very wrong! Please exit the manage subscriptions dialog immediately, pause your subs, and contact hydrus dev!' )
                     
                     return
                     
@@ -610,7 +612,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
                     
                     if edited_query_text != old_query_header.GetQueryText() and edited_query_text in self._GetCurrentQueryTexts():
                         
-                        QW.QMessageBox.warning( self, 'Warning', 'You already have a query for "'+edited_query_text+'"! The edit you just made will not be saved.' )
+                        ClientGUIDialogsMessage.ShowWarning( self, f'You already have a query for "{edited_query_text}"! The edit you just made will not be saved.' )
                         
                         break
                         
@@ -694,7 +696,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         text = os.linesep.join( data_strings )
         
-        HG.client_controller.pub( 'clipboard', 'text', text )
+        CG.client_controller.pub( 'clipboard', 'text', text )
         
     
     def _STARTShowQualityInfo( self ):
@@ -740,7 +742,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         message = os.linesep.join( data_strings )
         
-        QW.QMessageBox.information( self, 'Information', message )
+        ClientGUIDialogsMessage.ShowInformation( self, message )
         
     
     def _ListCtrlCanCheckNow( self ):
@@ -808,29 +810,31 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         try:
             
-            pasted_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            HydrusData.PrintException( e )
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
         
         try:
             
-            pasted_query_texts = HydrusText.DeserialiseNewlinedTexts( pasted_text )
+            pasted_query_texts = HydrusText.DeserialiseNewlinedTexts( raw_text )
             
-        except:
+        except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard!' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'Lines of Queries', e )
             
             return
             
         
         if len( pasted_query_texts ) == 0:
             
-            QW.QMessageBox.warning( self, 'Empty Paste?', 'The clipboard did not seem to have anything in it!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'The clipboard did not seem to have anything in it!' )
             
             return
             
@@ -947,7 +951,7 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( message ) > 0:
             
-            QW.QMessageBox.information( self, 'Information', message )
+            ClientGUIDialogsMessage.ShowInformation( self, message )
             
         
         query_headers = []
@@ -1107,13 +1111,13 @@ class EditSubscriptionPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _UpdateDelayText( self ):
         
-        if HydrusData.TimeHasPassed( self._no_work_until ):
+        if HydrusTime.TimeHasPassed( self._no_work_until ):
             
             status = 'no recent errors'
             
         else:
             
-            status = 'delayed--retrying ' + ClientData.TimestampToPrettyTimeDelta( self._no_work_until, just_now_threshold = 0 ) + ' because: ' + self._no_work_until_reason
+            status = 'delayed--retrying ' + ClientTime.TimestampToPrettyTimeDelta( self._no_work_until, just_now_threshold = 0 ) + ' because: ' + self._no_work_until_reason
             
         
         self._delay_st.setText( status )
@@ -1185,13 +1189,13 @@ class EditSubscriptionQueryPanel( ClientGUIScrolledPanels.EditPanel ):
         self._check_now = QW.QCheckBox( self )
         self._paused = QW.QCheckBox( self )
         
-        self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self, HG.client_controller )
+        self._file_seed_cache_control = ClientGUIFileSeedCache.FileSeedCacheStatusControl( self, CG.client_controller )
         
-        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self, HG.client_controller, True, True, 'search' )
+        self._gallery_seed_log_control = ClientGUIGallerySeedLog.GallerySeedLogStatusControl( self, CG.client_controller, True, True, 'search' )
         
         tag_import_options = query_header.GetTagImportOptions()
         show_downloader_options = False # just for additional tags, no parsing gubbins needed
-        allow_default_selection = True
+        allow_default_selection = False
         
         self._import_options_button = ClientGUIImportOptions.ImportOptionsButton( self, show_downloader_options, allow_default_selection )
         
@@ -1324,7 +1328,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'getting_started_subscriptions.html' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_GETTING_STARTED_SUBSCRIPTIONS )
         
         menu_items.append( ( 'normal', 'open the html subscriptions help', 'Open the help page for subscriptions in your web browser.', page_func ) )
         
@@ -1385,7 +1389,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         QP.AddToLayout( vbox, help_hbox, CC.FLAGS_ON_RIGHT )
         
-        if HG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ):
+        if CG.client_controller.new_options.GetBoolean( 'pause_subs_sync' ):
             
             message = 'SUBSCRIPTIONS ARE CURRENTLY GLOBALLY PAUSED! CHECK THE NETWORK MENU TO UNPAUSE THEM.'
             
@@ -1570,7 +1574,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_latest_new_file_time = ClientData.TimestampToPrettyTimeDelta( latest_new_file_time )
+            pretty_latest_new_file_time = ClientTime.TimestampToPrettyTimeDelta( latest_new_file_time )
             
         
         if last_checked is None or last_checked == 0:
@@ -1579,7 +1583,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_last_checked = ClientData.TimestampToPrettyTimeDelta( last_checked )
+            pretty_last_checked = ClientTime.TimestampToPrettyTimeDelta( last_checked )
             
         
         #
@@ -1627,11 +1631,11 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
-        if HydrusData.TimeHasPassed( no_work_until ):
+        if HydrusTime.TimeHasPassed( no_work_until ):
             
             try:
                 
-                ( min_estimate, max_estimate ) = subscription.GetBandwidthWaitingEstimateMinMax( HG.client_controller.network_engine.bandwidth_manager )
+                ( min_estimate, max_estimate ) = subscription.GetBandwidthWaitingEstimateMinMax( CG.client_controller.network_engine.bandwidth_manager )
                 
                 if max_estimate == 0: # don't seem to be any delays of any kind
                     
@@ -1640,19 +1644,19 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
                     
                 elif min_estimate == 0: # some are good to go, but there are delays
                     
-                    pretty_delay = 'bandwidth: some ok, some up to ' + HydrusData.TimeDeltaToPrettyTimeDelta( max_estimate )
+                    pretty_delay = 'bandwidth: some ok, some up to ' + HydrusTime.TimeDeltaToPrettyTimeDelta( max_estimate )
                     delay = max_estimate
                     
                 else:
                     
                     if min_estimate == max_estimate: # probably just one query, and it is delayed
                         
-                        pretty_delay = 'bandwidth: up to ' + HydrusData.TimeDeltaToPrettyTimeDelta( max_estimate )
+                        pretty_delay = 'bandwidth: up to ' + HydrusTime.TimeDeltaToPrettyTimeDelta( max_estimate )
                         delay = max_estimate
                         
                     else:
                         
-                        pretty_delay = 'bandwidth: from ' + HydrusData.TimeDeltaToPrettyTimeDelta( min_estimate ) + ' to ' + HydrusData.TimeDeltaToPrettyTimeDelta( max_estimate )
+                        pretty_delay = 'bandwidth: from ' + HydrusTime.TimeDeltaToPrettyTimeDelta( min_estimate ) + ' to ' + HydrusTime.TimeDeltaToPrettyTimeDelta( max_estimate )
                         delay = max_estimate
                         
                     
@@ -1665,8 +1669,8 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_delay = 'delayed--retrying ' + ClientData.TimestampToPrettyTimeDelta( no_work_until, just_now_threshold = 0 ) + ' - because: ' + no_work_until_reason
-            delay = HydrusData.GetTimeDeltaUntilTime( no_work_until )
+            pretty_delay = 'delayed--retrying ' + ClientTime.TimestampToPrettyTimeDelta( no_work_until, just_now_threshold = 0 ) + ' - because: ' + no_work_until_reason
+            delay = HydrusTime.GetTimeDeltaUntilTime( no_work_until )
             
         
         file_seed_cache_status = ClientImportSubscriptionQuery.GenerateQueryHeadersStatus( query_headers )
@@ -2029,7 +2033,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def Add( self ):
         
-        gug_key_and_name = HG.client_controller.network_engine.domain_manager.GetDefaultGUGKeyAndName()
+        gug_key_and_name = CG.client_controller.network_engine.domain_manager.GetDefaultGUGKeyAndName()
         
         empty_subscription = ClientImportSubscriptions.Subscription( 'new subscription', gug_key_and_name = gug_key_and_name )
         
@@ -2112,7 +2116,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
             # this should never happen, and we should not have the situation where only cased can be done. if cased can, caseless can, riiiiiight?
             
-            QW.QMessageBox.warning( self, 'Warning', 'There are no apparent duplicates, the dupe data will now be recalculated.' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'There are no apparent duplicates, the dupe data will now be recalculated.' )
             
             self._RegenDupeData()
             
@@ -2134,7 +2138,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( gug_names_to_dupe_query_texts ) == 0:
             
-            QW.QMessageBox.warning( self, 'Warning', 'There are no apparent duplicates, the dupe data will now be recalculated.' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'There are no apparent duplicates, the dupe data will now be recalculated.' )
             
             self._RegenDupeData()
             
@@ -2177,7 +2181,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( potential_dupe_query_texts ) == 0:
             
-            QW.QMessageBox.warning( self, 'Warning', 'Strangely, there are actually no apparent duplicates for this downloader, the dupe data will now be recalculated. Let hydev know about this, please.' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Strangely, there are actually no apparent duplicates for this downloader, the dupe data will now be recalculated. Let hydev know about this, please.' )
             
             self._RegenDupeData()
             
@@ -2293,7 +2297,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 if len( choice_tuples ) == 0:
                     
-                    QW.QMessageBox.warning( self, 'Warning', 'Strangely, there are actually no subscriptions that can do dedupe work for the selected duplicates, the dupe data will now be recalculated. Let hydev know about this, please.' )
+                    ClientGUIDialogsMessage.ShowWarning( self, 'Strangely, there are actually no subscriptions that can do dedupe work for the selected duplicates, the dupe data will now be recalculated. Let hydev know about this, please.' )
                     
                     return
                     
@@ -2506,7 +2510,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
             if len( mergeable_groups ) == 0:
                 
-                QW.QMessageBox.information( self, 'Information', 'Unfortunately, none of those subscriptions appear to be mergeable!' )
+                ClientGUIDialogsMessage.ShowInformation( self, 'Unfortunately, none of those subscriptions appear to be mergeable!' )
                 
                 return
                 
@@ -2635,7 +2639,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( subscriptions ) != 1:
             
-            QW.QMessageBox.critical( self, 'Error', 'Separate only works if one subscription is selected!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Separate only works if one subscription is selected!' )
             
             return
             
@@ -2646,7 +2650,7 @@ class EditSubscriptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if num_queries <= 1:
             
-            QW.QMessageBox.critical( self, 'Error', 'Separate only works if the selected subscription has more than one query!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Separate only works if the selected subscription has more than one query!' )
             
             return
             

@@ -7,13 +7,18 @@ from qtpy import QtGui as QG
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientData
 from hydrus.client.media import ClientMedia
+from hydrus.client.metadata import ClientContentUpdates
 
 # now let's fill out grandparents
 def BuildServiceKeysToChildrenToParents( service_keys_to_simple_children_to_parents ):
+    
+    # TODO: this is not used any more. was it all moved elsewhere? delete if so
     
     # important thing here, and reason why it is recursive, is because we want to preserve the parent-grandparent interleaving in list order
     def AddParentsAndGrandparents( simple_children_to_parents, this_childs_parents, parents ):
@@ -53,6 +58,8 @@ def BuildServiceKeysToChildrenToParents( service_keys_to_simple_children_to_pare
     
 def BuildServiceKeysToSimpleChildrenToParents( service_keys_to_pairs_flat ):
     
+    # TODO: this is not used any more. was it all moved elsewhere? delete if so
+    
     service_keys_to_simple_children_to_parents = collections.defaultdict( HydrusData.default_dict_set )
     
     for ( service_key, pairs ) in service_keys_to_pairs_flat.items():
@@ -62,9 +69,12 @@ def BuildServiceKeysToSimpleChildrenToParents( service_keys_to_pairs_flat ):
     
     return service_keys_to_simple_children_to_parents
     
+
 # take pairs, make dict of child -> parents while excluding loops
 # no grandparents here
 def BuildSimpleChildrenToParents( pairs ):
+    
+    # TODO: move this and Loop guy somewhere better
     
     simple_children_to_parents = HydrusData.default_dict_set()
     
@@ -86,6 +96,8 @@ def BuildSimpleChildrenToParents( pairs ):
     return simple_children_to_parents
     
 def LoopInSimpleChildrenToParents( simple_children_to_parents, child, parent ):
+    
+    # TODO: move this somewhere better
     
     potential_loop_paths = { parent }
     
@@ -249,14 +261,14 @@ class FileViewingStatsManager( object ):
         
         self._pending_updates = {}
         
-        self._last_update = HydrusData.GetNow()
+        self._last_update = HydrusTime.GetNow()
         
         self._my_flush_job = self._controller.CallRepeating( 5, 60, self.REPEATINGFlush )
         
     
-    def _GenerateViewsRow( self, media: ClientMedia.Media, canvas_type: int, view_timestamp: int, viewtime_delta: int ):
+    def _GenerateViewsRow( self, media: ClientMedia.Media, canvas_type: int, view_timestamp_ms: int, viewtime_delta: int ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         viewtime_min = None
         viewtime_max = None
@@ -291,7 +303,7 @@ class FileViewingStatsManager( object ):
         if media.HasDuration() and viewtime_max is not None:
             
             # if user is watching a long vid, save that whole time mate
-            viewtime_max = max( viewtime_max, ( media.GetDurationMS() / 1000 ) * 5 )
+            viewtime_max = max( viewtime_max, ( media.GetMediaResult().GetDuration() ) * 5 )
             
         
         if do_it:
@@ -310,28 +322,28 @@ class FileViewingStatsManager( object ):
                 
             
         
-        return ( canvas_type, ( view_timestamp, result_views_delta, result_viewtime_delta ) )
+        return ( canvas_type, ( view_timestamp_ms, result_views_delta, result_viewtime_delta ) )
         
     
     def _RowMakesChanges( self, row ):
         
-        ( view_timestamp, views_delta, viewtime_delta ) = row
+        ( view_timestamp_ms, views_delta, viewtime_delta ) = row
         
         return views_delta != 0 or viewtime_delta != 0
         
     
     def _PubSubRow( self, hash, canvas_type, row ):
         
-        ( view_timestamp, views_delta, viewtime_delta ) = row
+        ( view_timestamp_ms, views_delta, viewtime_delta ) = row
         
-        pubsub_row = ( hash, canvas_type, view_timestamp, views_delta, viewtime_delta )
+        pubsub_row = ( hash, canvas_type, view_timestamp_ms, views_delta, viewtime_delta )
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_ADD, pubsub_row )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_ADD, pubsub_row )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        HG.client_controller.pub( 'content_updates_data', service_keys_to_content_updates )
-        HG.client_controller.pub( 'content_updates_gui', service_keys_to_content_updates )
+        CG.client_controller.pub( 'content_updates_data', content_update_package )
+        CG.client_controller.pub( 'content_updates_gui', content_update_package )
         
     
     def Flush( self ):
@@ -342,28 +354,28 @@ class FileViewingStatsManager( object ):
                 
                 content_updates = []
                 
-                for ( ( hash, canvas_type ), ( view_timestamp, views_delta, viewtime_delta ) ) in self._pending_updates.items():
+                for ( ( hash, canvas_type ), ( view_timestamp_ms, views_delta, viewtime_delta ) ) in self._pending_updates.items():
                     
-                    row = ( hash, canvas_type, view_timestamp, views_delta, viewtime_delta )
+                    row = ( hash, canvas_type, view_timestamp_ms, views_delta, viewtime_delta )
                     
-                    content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_ADD, row )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILE_VIEWING_STATS, HC.CONTENT_UPDATE_ADD, row )
                     
                     content_updates.append( content_update )
                     
                 
-                service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : content_updates }
+                content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_updates )
                 
                 # non-synchronous, non-publishing
-                self._controller.Write( 'content_updates', service_keys_to_content_updates, publish_content_updates = False )
+                self._controller.Write( 'content_updates', content_update_package, publish_content_updates = False )
                 
                 self._pending_updates = {}
                 
             
         
     
-    def FinishViewing( self, media: ClientMedia.MediaSingleton, canvas_type, view_timestamp, viewtime_delta ):
+    def FinishViewing( self, media: ClientMedia.MediaSingleton, canvas_type, view_timestamp_ms, viewtime_delta ):
         
-        if not HG.client_controller.new_options.GetBoolean( 'file_viewing_statistics_active' ):
+        if not CG.client_controller.new_options.GetBoolean( 'file_viewing_statistics_active' ):
             
             return
             
@@ -372,7 +384,7 @@ class FileViewingStatsManager( object ):
         
         with self._lock:
             
-            ( canvas_type, row ) = self._GenerateViewsRow( media, canvas_type, view_timestamp, viewtime_delta )
+            ( canvas_type, row ) = self._GenerateViewsRow( media, canvas_type, view_timestamp_ms, viewtime_delta )
             
             if not self._RowMakesChanges( row ):
                 
@@ -387,11 +399,11 @@ class FileViewingStatsManager( object ):
                 
             else:
                 
-                ( view_timestamp, views_delta, viewtime_delta ) = row
+                ( view_timestamp_ms, views_delta, viewtime_delta ) = row
                 
-                ( existing_view_timestamp, existing_views_delta, existing_viewtime_delta ) = self._pending_updates[ key ]
+                ( existing_view_timestamp_ms, existing_views_delta, existing_viewtime_delta ) = self._pending_updates[ key ]
                 
-                self._pending_updates[ key ] = ( max( view_timestamp, existing_view_timestamp ), existing_views_delta + views_delta, existing_viewtime_delta + viewtime_delta )
+                self._pending_updates[ key ] = ( max( view_timestamp_ms, existing_view_timestamp_ms ), existing_views_delta + views_delta, existing_viewtime_delta + viewtime_delta )
                 
             
         
@@ -419,11 +431,11 @@ class UndoManager( object ):
         self._controller.sub( self, 'Redo', 'redo' )
         
     
-    def _FilterServiceKeysToContentUpdates( self, service_keys_to_content_updates ):
+    def _FilterContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
-        filtered_service_keys_to_content_updates = {}
+        filtered_content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+        for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
             
             filtered_content_updates = []
             
@@ -433,7 +445,7 @@ class UndoManager( object ):
                 
                 if data_type == HC.CONTENT_TYPE_FILES:
                     
-                    if action in ( HC.CONTENT_UPDATE_ADD, HC.CONTENT_UPDATE_DELETE, HC.CONTENT_UPDATE_UNDELETE, HC.CONTENT_UPDATE_RESCIND_PETITION, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD ):
+                    if action in ( HC.CONTENT_UPDATE_ADD, HC.CONTENT_UPDATE_DELETE, HC.CONTENT_UPDATE_UNDELETE, HC.CONTENT_UPDATE_RESCIND_PETITION, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, HC.CONTENT_UPDATE_DELETE_FROM_SOURCE_AFTER_MIGRATE ):
                         
                         continue
                         
@@ -450,25 +462,25 @@ class UndoManager( object ):
                     continue
                     
                 
-                filtered_content_update = HydrusData.ContentUpdate( data_type, action, row )
+                filtered_content_update = ClientContentUpdates.ContentUpdate( data_type, action, row )
                 
                 filtered_content_updates.append( filtered_content_update )
                 
             
             if len( filtered_content_updates ) > 0:
                 
-                filtered_service_keys_to_content_updates[ service_key ] = filtered_content_updates
+                filtered_content_update_package.AddContentUpdates( service_key, filtered_content_updates )
                 
             
         
-        return filtered_service_keys_to_content_updates
+        return filtered_content_update_package
         
     
-    def _InvertServiceKeysToContentUpdates( self, service_keys_to_content_updates ):
+    def _InvertContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
-        inverted_service_keys_to_content_updates = {}
+        inverted_content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+        for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
             
             inverted_content_updates = []
             
@@ -485,6 +497,10 @@ class UndoManager( object ):
                     elif action == HC.CONTENT_UPDATE_PEND: inverted_action = HC.CONTENT_UPDATE_RESCIND_PEND
                     elif action == HC.CONTENT_UPDATE_RESCIND_PEND: inverted_action = HC.CONTENT_UPDATE_PEND
                     elif action == HC.CONTENT_UPDATE_PETITION: inverted_action = HC.CONTENT_UPDATE_RESCIND_PETITION
+                    else:
+                        
+                        continue
+                        
                     
                 elif data_type == HC.CONTENT_TYPE_MAPPINGS:
                     
@@ -493,17 +509,25 @@ class UndoManager( object ):
                     elif action == HC.CONTENT_UPDATE_PEND: inverted_action = HC.CONTENT_UPDATE_RESCIND_PEND
                     elif action == HC.CONTENT_UPDATE_RESCIND_PEND: inverted_action = HC.CONTENT_UPDATE_PEND
                     elif action == HC.CONTENT_UPDATE_PETITION: inverted_action = HC.CONTENT_UPDATE_RESCIND_PETITION
+                    else:
+                        
+                        continue
+                        
+                    
+                else:
+                    
+                    continue
                     
                 
-                inverted_content_update = HydrusData.ContentUpdate( data_type, inverted_action, inverted_row )
+                inverted_content_update = ClientContentUpdates.ContentUpdate( data_type, inverted_action, inverted_row )
                 
                 inverted_content_updates.append( inverted_content_update )
                 
             
-            inverted_service_keys_to_content_updates[ service_key ] = inverted_content_updates
+            inverted_content_update_package.AddContentUpdates( service_key, inverted_content_updates )
             
         
-        return inverted_service_keys_to_content_updates
+        return inverted_content_update_package
         
     
     def AddCommand( self, action, *args, **kwargs ):
@@ -516,19 +540,28 @@ class UndoManager( object ):
             
             if action == 'content_updates':
                 
-                ( service_keys_to_content_updates, ) = args
+                ( content_update_package, ) = args
                 
-                service_keys_to_content_updates = self._FilterServiceKeysToContentUpdates( service_keys_to_content_updates )
+                content_update_package = self._FilterContentUpdatePackage( content_update_package )
                 
-                if len( service_keys_to_content_updates ) == 0: return
+                if not content_update_package.HasContent():
+                    
+                    return
+                    
                 
-                inverted_service_keys_to_content_updates = self._InvertServiceKeysToContentUpdates( service_keys_to_content_updates )
+                inverted_content_update_package = self._InvertContentUpdatePackage( content_update_package )
                 
-                if len( inverted_service_keys_to_content_updates ) == 0: return
+                if not inverted_content_update_package.HasContent():
+                    
+                    return
+                    
                 
-                inverted_args = ( inverted_service_keys_to_content_updates, )
+                inverted_args = ( inverted_content_update_package, )
                 
-            else: return
+            else:
+                
+                return
+                
             
             self._commands = self._commands[ : self._current_index ]
             self._inverted_commands = self._inverted_commands[ : self._current_index ]
@@ -557,9 +590,9 @@ class UndoManager( object ):
                 
                 if action == 'content_updates':
                     
-                    ( service_keys_to_content_updates, ) = args
+                    ( content_update_package, ) = args
                     
-                    undo_string = 'undo ' + ClientData.ConvertServiceKeysToContentUpdatesToPrettyString( service_keys_to_content_updates )
+                    undo_string = 'undo ' + content_update_package.ToString()
                     
                 
             
@@ -571,9 +604,9 @@ class UndoManager( object ):
                 
                 if action == 'content_updates':
                     
-                    ( service_keys_to_content_updates, ) = args
+                    ( content_update_package, ) = args
                     
-                    redo_string = 'redo ' + ClientData.ConvertServiceKeysToContentUpdatesToPrettyString( service_keys_to_content_updates )
+                    redo_string = 'redo ' + content_update_package.ToString()
                     
                 
             

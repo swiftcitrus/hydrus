@@ -155,7 +155,7 @@ def FilterNamespaces( tags, namespaces ):
     
     for namespace in namespaces:
         
-        if namespace == None:
+        if namespace is None:
             
             result.update( processed_tags[ '' ] )
             
@@ -436,39 +436,6 @@ class TagFilter( HydrusSerialisable.SerialisableBase ):
         
     
     def _TagOK( self, tag, apply_unnamespaced_rules_to_namespaced_tags = False ):
-        
-        # old method, has a bunch of overhead due to iteration
-        '''
-        blacklist_encountered = False
-        
-        for tag_slice in self._IterateTagSlices( tag, apply_unnamespaced_rules_to_namespaced_tags = apply_unnamespaced_rules_to_namespaced_tags ):
-            
-            if tag_slice in self._tag_slices_to_rules:
-                
-                rule = self._tag_slices_to_rules[ tag_slice ]
-                
-                if rule == HC.FILTER_WHITELIST:
-                    
-                    return True # there is an exception for this class of tag
-                    
-                elif rule == HC.FILTER_BLACKLIST: # there is a rule against this class of tag
-                    
-                    blacklist_encountered = True
-                    
-                
-            
-        
-        if blacklist_encountered: # rule against and no exceptions
-            
-            return False
-            
-        else:
-            
-            return True # no rules against or explicitly for, so permitted
-            
-        '''
-        
-        #
         
         # since this is called a whole bunch and overhead piles up, we are now splaying the logic out to hardcoded tests
         
@@ -764,9 +731,17 @@ class TagFilter( HydrusSerialisable.SerialisableBase ):
     
     def SetRule( self, tag_slice, rule ):
         
+        self.SetRules( ( tag_slice, ), rule )
+        
+    
+    def SetRules( self, tag_slices, rule ):
+        
         with self._lock:
             
-            self._tag_slices_to_rules[ tag_slice ] = rule
+            for tag_slice in tag_slices:
+                
+                self._tag_slices_to_rules[ tag_slice ] = rule
+                
             
             self._UpdateRuleCache()
             

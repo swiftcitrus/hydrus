@@ -16,17 +16,20 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNATPunch
 from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworkVariableHandling
 from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientFiles
 from hydrus.client import ClientThreading
+from hydrus.client import ClientTime
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.importing import ClientImporting
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientRatings
 from hydrus.client.networking import ClientNetworkingContexts
 from hydrus.client.networking import ClientNetworkingJobs
@@ -238,7 +241,7 @@ class Service( object ):
         
         self._dirty = True
         
-        HG.client_controller.pub( 'service_updated', self )
+        CG.client_controller.pub( 'service_updated', self )
         
     
     def CheckFunctional( self ) -> bool:
@@ -802,11 +805,26 @@ class ServiceLocalRatingNumerical( ServiceLocalRatingStars ):
     
     def ConvertStarsToRating( self, stars: int ) -> float:
         
+        if stars > self._num_stars:
+            
+            stars = self._num_stars
+            
+        
         if self._allow_zero:
+            
+            if stars < 0:
+                
+                stars = 0
+                
             
             rating = stars / self._num_stars
             
         else:
+            
+            if stars < 1:
+                
+                stars = 1
+                
             
             rating = ( stars - 1 ) / ( self._num_stars - 1 )
             
@@ -857,12 +875,12 @@ class ServiceRemote( Service ):
             duration = self._GetErrorWaitPeriod()
             
         
-        next_no_requests_until = HydrusData.GetNow() + duration
+        next_no_requests_until = HydrusTime.GetNow() + duration
         
         if next_no_requests_until > self._no_requests_until:
             
             self._no_requests_reason = reason
-            self._no_requests_until = HydrusData.GetNow() + duration
+            self._no_requests_until = HydrusTime.GetNow() + duration
             
         
         self._SetDirty()
@@ -894,16 +912,16 @@ class ServiceRemote( Service ):
     
     def _CheckCanCommunicateExternally( self, including_bandwidth = True ):
         
-        if not HydrusData.TimeHasPassed( self._no_requests_until ):
+        if not HydrusTime.TimeHasPassed( self._no_requests_until ):
             
-            raise HydrusExceptions.InsufficientCredentialsException( self._no_requests_reason + ' - next request ' + ClientData.TimestampToPrettyTimeDelta( self._no_requests_until ) )
+            raise HydrusExceptions.InsufficientCredentialsException( self._no_requests_reason + ' - next request ' + ClientTime.TimestampToPrettyTimeDelta( self._no_requests_until ) )
             
         
         if including_bandwidth:
             
             example_nj = ClientNetworkingJobs.NetworkJobHydrus( self._service_key, 'GET', self._GetBaseURL() )
             
-            can_start = HG.client_controller.network_engine.bandwidth_manager.CanDoWork( example_nj.GetNetworkContexts(), threshold = 60 )
+            can_start = CG.client_controller.network_engine.bandwidth_manager.CanDoWork( example_nj.GetNetworkContexts(), threshold = 60 )
             
             if not can_start:
                 
@@ -949,7 +967,7 @@ class ServiceRemote( Service ):
         
         with self._lock:
             
-            return HG.client_controller.network_engine.bandwidth_manager.GetCurrentMonthSummary( self.network_context )
+            return CG.client_controller.network_engine.bandwidth_manager.GetCurrentMonthSummary( self.network_context )
             
         
     
@@ -957,7 +975,7 @@ class ServiceRemote( Service ):
         
         with self._lock:
             
-            return HG.client_controller.network_engine.bandwidth_manager.GetBandwidthStringsAndGaugeTuples( self.network_context )
+            return CG.client_controller.network_engine.bandwidth_manager.GetBandwidthStringsAndGaugeTuples( self.network_context )
             
         
     
@@ -1000,15 +1018,15 @@ class ServiceRestricted( ServiceRemote ):
         
         self._account = HydrusNetwork.Account.GenerateUnknownAccount( account_key )
         
-        HG.client_controller.pub( 'notify_account_sync_due' )
+        CG.client_controller.pub( 'notify_account_sync_due' )
         
-        self._next_account_sync = HydrusData.GetNow()
+        self._next_account_sync = HydrusTime.GetNow()
         
-        HG.client_controller.network_engine.session_manager.ClearSession( self.network_context )
+        CG.client_controller.network_engine.session_manager.ClearSession( self.network_context )
         
         self._SetDirty()
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
     
     def _DealWithFundamentalNetworkError( self ):
@@ -1017,11 +1035,11 @@ class ServiceRestricted( ServiceRemote ):
         
         self._account = HydrusNetwork.Account.GenerateUnknownAccount( account_key )
         
-        self._next_account_sync = HydrusData.GetNow() + ACCOUNT_SYNC_PERIOD
+        self._next_account_sync = HydrusTime.GetNow() + ACCOUNT_SYNC_PERIOD
         
         self._SetDirty()
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
     
     def _GetErrorWaitPeriod( self ):
@@ -1081,11 +1099,11 @@ class ServiceRestricted( ServiceRemote ):
         
         self._account = HydrusNetwork.Account.GenerateUnknownAccount( account_key )
         
-        self._next_account_sync = HydrusData.GetNow()
+        self._next_account_sync = HydrusTime.GetNow()
         
         self._SetDirty()
         
-        HG.client_controller.pub( 'notify_account_sync_due' )
+        CG.client_controller.pub( 'notify_account_sync_due' )
         
     
     def _GetSerialisableDictionary( self ):
@@ -1165,13 +1183,13 @@ class ServiceRestricted( ServiceRemote ):
     
     def GetNextAccountSyncStatus( self ):
         
-        if HydrusData.TimeHasPassed( self._next_account_sync ):
+        if HydrusTime.TimeHasPassed( self._next_account_sync ):
             
             s = 'imminently'
             
         else:
             
-            s = ClientData.TimestampToPrettyTimeDelta( self._next_account_sync )
+            s = ClientTime.TimestampToPrettyTimeDelta( self._next_account_sync )
             
         
         return 'next account sync ' + s
@@ -1251,11 +1269,11 @@ class ServiceRestricted( ServiceRemote ):
             paused = self._network_sync_paused
             
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
         if not paused:
             
-            HG.client_controller.pub( 'notify_new_permissions' )
+            CG.client_controller.pub( 'notify_new_permissions' )
             
         
     
@@ -1339,7 +1357,7 @@ class ServiceRestricted( ServiceRemote ):
                 network_job.AddAdditionalHeader( 'Content-Type', HC.mime_mimetype_string_lookup[ content_type ] )
                 
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
@@ -1381,7 +1399,7 @@ class ServiceRestricted( ServiceRemote ):
                     
                 elif isinstance( e, HydrusExceptions.SessionException ):
                     
-                    HG.client_controller.network_engine.session_manager.ClearSession( self.network_context )
+                    CG.client_controller.network_engine.session_manager.ClearSession( self.network_context )
                     
                 elif isinstance( e, ( HydrusExceptions.MissingCredentialsException, HydrusExceptions.InsufficientCredentialsException, HydrusExceptions.ConflictException ) ):
                     
@@ -1409,12 +1427,12 @@ class ServiceRestricted( ServiceRemote ):
         
         with self._lock:
             
-            self._next_account_sync = HydrusData.GetNow() - 1
+            self._next_account_sync = HydrusTime.GetNow() - 1
             
             self._SetDirty()
             
         
-        HG.client_controller.pub( 'notify_account_sync_due' )
+        CG.client_controller.pub( 'notify_account_sync_due' )
         
     
     def SetClean( self ):
@@ -1446,13 +1464,13 @@ class ServiceRestricted( ServiceRemote ):
                     
                     do_it = False
                     
-                    self._next_account_sync = HydrusData.GetNow() + SHORT_DELAY_PERIOD
+                    self._next_account_sync = HydrusTime.GetNow() + SHORT_DELAY_PERIOD
                     
                     self._SetDirty()
                     
                 else:
                     
-                    do_it = HydrusData.TimeHasPassed( self._next_account_sync )
+                    do_it = HydrusTime.TimeHasPassed( self._next_account_sync )
                     
                 
             
@@ -1469,7 +1487,7 @@ class ServiceRestricted( ServiceRemote ):
                     
                     ( message, message_created ) = self._account.GetMessageAndTimestamp()
                     
-                    if message != '' and message_created != original_message_created and not HydrusData.TimeHasPassed( message_created + ( 86400 * 5 ) ):
+                    if message != '' and message_created != original_message_created and not HydrusTime.TimeHasPassed( message_created + ( 86400 * 5 ) ):
                         
                         m = 'New message for your account on {}:'.format( self._name )
                         m += os.linesep * 2
@@ -1510,7 +1528,7 @@ class ServiceRestricted( ServiceRemote ):
                             
                             tag_filter = tag_filter_response[ 'tag_filter' ]
                             
-                            if 'tag_filter' in self._service_options and HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+                            if 'tag_filter' in self._service_options and CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
                                 
                                 old_tag_filter = self._service_options[ 'tag_filter' ]
                                 
@@ -1570,13 +1588,13 @@ class ServiceRestricted( ServiceRemote ):
                 
                 with self._lock:
                     
-                    self._next_account_sync = HydrusData.GetNow() + ACCOUNT_SYNC_PERIOD
+                    self._next_account_sync = HydrusTime.GetNow() + ACCOUNT_SYNC_PERIOD
                     
                     self._SetDirty()
                     
                 
-                HG.client_controller.pub( 'notify_new_permissions' )
-                HG.client_controller.pub( 'important_dirt_to_clean' )
+                CG.client_controller.pub( 'notify_new_permissions' )
+                CG.client_controller.pub( 'important_dirt_to_clean' )
                 
             
         
@@ -1609,12 +1627,12 @@ class ServiceRepository( ServiceRestricted ):
     
     def _CanSyncProcess( self ):
         
-        return not ( self._update_processing_paused or HG.client_controller.new_options.GetBoolean( 'pause_repo_sync' ) )
+        return not ( self._update_processing_paused or CG.client_controller.new_options.GetBoolean( 'pause_repo_sync' ) )
         
     
     def _CheckFunctional( self, including_external_communication = True, including_bandwidth = True, including_account = True ):
         
-        if HG.client_controller.new_options.GetBoolean( 'pause_repo_sync' ):
+        if CG.client_controller.new_options.GetBoolean( 'pause_repo_sync' ):
             
             raise HydrusExceptions.ConflictException( 'All repositories are paused!' )
             
@@ -1704,7 +1722,7 @@ class ServiceRepository( ServiceRestricted ):
             return
             
         
-        it_took = HydrusData.GetNowPrecise() - precise_timestamp
+        it_took = HydrusTime.GetNowPrecise() - precise_timestamp
         
         rows_s = HydrusData.ToHumanInt( int( total_rows / it_took ) )
         
@@ -1713,20 +1731,20 @@ class ServiceRepository( ServiceRestricted ):
         HydrusData.Print( summary )
         
     
-    def _ReportOngoingRowSpeed( self, job_key, rows_done, total_rows, precise_timestamp, rows_done_in_last_packet, row_name ):
+    def _ReportOngoingRowSpeed( self, job_status, rows_done, total_rows, precise_timestamp, rows_done_in_last_packet, row_name ):
         
-        it_took = HydrusData.GetNowPrecise() - precise_timestamp
+        it_took = HydrusTime.GetNowPrecise() - precise_timestamp
         
         rows_s = HydrusData.ToHumanInt( int( rows_done_in_last_packet / it_took ) )
         
         popup_message = '{} {}: processing at {} rows/s'.format( row_name, HydrusData.ConvertValueRangeToPrettyString( rows_done, total_rows ), rows_s )
         
-        HG.client_controller.frame_splash_status.SetText( popup_message, print_to_log = False )
-        job_key.SetStatusText( popup_message, 2 )
+        CG.client_controller.frame_splash_status.SetText( popup_message, print_to_log = False )
+        job_status.SetStatusText( popup_message, 2 )
         
         if HG.profile_mode:
             
-            HG.client_controller.PrintProfile( popup_message )
+            CG.client_controller.PrintProfile( popup_message )
             
         
     
@@ -1784,11 +1802,11 @@ class ServiceRepository( ServiceRestricted ):
             
             if do_a_full_metadata_resync:
                 
-                HG.client_controller.WriteSynchronous( 'set_repository_update_hashes', service_key, metadata_slice )
+                CG.client_controller.WriteSynchronous( 'set_repository_update_hashes', service_key, metadata_slice )
                 
             else:
                 
-                HG.client_controller.WriteSynchronous( 'associate_repository_update_hashes', service_key, metadata_slice )
+                CG.client_controller.WriteSynchronous( 'associate_repository_update_hashes', service_key, metadata_slice )
                 
             
             with self._lock:
@@ -1822,25 +1840,25 @@ class ServiceRepository( ServiceRestricted ):
             service_key = self._service_key
             
         
-        update_hashes = HG.client_controller.Read( 'missing_repository_update_hashes', service_key )
+        update_hashes = CG.client_controller.Read( 'missing_repository_update_hashes', service_key )
         
         if len( update_hashes ) > 0:
             
-            job_key = ClientThreading.JobKey( cancellable = True, stop_time = stop_time )
+            job_status = ClientThreading.JobStatus( cancellable = True, stop_time = stop_time )
             
             try:
                 
-                job_key.SetStatusTitle( name + ' sync: downloading updates' )
+                job_status.SetStatusTitle( name + ' sync: downloading updates' )
                 
-                HG.client_controller.pub( 'message', job_key )
+                CG.client_controller.pub( 'message', job_status )
                 
                 for ( i, update_hash ) in enumerate( update_hashes ):
                     
                     status = 'update ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( update_hashes ) )
                     
-                    HG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
-                    job_key.SetStatusText( status )
-                    job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( update_hashes ) ) )
+                    CG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
+                    job_status.SetStatusText( status )
+                    job_status.SetVariable( 'popup_gauge_1', ( i + 1, len( update_hashes ) ) )
                     
                     with self._lock:
                         
@@ -1850,7 +1868,7 @@ class ServiceRepository( ServiceRestricted ):
                             
                         
                     
-                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                     
                     if should_quit:
                         
@@ -1946,7 +1964,7 @@ class ServiceRepository( ServiceRestricted ):
                     
                     try:
                         
-                        HG.client_controller.WriteSynchronous( 'import_update', update_network_string, update_hash, mime )
+                        CG.client_controller.WriteSynchronous( 'import_update', update_network_string, update_hash, mime )
                         
                     except Exception as e:
                         
@@ -1965,13 +1983,12 @@ class ServiceRepository( ServiceRestricted ):
                         
                     
                 
-                job_key.SetStatusText( 'finished' )
-                job_key.DeleteVariable( 'popup_gauge_1' )
+                job_status.SetStatusText( 'finished' )
+                job_status.DeleteVariable( 'popup_gauge_1' )
                 
             finally:
                 
-                job_key.Finish()
-                job_key.Delete( 5 )
+                job_status.FinishAndDismiss( 5 )
                 
             
         
@@ -1986,7 +2003,7 @@ class ServiceRepository( ServiceRestricted ):
                 
             
         
-        if HG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
+        if CG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ):
             
             return
             
@@ -1995,15 +2012,15 @@ class ServiceRepository( ServiceRestricted ):
         
         try:
             
-            job_key = ClientThreading.JobKey( cancellable = True, maintenance_mode = maintenance_mode, stop_time = stop_time )
+            job_status = ClientThreading.JobStatus( cancellable = True, maintenance_mode = maintenance_mode, stop_time = stop_time )
             
             title = '{} sync: processing updates'.format( self._name )
             
-            job_key.SetStatusTitle( title )
+            job_status.SetStatusTitle( title )
             
             content_types_to_process = self._GetContentTypesWeAreProcessing()
             
-            ( this_is_first_definitions_work, definition_hashes_and_content_types, this_is_first_content_work, content_hashes_and_content_types ) = HG.client_controller.Read( 'repository_update_hashes_to_process', self._service_key, content_types_to_process )
+            ( this_is_first_definitions_work, definition_hashes_and_content_types, this_is_first_content_work, content_hashes_and_content_types ) = CG.client_controller.Read( 'repository_update_hashes_to_process', self._service_key, content_types_to_process )
             
             if len( definition_hashes_and_content_types ) == 0 and len( content_hashes_and_content_types ) == 0:
                 
@@ -2020,8 +2037,8 @@ class ServiceRepository( ServiceRestricted ):
             num_updates_done = 0
             num_updates_to_do = len( definition_hashes_and_content_types ) + len( content_hashes_and_content_types )
             
-            HG.client_controller.pub( 'message', job_key )
-            HG.client_controller.frame_splash_status.SetTitleText( title, print_to_log = False )
+            CG.client_controller.pub( 'message', job_status )
+            CG.client_controller.frame_splash_status.SetTitleText( title, print_to_log = False )
             
             total_definition_rows_completed = 0
             total_content_rows_completed = 0
@@ -2029,7 +2046,7 @@ class ServiceRepository( ServiceRestricted ):
             did_definition_analyze = False
             did_content_analyze = False
             
-            definition_start_time = HydrusData.GetNowPrecise()
+            definition_start_time = HydrusTime.GetNowPrecise()
             
             try:
                 
@@ -2039,22 +2056,22 @@ class ServiceRepository( ServiceRestricted ):
                     
                     splash_title = '{} sync: processing updates {}'.format( self._name, progress_string )
                     
-                    HG.client_controller.frame_splash_status.SetTitleText( splash_title, clear_undertexts = False, print_to_log = False )
+                    CG.client_controller.frame_splash_status.SetTitleText( splash_title, clear_undertexts = False, print_to_log = False )
                     
                     status = 'processing {}'.format( progress_string )
                     
-                    job_key.SetStatusText( status )
-                    job_key.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
+                    job_status.SetStatusText( status )
+                    job_status.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
                     
                     try:
                         
-                        update_path = HG.client_controller.client_files_manager.GetFilePath( definition_hash, HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS )
+                        update_path = CG.client_controller.client_files_manager.GetFilePath( definition_hash, HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS )
                         
                     except HydrusExceptions.FileMissingException:
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear/fix orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -2068,14 +2085,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                     except:
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
                         
                         raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
                     
                     if not isinstance( definition_update, HydrusNetwork.DefinitionsUpdate ):
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
                         raise Exception( 'An unusual error has occured during repository processing: a definition update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( definition_hash.hex() ) )
                         
@@ -2090,58 +2107,60 @@ class ServiceRepository( ServiceRestricted ):
                     
                     while len( iterator_dict ) > 0:
                         
-                        this_work_start_time = HydrusData.GetNowPrecise()
+                        this_work_start_time = HydrusTime.GetNowPrecise()
                         
-                        if HG.client_controller.CurrentlyVeryIdle():
+                        if CG.client_controller.CurrentlyVeryIdle():
                             
-                            work_time = 30
-                            break_percentage = 0.03
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_very_idle' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_very_idle' ) / 100
                             
-                        elif HG.client_controller.CurrentlyIdle():
+                        elif CG.client_controller.CurrentlyIdle():
                             
-                            work_time = 10
-                            break_percentage = 0.05
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_idle' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_idle' ) / 100
                             
                         else:
                             
-                            work_time = 0.5
-                            break_percentage = 0.1
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_normal' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_normal' ) / 100
                             
                         
-                        start_time = HydrusData.GetNowPrecise()
+                        start_time = HydrusTime.GetNowPrecise()
                         
-                        num_rows_done = HG.client_controller.WriteSynchronous( 'process_repository_definitions', self._service_key, definition_hash, iterator_dict, content_types, job_key, work_time )
+                        num_rows_done = CG.client_controller.WriteSynchronous( 'process_repository_definitions', self._service_key, definition_hash, iterator_dict, content_types, job_status, work_time )
                         
-                        time_it_took = HydrusData.GetNowPrecise() - start_time
+                        time_it_took = HydrusTime.GetNowPrecise() - start_time
                         
                         rows_done_in_this_update += num_rows_done
                         total_definition_rows_completed += num_rows_done
                         
                         work_done = True
                         
-                        if this_is_first_definitions_work and total_definition_rows_completed > 1000 and not did_definition_analyze:
+                        if ( this_is_first_definitions_work or total_definition_rows_completed > 10000 ) and not did_definition_analyze:
                             
-                            HG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode, stop_time = stop_time )
+                            CG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode )
                             
                             did_definition_analyze = True
                             
                         
-                        if HG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_key.IsCancelled():
+                        if CG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_status.IsCancelled():
                             
                             return
                             
                         
-                        time.sleep( break_percentage * time_it_took )
+                        reasonable_work_time = min( 5 * work_time, time_it_took )
                         
-                        self._ReportOngoingRowSpeed( job_key, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'definitions' )
+                        time.sleep( reasonable_work_time * rest_ratio )
+                        
+                        self._ReportOngoingRowSpeed( job_status, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'definitions' )
                         
                     
                     num_updates_done += 1
                     
                 
-                if this_is_first_definitions_work and not did_definition_analyze:
+                if ( this_is_first_definitions_work or total_definition_rows_completed > 10000 ) and not did_definition_analyze:
                     
-                    HG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode, stop_time = stop_time )
+                    CG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode )
                     
                     did_definition_analyze = True
                     
@@ -2151,12 +2170,12 @@ class ServiceRepository( ServiceRestricted ):
                 self._LogFinalRowSpeed( definition_start_time, total_definition_rows_completed, 'definitions' )
                 
             
-            if HG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_key.IsCancelled():
+            if CG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_status.IsCancelled():
                 
                 return
                 
             
-            content_start_time = HydrusData.GetNowPrecise()
+            content_start_time = HydrusTime.GetNowPrecise()
             
             try:
                 
@@ -2166,22 +2185,22 @@ class ServiceRepository( ServiceRestricted ):
                     
                     splash_title = '{} sync: processing updates {}'.format( self._name, progress_string )
                     
-                    HG.client_controller.frame_splash_status.SetTitleText( splash_title, clear_undertexts = False, print_to_log = False )
+                    CG.client_controller.frame_splash_status.SetTitleText( splash_title, clear_undertexts = False, print_to_log = False )
                     
                     status = 'processing {}'.format( progress_string )
                     
-                    job_key.SetStatusText( status )
-                    job_key.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
+                    job_status.SetStatusText( status )
+                    job_status.SetVariable( 'popup_gauge_1', ( num_updates_done, num_updates_to_do ) )
                     
                     try:
                         
-                        update_path = HG.client_controller.client_files_manager.GetFilePath( content_hash, HC.APPLICATION_HYDRUS_UPDATE_CONTENT )
+                        update_path = CG.client_controller.client_files_manager.GetFilePath( content_hash, HC.APPLICATION_HYDRUS_UPDATE_CONTENT )
                         
                     except HydrusExceptions.FileMissingException:
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_PRESENCE_REMOVE_RECORD )
                         
-                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
+                        raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was missing. Your repository should be paused, and all update files have been scheduled for a presence check. I recommend you run _database->maintenance->clear/fix orphan file records_ too. Please then permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     with open( update_path, 'rb' ) as f:
@@ -2195,14 +2214,14 @@ class ServiceRepository( ServiceRestricted ):
                         
                     except:
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_INTEGRITY_DATA_REMOVE_RECORD )
                         
                         raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) was invalid. Your repository should be paused, and all update files have been scheduled for an integrity check. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
                     
                     if not isinstance( content_update, HydrusNetwork.ContentUpdate ):
                         
-                        HG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
+                        CG.client_controller.WriteSynchronous( 'schedule_repository_update_file_maintenance', self._service_key, ClientFiles.REGENERATE_FILE_DATA_JOB_FILE_METADATA )
                         
                         raise Exception( 'An unusual error has occured during repository processing: a content update file ({}) has incorrect metadata. Your repository should be paused, and all update files have been scheduled for a metadata rescan. Please permit file maintenance under _database->file maintenance->manage scheduled jobs_ to finish its new work, which should fix this, before unpausing your repository.'.format( content_hash.hex() ) )
                         
@@ -2238,58 +2257,60 @@ class ServiceRepository( ServiceRestricted ):
                     
                     while len( iterator_dict ) > 0:
                         
-                        this_work_start_time = HydrusData.GetNowPrecise()
+                        this_work_start_time = HydrusTime.GetNowPrecise()
                         
-                        if HG.client_controller.CurrentlyVeryIdle():
+                        if CG.client_controller.CurrentlyVeryIdle():
                             
-                            work_time = 30
-                            break_percentage = 0.03
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_very_idle' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_very_idle' ) / 100
                             
-                        elif HG.client_controller.CurrentlyIdle():
+                        elif CG.client_controller.CurrentlyIdle():
                             
-                            work_time = 10
-                            break_percentage = 0.05
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_idle' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_idle' ) / 100
                             
                         else:
                             
-                            work_time = 0.5
-                            break_percentage = 0.1
+                            work_time = CG.client_controller.new_options.GetInteger( 'repository_processing_work_time_ms_normal' ) / 1000
+                            rest_ratio = CG.client_controller.new_options.GetInteger( 'repository_processing_rest_percentage_normal' ) / 100
                             
                         
-                        start_time = HydrusData.GetNowPrecise()
+                        start_time = HydrusTime.GetNowPrecise()
                         
-                        num_rows_done = HG.client_controller.WriteSynchronous( 'process_repository_content', self._service_key, content_hash, iterator_dict, content_types, job_key, work_time )
+                        num_rows_done = CG.client_controller.WriteSynchronous( 'process_repository_content', self._service_key, content_hash, iterator_dict, content_types, job_status, work_time )
                         
-                        time_it_took = HydrusData.GetNowPrecise() - start_time
+                        time_it_took = HydrusTime.GetNowPrecise() - start_time
                         
                         rows_done_in_this_update += num_rows_done
                         total_content_rows_completed += num_rows_done
                         
                         work_done = True
                         
-                        if this_is_first_content_work and total_content_rows_completed > 1000 and not did_content_analyze:
+                        if ( this_is_first_content_work or total_content_rows_completed > 10000 ) and not did_content_analyze:
                             
-                            HG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode, stop_time = stop_time )
+                            CG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode )
                             
                             did_content_analyze = True
                             
                         
-                        if HG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_key.IsCancelled():
+                        if CG.client_controller.ShouldStopThisWork( maintenance_mode, stop_time = stop_time ) or job_status.IsCancelled():
                             
                             return
                             
                         
-                        time.sleep( break_percentage * time_it_took )
+                        reasonable_work_time = min( 5 * work_time, time_it_took )
                         
-                        self._ReportOngoingRowSpeed( job_key, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'content rows' )
+                        time.sleep( reasonable_work_time * rest_ratio )
+                        
+                        self._ReportOngoingRowSpeed( job_status, rows_done_in_this_update, rows_in_this_update, this_work_start_time, num_rows_done, 'content rows' )
                         
                     
                     num_updates_done += 1
                     
                 
-                if this_is_first_content_work and not did_content_analyze:
+                if ( this_is_first_content_work or total_content_rows_completed > 10000 ) and not did_content_analyze:
                     
-                    HG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode, stop_time = stop_time )
+                    CG.client_controller.WriteSynchronous( 'analyze', maintenance_mode = maintenance_mode )
                     
                     did_content_analyze = True
                     
@@ -2320,7 +2341,7 @@ class ServiceRepository( ServiceRestricted ):
                 self._SetDirty()
                 
             
-            HG.client_controller.pub( 'important_dirt_to_clean' )
+            CG.client_controller.pub( 'important_dirt_to_clean' )
             
             
         finally:
@@ -2334,16 +2355,15 @@ class ServiceRepository( ServiceRestricted ):
                     self._SetDirty()
                     
                 
-                HG.client_controller.pub( 'notify_new_force_refresh_tags_data' )
-                HG.client_controller.pub( 'notify_new_tag_display_application' )
+                CG.client_controller.pub( 'notify_new_force_refresh_tags_data' )
+                CG.client_controller.pub( 'notify_new_tag_display_application' )
                 
             
-            job_key.DeleteStatusText()
-            job_key.DeleteStatusText( 2 )
-            job_key.DeleteVariable( 'popup_gauge_1' )
+            job_status.DeleteStatusText()
+            job_status.DeleteStatusText( 2 )
+            job_status.DeleteVariable( 'popup_gauge_1' )
             
-            job_key.Finish()
-            job_key.Delete( 3 )
+            job_status.FinishAndDismiss( 3 )
             
         
     
@@ -2373,7 +2393,7 @@ class ServiceRepository( ServiceRestricted ):
         
         content_types_we_are_processing = self._GetContentTypesWeAreProcessing()
         
-        ( num_local_updates, num_updates, content_types_to_num_processed_updates, content_types_to_num_updates ) = HG.client_controller.Read( 'repository_progress', service_key )
+        ( num_local_updates, num_updates, content_types_to_num_processed_updates, content_types_to_num_updates ) = CG.client_controller.Read( 'repository_progress', service_key )
         
         for ( content_type, num_processed_updates ) in content_types_to_num_processed_updates.items():
             
@@ -2419,8 +2439,8 @@ class ServiceRepository( ServiceRestricted ):
             self._SetDirty()
             
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
-        HG.client_controller.pub( 'notify_new_permissions' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'notify_new_permissions' )
         
     
     def GetMetadata( self ):
@@ -2531,7 +2551,7 @@ class ServiceRepository( ServiceRestricted ):
         # if a user is more than two weeks behind, let's assume they aren't 'caught up'
         CAUGHT_UP_BUFFER = 14 * 86400
         
-        two_weeks_ago = HydrusData.GetNow() - CAUGHT_UP_BUFFER
+        two_weeks_ago = HydrusTime.GetNow() - CAUGHT_UP_BUFFER
         
         with self._lock:
             
@@ -2566,9 +2586,9 @@ class ServiceRepository( ServiceRestricted ):
         
         content_types_to_process = self._GetContentTypesWeAreProcessing()
         
-        ( this_is_first_definitions_work, definition_hashes_and_content_types, this_is_first_content_work, content_hashes_and_content_types ) = HG.client_controller.Read( 'repository_update_hashes_to_process', self._service_key, content_types_to_process )
+        ( this_is_first_definitions_work, definition_hashes_and_content_types, this_is_first_content_work, content_hashes_and_content_types ) = CG.client_controller.Read( 'repository_update_hashes_to_process', self._service_key, content_types_to_process )
         
-        missing_update_hashes = HG.client_controller.Read( 'missing_repository_update_hashes', service_key )
+        missing_update_hashes = CG.client_controller.Read( 'missing_repository_update_hashes', service_key )
         
         unprocessed_update_hashes = set( ( hash for ( hash, content_types ) in definition_hashes_and_content_types ) ).union( ( hash for ( hash, content_types ) in content_hashes_and_content_types ) ).union( missing_update_hashes )
         
@@ -2623,11 +2643,11 @@ class ServiceRepository( ServiceRestricted ):
             paused = self._update_downloading_paused
             
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
         if not paused:
             
-            HG.client_controller.pub( 'notify_new_permissions' )
+            CG.client_controller.pub( 'notify_new_permissions' )
             
         
     
@@ -2651,11 +2671,11 @@ class ServiceRepository( ServiceRestricted ):
             self._is_mostly_caught_up = None
             
         
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
         if not paused:
             
-            HG.client_controller.pub( 'notify_new_permissions' )
+            CG.client_controller.pub( 'notify_new_permissions' )
             
         
     
@@ -2677,10 +2697,10 @@ class ServiceRepository( ServiceRestricted ):
             self._SetDirty()
             
         
-        HG.client_controller.pub( 'notify_account_sync_due' )
-        HG.client_controller.pub( 'important_dirt_to_clean' )
+        CG.client_controller.pub( 'notify_account_sync_due' )
+        CG.client_controller.pub( 'important_dirt_to_clean' )
         
-        HG.client_controller.Write( 'reset_repository', self )
+        CG.client_controller.Write( 'reset_repository', self )
         
     
     def SetTagFilter( self, tag_filter: HydrusTags.TagFilter ):
@@ -2730,7 +2750,7 @@ class ServiceRepository( ServiceRestricted ):
                 
                 if self.IsDirty():
                     
-                    HG.client_controller.pub( 'important_dirt_to_clean' )
+                    CG.client_controller.pub( 'important_dirt_to_clean' )
                     
                 
             
@@ -2762,29 +2782,29 @@ class ServiceRepository( ServiceRestricted ):
             service_key = self._service_key
             
         
-        thumbnail_hashes = HG.client_controller.Read( 'missing_thumbnail_hashes', service_key )
+        thumbnail_hashes = CG.client_controller.Read( 'missing_thumbnail_hashes', service_key )
         
         num_to_do = len( thumbnail_hashes )
         
         if num_to_do > 0:
             
-            client_files_manager = HG.client_controller.client_files_manager
+            client_files_manager = CG.client_controller.client_files_manager
             
-            job_key = ClientThreading.JobKey( cancellable = True, stop_time = stop_time )
+            job_status = ClientThreading.JobStatus( cancellable = True, stop_time = stop_time )
             
             try:
                 
-                job_key.SetStatusTitle( name + ' sync: downloading thumbnails' )
+                job_status.SetStatusTitle( name + ' sync: downloading thumbnails' )
                 
-                HG.client_controller.pub( 'message', job_key )
+                CG.client_controller.pub( 'message', job_status )
                 
                 for ( i, thumbnail_hash ) in enumerate( thumbnail_hashes ):
                     
                     status = 'thumbnail ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, num_to_do )
                     
-                    HG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
-                    job_key.SetStatusText( status )
-                    job_key.SetVariable( 'popup_gauge_1', ( i + 1, num_to_do ) )
+                    CG.client_controller.frame_splash_status.SetText( status, print_to_log = False )
+                    job_status.SetStatusText( status )
+                    job_status.SetVariable( 'popup_gauge_1', ( i + 1, num_to_do ) )
                     
                     with self._lock:
                         
@@ -2794,7 +2814,7 @@ class ServiceRepository( ServiceRestricted ):
                             
                         
                     
-                    ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                    ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                     
                     if should_quit:
                         
@@ -2835,13 +2855,12 @@ class ServiceRepository( ServiceRestricted ):
                     client_files_manager.AddThumbnailFromBytes( thumbnail_hash, thumbnail_bytes )
                     
                 
-                job_key.SetStatusText( 'finished' )
-                job_key.DeleteVariable( 'popup_gauge_1' )
+                job_status.SetStatusText( 'finished' )
+                job_status.DeleteVariable( 'popup_gauge_1' )
                 
             finally:
                 
-                job_key.Finish()
-                job_key.Delete( 5 )
+                job_status.FinishAndDismiss( 5 )
                 
             
         
@@ -2877,7 +2896,7 @@ class ServiceIPFS( ServiceRemote ):
         return api_base_url
         
     
-    def ConvertMultihashToURLTree( self, name, size, multihash, job_key: typing.Optional[ ClientThreading.JobKey ] = None ):
+    def ConvertMultihashToURLTree( self, name, size, multihash, job_status: typing.Optional[ ClientThreading.JobStatus ] = None ):
         
         with self._lock:
             
@@ -2888,24 +2907,24 @@ class ServiceIPFS( ServiceRemote ):
         
         network_job = ClientNetworkingJobs.NetworkJobIPFS( links_url )
         
-        if job_key is not None:
+        if job_status is not None:
             
-            job_key.SetNetworkJob( network_job )
+            job_status.SetNetworkJob( network_job )
             
         
         try:
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
         finally:
             
-            if job_key is not None:
+            if job_status is not None:
                 
-                job_key.DeleteNetworkJob()
+                job_status.DeleteNetworkJob()
                 
-                if job_key.IsCancelled():
+                if job_status.IsCancelled():
                     
                     raise HydrusExceptions.CancelledException( 'Multihash parsing cancelled by user.' )
                     
@@ -2939,7 +2958,7 @@ class ServiceIPFS( ServiceRemote ):
                 subsize = link[ 'Size' ]
                 submultihash = link[ 'Hash' ]
                 
-                children.append( self.ConvertMultihashToURLTree( subname, subsize, submultihash, job_key = job_key ) )
+                children.append( self.ConvertMultihashToURLTree( subname, subsize, submultihash, job_status = job_status ) )
                 
             
             if size is None:
@@ -2970,7 +2989,7 @@ class ServiceIPFS( ServiceRemote ):
         
         network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         network_job.WaitUntilDone()
         
@@ -2992,7 +3011,7 @@ class ServiceIPFS( ServiceRemote ):
         
         network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         network_job.WaitUntilDone()
         
@@ -3022,7 +3041,7 @@ class ServiceIPFS( ServiceRemote ):
         
         network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         try:
             
@@ -3049,13 +3068,13 @@ class ServiceIPFS( ServiceRemote ):
     
     def ImportFile( self, multihash, silent = False ):
         
-        def on_qt_select_tree( job_key, url_tree ):
+        def on_qt_select_tree( job_status, url_tree ):
             
             try:
                 
                 from hydrus.client.gui import ClientGUIDialogs
                 
-                tlw = HG.client_controller.GetMainTLW()
+                tlw = CG.client_controller.GetMainTLW()
                 
                 with ClientGUIDialogs.DialogSelectFromURLTree( tlw, url_tree ) as dlg:
                     
@@ -3067,7 +3086,7 @@ class ServiceIPFS( ServiceRemote ):
                         
                         if len( urls ) > 0:
                             
-                            HG.client_controller.CallToThread( ClientImporting.THREADDownloadURLs, job_key, urls, multihash )
+                            CG.client_controller.CallToThread( ClientImporting.THREADDownloadURLs, job_status, urls, multihash )
                             
                             urls_good = True
                             
@@ -3075,13 +3094,13 @@ class ServiceIPFS( ServiceRemote ):
                     
                     if not urls_good:
                         
-                        job_key.Delete()
+                        job_status.FinishAndDismiss()
                         
                     
                 
             except:
                 
-                job_key.Delete()
+                job_status.FinishAndDismiss()
                 
                 raise
                 
@@ -3089,30 +3108,30 @@ class ServiceIPFS( ServiceRemote ):
         
         def off_qt():
             
-            job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
+            job_status = ClientThreading.JobStatus( pausable = True, cancellable = True )
             
-            job_key.SetStatusText( 'Looking up multihash information' )
+            job_status.SetStatusText( 'Looking up multihash information' )
             
             if not silent:
                 
-                HG.client_controller.pub( 'message', job_key )
+                CG.client_controller.pub( 'message', job_status )
                 
             
             try:
                 
                 try:
                     
-                    url_tree = self.ConvertMultihashToURLTree( multihash, None, multihash, job_key = job_key )
+                    url_tree = self.ConvertMultihashToURLTree( multihash, None, multihash, job_status = job_status )
                     
                 except HydrusExceptions.NotFoundException:
                     
-                    job_key.SetStatusText( 'Failed to find multihash information for "{}"!'.format( multihash ) )
+                    job_status.SetStatusText( 'Failed to find multihash information for "{}"!'.format( multihash ) )
                     
                     return
                     
                 except HydrusExceptions.ServerException as e:
                     
-                    job_key.SetStatusText( 'IPFS Error: "{}"!'.format( e ) )
+                    job_status.SetStatusText( 'IPFS Error: "{}"!'.format( e ) )
                     
                     return
                     
@@ -3121,24 +3140,24 @@ class ServiceIPFS( ServiceRemote ):
                     
                     url = url_tree[3]
                     
-                    HG.client_controller.CallToThread( ClientImporting.THREADDownloadURL, job_key, url, multihash )
+                    CG.client_controller.CallToThread( ClientImporting.THREADDownloadURL, job_status, url, multihash )
                     
                 else:
                     
-                    job_key.SetStatusText( 'Waiting for user selection' )
+                    job_status.SetStatusText( 'Waiting for user selection' )
                     
-                    QP.CallAfter( on_qt_select_tree, job_key, url_tree )
+                    QP.CallAfter( on_qt_select_tree, job_status, url_tree )
                     
                 
             except:
                 
-                job_key.Delete()
+                job_status.FinishAndDismiss()
                 
                 raise
                 
             
         
-        HG.client_controller.CallToThread( off_qt )
+        CG.client_controller.CallToThread( off_qt )
         
     
     def IsPinned( self, multihash ):
@@ -3154,7 +3173,7 @@ class ServiceIPFS( ServiceRemote ):
         
         network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
         try:
             
@@ -3190,11 +3209,11 @@ class ServiceIPFS( ServiceRemote ):
     
     def PinDirectory( self, hashes, note ):
         
-        job_key = ClientThreading.JobKey( pausable = True, cancellable = True )
+        job_status = ClientThreading.JobStatus( pausable = True, cancellable = True )
         
-        job_key.SetStatusTitle( 'creating ipfs directory on ' + self._name )
+        job_status.SetStatusTitle( 'creating ipfs directory on ' + self._name )
         
-        HG.client_controller.pub( 'message', job_key )
+        CG.client_controller.pub( 'message', job_status )
         
         try:
             
@@ -3204,19 +3223,19 @@ class ServiceIPFS( ServiceRemote ):
             
             for ( i, hash ) in enumerate( hashes ):
                 
-                ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                 
                 if should_quit:
                     
-                    job_key.SetStatusText( 'cancelled!' )
+                    job_status.SetStatusText( 'cancelled!' )
                     
                     return
                     
                 
-                job_key.SetStatusText( 'ensuring files are pinned: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( hashes ) ) )
-                job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( hashes ) ) )
+                job_status.SetStatusText( 'ensuring files are pinned: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( hashes ) ) )
+                job_status.SetVariable( 'popup_gauge_1', ( i + 1, len( hashes ) ) )
                 
-                media_result = HG.client_controller.Read( 'media_result', hash )
+                media_result = CG.client_controller.Read( 'media_result', hash )
                 
                 mime = media_result.GetMime()
                 
@@ -3248,7 +3267,7 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
@@ -3258,17 +3277,17 @@ class ServiceIPFS( ServiceRemote ):
             
             for ( i, ( hash, mime, multihash ) ) in enumerate( file_info ):
                 
-                ( i_paused, should_quit ) = job_key.WaitIfNeeded()
+                ( i_paused, should_quit ) = job_status.WaitIfNeeded()
                 
                 if should_quit:
                     
-                    job_key.SetStatusText( 'cancelled!' )
+                    job_status.SetStatusText( 'cancelled!' )
                     
                     return
                     
                 
-                job_key.SetStatusText( 'creating directory: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( file_info ) ) )
-                job_key.SetVariable( 'popup_gauge_1', ( i + 1, len( file_info ) ) )
+                job_status.SetStatusText( 'creating directory: ' + HydrusData.ConvertValueRangeToPrettyString( i + 1, len( file_info ) ) )
+                job_status.SetVariable( 'popup_gauge_1', ( i + 1, len( file_info ) ) )
                 
                 object_multihash = response_json[ 'Hash' ]
                 
@@ -3278,7 +3297,7 @@ class ServiceIPFS( ServiceRemote ):
                 
                 network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
                 
-                HG.client_controller.network_engine.AddJob( network_job )
+                CG.client_controller.network_engine.AddJob( network_job )
                 
                 network_job.WaitUntilDone()
                 
@@ -3293,24 +3312,24 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
             content_update_row = ( hashes, directory_multihash, note )
             
-            content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_DIRECTORIES, HC.CONTENT_UPDATE_ADD, content_update_row ) ]
+            content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_DIRECTORIES, HC.CONTENT_UPDATE_ADD, content_update_row ) ]
             
-            HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
+            CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._service_key, content_updates ) )
             
-            job_key.SetStatusText( 'done!' )
+            job_status.SetStatusText( 'done!' )
             
             with self._lock:
                 
                 text = self._multihash_prefix + directory_multihash
                 
             
-            job_key.SetVariable( 'popup_clipboard', ( 'copy multihash to clipboard', text ) )
+            job_status.SetVariable( 'popup_clipboard', ( 'copy multihash to clipboard', text ) )
             
             return directory_multihash
             
@@ -3318,15 +3337,15 @@ class ServiceIPFS( ServiceRemote ):
             
             HydrusData.ShowException( e )
             
-            job_key.SetErrorException( e )
+            job_status.SetErrorException( e )
             
-            job_key.Cancel()
+            job_status.Cancel()
             
         finally:
             
-            job_key.DeleteVariable( 'popup_gauge_1' )
+            job_status.DeleteVariable( 'popup_gauge_1' )
             
-            job_key.Finish()
+            job_status.Finish()
             
         
     
@@ -3337,7 +3356,7 @@ class ServiceIPFS( ServiceRemote ):
             api_base_url = self._GetAPIBaseURL()
             
         
-        client_files_manager = HG.client_controller.client_files_manager
+        client_files_manager = CG.client_controller.client_files_manager
         
         path = client_files_manager.GetFilePath( hash, mime )
         
@@ -3388,7 +3407,7 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job.SetFiles( files )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
@@ -3422,15 +3441,15 @@ class ServiceIPFS( ServiceRemote ):
             raise HydrusExceptions.DataMissing( message )
             
         
-        media_result = HG.client_controller.Read( 'media_result', hash )
+        media_result = CG.client_controller.Read( 'media_result', hash )
         
         file_info_manager = media_result.GetFileInfoManager()
         
         content_update_row = ( file_info_manager, multihash )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, content_update_row ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, content_update_row ) ]
         
-        HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
+        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._service_key, content_updates ) )
         
         return multihash
         
@@ -3448,14 +3467,14 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_DIRECTORIES, HC.CONTENT_UPDATE_DELETE, multihash ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_DIRECTORIES, HC.CONTENT_UPDATE_DELETE, multihash ) ]
         
-        HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
+        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._service_key, content_updates ) )
         
     
     def UnpinFile( self, hash, multihash ):
@@ -3471,14 +3490,14 @@ class ServiceIPFS( ServiceRemote ):
             
             network_job = ClientNetworkingJobs.NetworkJobIPFS( url )
             
-            HG.client_controller.network_engine.AddJob( network_job )
+            CG.client_controller.network_engine.AddJob( network_job )
             
             network_job.WaitUntilDone()
             
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash } ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, { hash } ) ]
         
-        HG.client_controller.WriteSynchronous( 'content_updates', { self._service_key : content_updates } )
+        CG.client_controller.WriteSynchronous( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( self._service_key, content_updates ) )
         
     
 class ServicesManager( object ):
@@ -3488,7 +3507,7 @@ class ServicesManager( object ):
         self._controller = controller
         
         self._lock = threading.Lock()
-        self._keys_to_services = {}
+        self._keys_to_services: typing.Dict[ bytes, Service ] = {}
         self._services_sorted = []
         
         self.RefreshServices()
@@ -3496,7 +3515,7 @@ class ServicesManager( object ):
         self._controller.sub( self, 'RefreshServices', 'notify_new_services_data' )
         
     
-    def _GetService( self, service_key: bytes ):
+    def _GetService( self, service_key: bytes ) -> Service:
         
         try:
             
@@ -3588,7 +3607,15 @@ class ServicesManager( object ):
             
         
     
-    def GetServiceType( self, service_key: bytes ):
+    def GetServiceName( self, service_key: bytes ) -> str:
+        
+        with self._lock:
+            
+            return self._GetService( service_key ).GetName()
+            
+        
+    
+    def GetServiceType( self, service_key: bytes ) -> int:
         
         with self._lock:
             
@@ -3608,6 +3635,14 @@ class ServicesManager( object ):
                     
                 
             
+            for service in self._services_sorted:
+                
+                if service.GetServiceType() in allowed_types and service.GetName().lower() == service_name.lower():
+                    
+                    return service.GetServiceKey()
+                    
+                
+            
             raise HydrusExceptions.DataMissing()
             
         
@@ -3616,7 +3651,7 @@ class ServicesManager( object ):
         
         with self._lock:
             
-            filtered_service_keys = [ service_key for ( service_key, service ) in self._keys_to_services.items() if service.GetServiceType() in desired_types ]
+            filtered_service_keys = [ service.GetServiceKey() for service in self._services_sorted if service.GetServiceType() in desired_types ]
             
             return filtered_service_keys
             

@@ -8,12 +8,14 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetwork
 from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIAsync
-from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -171,7 +173,7 @@ class EditAccountTypePanel( ClientGUIScrolledPanels.EditPanel ):
         
         num_created = self._auto_create_history.GetUsage( HC.BANDWIDTH_TYPE_DATA, time_delta )
         
-        text += '{} auto-created in the past {}.'.format( HydrusData.ToHumanInt( num_created ), HydrusData.TimeDeltaToPrettyTimeDelta( time_delta ) )
+        text += '{} auto-created in the past {}.'.format( HydrusData.ToHumanInt( num_created ), HydrusTime.TimeDeltaToPrettyTimeDelta( time_delta ) )
         
         self._auto_create_history_st.setText( text )
         
@@ -287,7 +289,7 @@ class EditAccountTypesPanel( ClientGUIScrolledPanels.EditPanel ):
             
             if True in ( at.IsNullAccount() for at in account_types_about_to_delete ):
                 
-                QW.QMessageBox.critical( self, 'Error', 'You cannot delete the null account type!' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'You cannot delete the null account type!' )
                 
                 return
                 
@@ -298,7 +300,7 @@ class EditAccountTypesPanel( ClientGUIScrolledPanels.EditPanel ):
             
             if len( account_types_can_move_to ) == 0:
                 
-                QW.QMessageBox.critical( self, 'Error', 'You cannot delete every account type!' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'You cannot delete every account type!' )
                 
                 return
                 
@@ -341,7 +343,7 @@ class EditAccountTypesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if True in ( at.IsNullAccount() for at in datas ):
             
-            QW.QMessageBox.critical( self, 'Error', 'You cannot edit the null account type!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'You cannot edit the null account type!' )
             
             return
             
@@ -411,7 +413,7 @@ class ListAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
         
         self._service_key = service_key
-        self._service = HG.client_controller.services_manager.GetService( self._service_key )
+        self._service = CG.client_controller.services_manager.GetService( self._service_key )
         self._accounts = accounts
         
         self._accounts_box = ClientGUICommon.StaticBox( self, 'accounts' )
@@ -493,7 +495,7 @@ class ReviewAccountsPanel( QW.QWidget ):
         QW.QWidget.__init__( self, parent )
         
         self._service_key = service_key
-        self._service = HG.client_controller.services_manager.GetService( self._service_key )
+        self._service = CG.client_controller.services_manager.GetService( self._service_key )
         self._account_identifiers = account_identifiers
         
         self._done_first_fetch = False
@@ -622,7 +624,7 @@ class ReviewAccountsPanel( QW.QWidget ):
             
             account_keys_text = os.linesep.join( ( account_key.hex() for account_key in checked_account_keys ) )
             
-            HG.client_controller.pub( 'clipboard', 'text', account_keys_text )
+            CG.client_controller.pub( 'clipboard', 'text', account_keys_text )
             
         
     
@@ -698,7 +700,7 @@ class ReviewAccountsPanel( QW.QWidget ):
                 
                 account_errors = sorted( account_errors )
                 
-                QW.QMessageBox.information( self, 'Information', 'Errors were encountered during account fetch:{}{}'.format( os.linesep * 2, os.linesep.join( account_errors ) ) )
+                ClientGUIDialogsMessage.ShowInformation( self, 'Errors were encountered during account fetch:{}{}'.format( os.linesep * 2, os.linesep.join( account_errors ) ) )
                 
             
             if not self._done_first_fetch:
@@ -777,7 +779,7 @@ class ReviewAccountsPanel( QW.QWidget ):
             
         
         self._status_st.setVisible( True )
-        self._status_st.setText( 'fetching accounts\u2026' )
+        self._status_st.setText( 'fetching accounts' + HC.UNICODE_ELLIPSIS )
         
         self._accounts_loaded = False
         
@@ -873,7 +875,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         ClientGUIScrolledPanels.ReviewPanel.__init__( self, parent )
         
         self._service_key = service_key
-        self._service = HG.client_controller.services_manager.GetService( service_key )
+        self._service = CG.client_controller.services_manager.GetService( service_key )
         self._subject_identifiers = subject_identifiers
         self._account_types = []
         
@@ -1038,19 +1040,19 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if num_unchecked > 0:
             
-            QW.QMessageBox.information( self, 'Information', '{} accounts do not expire, so could not have time added!'.format( HydrusData.ToHumanInt( num_unchecked ) ) )
+            ClientGUIDialogsMessage.ShowInformation( self, '{} accounts do not expire, so could not have time added!'.format( HydrusData.ToHumanInt( num_unchecked ) ) )
             
         
         subject_accounts = self._account_panel.GetCheckedAccounts()
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
         
-        message = 'Add {} to expiry for {} accounts?'.format( HydrusData.TimeDeltaToPrettyTimeDelta( expires_delta ), HydrusData.ToHumanInt( len( subject_accounts ) ) )
+        message = 'Add {} to expiry for {} accounts?'.format( HydrusTime.TimeDeltaToPrettyTimeDelta( expires_delta ), HydrusData.ToHumanInt( len( subject_accounts ) ) )
         
         result = ClientGUIDialogsQuick.GetYesNo( self, message )
         
@@ -1077,7 +1079,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
     
     def _DisableUIForRefresh( self ):
         
-        self._DisableUIForJob( 'refreshing accounts\u2026' )
+        self._DisableUIForJob( 'refreshing accounts' + HC.UNICODE_ELLIPSIS )
         
     
     def _DoAccountType( self ):
@@ -1088,7 +1090,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_account_keys ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1120,12 +1122,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def publish_callable( gumpf ):
             
-            QW.QMessageBox.information( self, 'Information', 'Done!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'Done!' )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'setting new account type\u2026' )
+        self._DisableUIForJob( 'setting new account type' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1140,7 +1142,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1165,7 +1167,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if reason == '':
             
-            QW.QMessageBox.information( self, 'Information', 'The ban reason is empty!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'The ban reason is empty!' )
             
             return
             
@@ -1183,7 +1185,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if expires is not None:
             
-            expires += HydrusData.GetNow()
+            expires += HydrusTime.GetNow()
             
         
         service = self._service
@@ -1200,12 +1202,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def publish_callable( gumpf ):
             
-            QW.QMessageBox.information( self, 'Information', 'Done!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'Done!' )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'banning\u2026' )
+        self._DisableUIForJob( 'banning' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1220,7 +1222,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1277,12 +1279,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 message = 'Not everything was deleted--this may be a big account. You can keep trying to chip away at what needs to be deleted, or wait for hydev to figure out a solution for big accounts.'
                 
             
-            QW.QMessageBox.information( self, 'Information', message )
+            ClientGUIDialogsMessage.ShowInformation( self, message )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'deleting\u2026' )
+        self._DisableUIForJob( 'deleting' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1293,7 +1295,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_account_keys_and_new_expires ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1312,12 +1314,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def publish_callable( gumpf ):
             
-            QW.QMessageBox.information( self, 'Information', 'Done!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'Done!' )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'setting new expiry\u2026' )
+        self._DisableUIForJob( 'setting new expiry' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1332,7 +1334,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1371,12 +1373,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def publish_callable( gumpf ):
             
-            QW.QMessageBox.information( self, 'Information', 'Done!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'Done!' )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'setting message\u2026' )
+        self._DisableUIForJob( 'setting message' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1391,7 +1393,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
@@ -1400,7 +1402,7 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if len( subject_accounts ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'None of the selected accounts are banned!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'None of the selected accounts are banned!' )
             
             return
             
@@ -1430,12 +1432,12 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         def publish_callable( gumpf ):
             
-            QW.QMessageBox.information( self, 'Information', 'Done!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'Done!' )
             
             self._account_panel.RefreshAccounts()
             
         
-        self._DisableUIForJob( 'unbanning\u2026' )
+        self._DisableUIForJob( 'unbanning' + HC.UNICODE_ELLIPSIS )
         
         job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -1500,19 +1502,19 @@ class ModifyAccountsPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if expires is not None:
             
-            expires += HydrusData.GetNow()
+            expires += HydrusTime.GetNow()
             
         
         subject_account_keys_and_new_expires = [ ( subject_account_key, expires ) for subject_account_key in self._account_panel.GetCheckedAccountKeys() ]
         
         if len( subject_account_keys_and_new_expires ) == 0:
             
-            QW.QMessageBox.information( self, 'Information', 'No accounts selected for action!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No accounts selected for action!' )
             
             return
             
         
-        message = 'Set expiry to {} for {} accounts?'.format( HydrusData.ConvertTimestampToPrettyExpires( expires ), HydrusData.ToHumanInt( len( subject_account_keys_and_new_expires ) ) )
+        message = 'Set expiry to {} for {} accounts?'.format( HydrusTime.TimestampToPrettyExpires( expires ), HydrusData.ToHumanInt( len( subject_account_keys_and_new_expires ) ) )
         
         result = ClientGUIDialogsQuick.GetYesNo( self, message )
         

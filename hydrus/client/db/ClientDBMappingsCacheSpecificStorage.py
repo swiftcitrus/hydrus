@@ -6,6 +6,8 @@ import typing
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusDBBase
+from hydrus.core import HydrusLists
+from hydrus.core import HydrusTime
 
 from hydrus.client.db import ClientDBFilesStorage
 from hydrus.client.db import ClientDBMaintenance
@@ -333,9 +335,9 @@ class ClientDBMappingsCacheSpecificStorage( ClientDBModule.ClientDBModule ):
         
         ( cache_current_mappings_table_name, cache_deleted_mappings_table_name, cache_pending_mappings_table_name ) = ClientDBMappingsStorage.GenerateSpecificMappingsCacheTableNames( file_service_id, tag_service_id )
         
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( cache_current_mappings_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( cache_deleted_mappings_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( cache_pending_mappings_table_name ) )
+        self.modules_db_maintenance.DeferredDropTable( cache_current_mappings_table_name )
+        self.modules_db_maintenance.DeferredDropTable( cache_deleted_mappings_table_name )
+        self.modules_db_maintenance.DeferredDropTable( cache_pending_mappings_table_name )
         
         self.modules_mappings_counts.DropTables( ClientTags.TAG_DISPLAY_STORAGE, file_service_id, tag_service_id )
         
@@ -430,7 +432,7 @@ class ClientDBMappingsCacheSpecificStorage( ClientDBModule.ClientDBModule ):
         
         BLOCK_SIZE = 10000
         
-        for ( i, block_of_hash_ids ) in enumerate( HydrusData.SplitListIntoChunks( hash_ids, BLOCK_SIZE ) ):
+        for ( i, block_of_hash_ids ) in enumerate( HydrusLists.SplitListIntoChunks( hash_ids, BLOCK_SIZE ) ):
             
             with self._MakeTemporaryIntegerTable( block_of_hash_ids, 'hash_id' ) as temp_hash_id_table_name:
                 

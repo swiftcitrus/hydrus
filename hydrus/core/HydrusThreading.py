@@ -1,5 +1,4 @@
 import bisect
-import collections
 import os
 import queue
 import random
@@ -11,6 +10,9 @@ import traceback
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusProfiling
+from hydrus.core import HydrusTime
+from hydrus.core.interfaces import HydrusThreadingInterface
 
 NEXT_THREAD_CLEAROUT = 0
 
@@ -24,6 +26,7 @@ def CheckIfThreadShuttingDown()-> None:
         raise HydrusExceptions.ShutdownException( 'Thread is shutting down!' )
         
     
+
 def ClearOutDeadThreads() -> None:
     
     with THREAD_INFO_LOCK:
@@ -43,11 +46,11 @@ def GetThreadInfo( thread = None ):
     
     global NEXT_THREAD_CLEAROUT
     
-    if HydrusData.TimeHasPassed( NEXT_THREAD_CLEAROUT ):
+    if HydrusTime.TimeHasPassed( NEXT_THREAD_CLEAROUT ):
         
         ClearOutDeadThreads()
         
-        NEXT_THREAD_CLEAROUT = HydrusData.GetNow() + 600
+        NEXT_THREAD_CLEAROUT = HydrusTime.GetNow() + 600
         
     
     if thread is None:
@@ -97,6 +100,7 @@ def IsThreadShuttingDown() -> bool:
     
     return thread_info[ 'shutting_down' ]
     
+
 def ShutdownThread( thread ) -> None:
     
     thread_info = GetThreadInfo( thread )
@@ -136,6 +140,52 @@ def SubprocessCommunicate( process: subprocess.Popen ):
             
         
     
+
+class RegularJobChecker( object ):
+    
+    def __init__( self, period = 10 ):
+        
+        self._period = period
+        
+        self._next_check = HydrusTime.GetNowFloat()
+        
+    
+    def Due( self ) -> bool:
+        
+        if HydrusTime.TimeHasPassedFloat( self._next_check ):
+            
+            self._next_check = HydrusTime.GetNowFloat() + self._period
+            
+            return True
+            
+        else:
+            
+            return False
+            
+        
+    
+
+class BigJobPauser( object ):
+    
+    def __init__( self, period = 10, wait_time = 0.1 ):
+        
+        self._period = period
+        self._wait_time = wait_time
+        
+        self._next_pause = HydrusTime.GetNowFloat() + self._period
+        
+    
+    def Pause( self ):
+        
+        if HydrusTime.TimeHasPassedFloat( self._next_pause ):
+            
+            time.sleep( self._wait_time )
+            
+            self._next_pause = HydrusTime.GetNowFloat() + self._period
+            
+        
+    
+
 class DAEMON( threading.Thread ):
     
     def __init__( self, controller, name ):
@@ -218,9 +268,9 @@ class DAEMONWorker( DAEMON ):
     
     def _DoAWait( self, wait_time, event_can_wake = True )-> None:
         
-        time_to_start = HydrusData.GetNow() + wait_time
+        time_to_start = HydrusTime.GetNow() + wait_time
         
-        while not HydrusData.TimeHasPassed( time_to_start ):
+        while not HydrusTime.TimeHasPassed( time_to_start ):
             
             if event_can_wake:
                 
@@ -375,7 +425,7 @@ class THREADCallToThread( DAEMON ):
                     
                     try:
                         
-                        ( callable, args, kwargs ) = self._queue.get( 1.0 )
+                        ( callable, args, kwargs ) = self._queue.get( timeout = 1.0 )
                         
                     except queue.Empty:
                         
@@ -394,7 +444,7 @@ class THREADCallToThread( DAEMON ):
                         
                         summary = 'Profiling CallTo Job: {}'.format( callable )
                         
-                        HydrusData.Profile( summary, 'callable( *args, **kwargs )', globals(), locals(), min_duration_ms = HG.callto_profile_min_job_time_ms )
+                        HydrusProfiling.Profile( summary, 'callable( *args, **kwargs )', globals(), locals(), min_duration_ms = HG.callto_profile_min_job_time_ms )
                         
                     else:
                         
@@ -498,7 +548,7 @@ class JobScheduler( threading.Thread ):
             
         
     
-    def _SortWaiting( self ) -> bool:
+    def _SortWaiting( self ):
         
         # sort the waiting jobs in ascending order of expected work time
         
@@ -690,11 +740,14 @@ class JobScheduler( threading.Thread ):
             
         
     
-class SchedulableJob( object ):
+
+class SchedulableJob( HydrusThreadingInterface.SchedulableJobInterface ):
     
     PRETTY_CLASS_NAME = 'job base'
     
     def __init__( self, controller, scheduler: JobScheduler, initial_delay, work_callable ):
+        
+        HydrusThreadingInterface.SchedulableJobInterface.__init__( self )
         
         self._controller = controller
         self._scheduler = scheduler
@@ -702,7 +755,7 @@ class SchedulableJob( object ):
         
         self._should_delay_on_wakeup = False
         
-        self._next_work_time = HydrusData.GetNowFloat() + initial_delay
+        self._next_work_time = HydrusTime.GetNowFloat() + initial_delay
         
         self._thread_slot_type = None
         
@@ -745,11 +798,18 @@ class SchedulableJob( object ):
         return self._currently_working.is_set()
         
     
+    def Delay( self, delay ) -> None:
+        
+        self._next_work_time = HydrusTime.GetNowFloat() + delay
+        
+        self._scheduler.WorkTimesHaveChanged()
+        
+    
     def GetDueString( self ) -> str:
         
-        due_delta = self._next_work_time - HydrusData.GetNowFloat()
+        due_delta = self._next_work_time - HydrusTime.GetNowFloat()
         
-        due_string = HydrusData.TimeDeltaToPrettyTimeDelta( due_delta )
+        due_string = HydrusTime.TimeDeltaToPrettyTimeDelta( due_delta )
         
         if due_delta < 0:
             
@@ -775,7 +835,7 @@ class SchedulableJob( object ):
     
     def GetTimeDeltaUntilDue( self ):
         
-        return HydrusData.GetTimeDeltaUntilTimeFloat( self._next_work_time )
+        return HydrusTime.GetTimeDeltaUntilTimeFloat( self._next_work_time )
         
     
     def IsCancelled( self ) -> bool:
@@ -790,7 +850,7 @@ class SchedulableJob( object ):
     
     def IsDue( self ) -> bool:
         
-        return HydrusData.TimeHasPassedFloat( self._next_work_time )
+        return HydrusTime.TimeHasPassedFloat( self._next_work_time )
         
     
     def PubSubWake( self, *args, **kwargs ) -> None:
@@ -818,7 +878,7 @@ class SchedulableJob( object ):
                 
             else:
                 
-                self._next_work_time = HydrusData.GetNowFloat() + 10 + random.random()
+                self._next_work_time = HydrusTime.GetNowFloat() + 10 + random.random()
                 
                 return False
                 
@@ -843,7 +903,7 @@ class SchedulableJob( object ):
         
         if next_work_time is None:
             
-            next_work_time = HydrusData.GetNowFloat()
+            next_work_time = HydrusTime.GetNowFloat()
             
         
         self._next_work_time = next_work_time
@@ -854,6 +914,19 @@ class SchedulableJob( object ):
     def WakeOnPubSub( self, topic ) -> None:
         
         HG.controller.sub( self, 'PubSubWake', topic )
+        
+    
+    def WaitingOnWorkSlot( self ):
+        
+        if self._thread_slot_type is not None:
+            
+            if not self._currently_working.set() and self.IsDue() and not HG.controller.ThreadSlotsAreAvailable( self._thread_slot_type ):
+                
+                return True
+                
+            
+        
+        return False
         
     
     def Work( self ) -> None:
@@ -892,6 +965,7 @@ class SchedulableJob( object ):
             
         
     
+
 class SingleJob( SchedulableJob ):
     
     PRETTY_CLASS_NAME = 'single job'
@@ -915,6 +989,7 @@ class SingleJob( SchedulableJob ):
         self._work_complete.set()
         
     
+
 class RepeatingJob( SchedulableJob ):
     
     PRETTY_CLASS_NAME = 'repeating job'
@@ -935,18 +1010,6 @@ class RepeatingJob( SchedulableJob ):
         self._stop_repeating.set()
         
     
-    def Delay( self, delay ) -> None:
-        
-        self._next_work_time = HydrusData.GetNowFloat() + delay
-        
-        self._scheduler.WorkTimesHaveChanged()
-        
-    
-    def IsRepeatingWorkFinished( self ) -> bool:
-        
-        return self._stop_repeating.is_set()
-        
-    
     def StartWork( self ) -> None:
         
         if self._stop_repeating.is_set():
@@ -963,9 +1026,26 @@ class RepeatingJob( SchedulableJob ):
         
         if not self._stop_repeating.is_set():
             
-            self._next_work_time = HydrusData.GetNowFloat() + self._period
+            self._next_work_time = HydrusTime.GetNowFloat() + self._period
             
             self._scheduler.AddJob( self )
             
+        
+    
+
+def WaitForProcessToFinish( p, timeout ):
+    
+    started = HydrusTime.GetNow()
+    
+    while p.poll() is None:
+        
+        if HydrusTime.TimeHasPassed( started + timeout ):
+            
+            p.kill()
+            
+            raise Exception( 'Process did not finish within ' + HydrusData.ToHumanInt( timeout ) + ' seconds!' )
+            
+        
+        time.sleep( 2 )
         
     

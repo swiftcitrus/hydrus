@@ -1,4 +1,5 @@
 import collections
+import os
 import unittest
 
 from hydrus.core import HydrusConstants as HC
@@ -7,11 +8,13 @@ from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientSearch
-from hydrus.client import ClientSearchParseSystemPredicates
 from hydrus.client.media import ClientMediaManagers
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTags
 from hydrus.client.metadata import ClientTagsHandling
+from hydrus.client.search import ClientSearch
+from hydrus.client.search import ClientSearchAutocomplete
+from hydrus.client.search import ClientSearchParseSystemPredicates
 
 class TestMergeTagsManagers( unittest.TestCase ):
     
@@ -93,7 +96,7 @@ class TestMergeTagsManagers( unittest.TestCase ):
         
         #
         
-        self.assertEqual( tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, ( 'character', ), ClientTags.TAG_DISPLAY_ACTUAL ), frozenset( { 'character:cibo' } ) )
+        self.assertEqual( tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, ( 'character', ), ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ), frozenset( { 'character:cibo' } ) )
         
     
 class TestTagsManager( unittest.TestCase ):
@@ -192,8 +195,8 @@ class TestTagsManager( unittest.TestCase ):
     
     def test_get_namespace_slice( self ):
         
-        self.assertEqual( self._tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, ( 'creator', 'series' ), ClientTags.TAG_DISPLAY_ACTUAL ), frozenset( { 'creator:tsutomu nihei', 'series:blame!' } ) )
-        self.assertEqual( self._tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, [], ClientTags.TAG_DISPLAY_ACTUAL ), frozenset() )
+        self.assertEqual( self._tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, ( 'creator', 'series' ), ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ), frozenset( { 'creator:tsutomu nihei', 'series:blame!' } ) )
+        self.assertEqual( self._tags_manager.GetNamespaceSlice( CC.COMBINED_TAG_SERVICE_KEY, [], ClientTags.TAG_DISPLAY_DISPLAY_ACTUAL ), frozenset() )
         
     
     def test_get_num_tags( self ):
@@ -275,7 +278,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'hello', hashes ) )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'hello', hashes ) )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -289,35 +292,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'hello', hashes ) )
-        
-        self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
-        
-        self.assertEqual( self._other_tags_manager.GetCurrent( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
-        self.assertEqual( self._other_tags_manager.GetDeleted( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
-        self.assertEqual( self._other_tags_manager.GetPending( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
-        self.assertEqual( self._other_tags_manager.GetPetitioned( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
-        
-        self.assertNotIn( 'hello', self._other_tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
-        self.assertIn( 'hello', self._other_tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
-        
-        #
-        
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_RESCIND_PEND, ( 'hello', hashes ) )
-        
-        self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
-        
-        self.assertEqual( self._other_tags_manager.GetCurrent( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
-        self.assertEqual( self._other_tags_manager.GetDeleted( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
-        self.assertEqual( self._other_tags_manager.GetPending( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
-        self.assertEqual( self._other_tags_manager.GetPetitioned( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
-        
-        self.assertNotIn( 'hello', self._other_tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
-        self.assertNotIn( 'hello', self._other_tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
-        
-        #
-        
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'hello', hashes ) )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'hello', hashes ) )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -331,7 +306,35 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'hello', hashes ) )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_RESCIND_PEND, ( 'hello', hashes ) )
+        
+        self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
+        
+        self.assertEqual( self._other_tags_manager.GetCurrent( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
+        self.assertEqual( self._other_tags_manager.GetDeleted( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
+        self.assertEqual( self._other_tags_manager.GetPending( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
+        self.assertEqual( self._other_tags_manager.GetPetitioned( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
+        
+        self.assertNotIn( 'hello', self._other_tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
+        self.assertNotIn( 'hello', self._other_tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
+        
+        #
+        
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( 'hello', hashes ) )
+        
+        self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
+        
+        self.assertEqual( self._other_tags_manager.GetCurrent( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
+        self.assertEqual( self._other_tags_manager.GetDeleted( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
+        self.assertEqual( self._other_tags_manager.GetPending( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), { 'hello' } )
+        self.assertEqual( self._other_tags_manager.GetPetitioned( self._content_update_service_key, ClientTags.TAG_DISPLAY_STORAGE ), set() )
+        
+        self.assertNotIn( 'hello', self._other_tags_manager.GetCurrent( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
+        self.assertIn( 'hello', self._other_tags_manager.GetPending( CC.COMBINED_TAG_SERVICE_KEY, ClientTags.TAG_DISPLAY_STORAGE ) )
+        
+        #
+        
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'hello', hashes ) )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -345,7 +348,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'hello', hashes ), reason = 'reason' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'hello', hashes ), reason = 'reason' )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -359,7 +362,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_RESCIND_PETITION, ( 'hello', hashes ) )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_RESCIND_PETITION, ( 'hello', hashes ) )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -373,7 +376,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'hello', hashes ), reason = 'reason' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( 'hello', hashes ), reason = 'reason' )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -387,7 +390,7 @@ class TestTagsManager( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'hello', hashes ) )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_DELETE, ( 'hello', hashes ) )
         
         self._other_tags_manager.ProcessContentUpdate( self._content_update_service_key, content_update )
         
@@ -452,7 +455,7 @@ class TestTagObjects( unittest.TestCase ):
     
     def test_parsed_autocomplete_text( self ):
         
-        def bool_tests( pat: ClientSearch.ParsedAutocompleteText, values ):
+        def bool_tests( pat: ClientSearchAutocomplete.ParsedAutocompleteText, values ):
             
             self.assertEqual( pat.IsAcceptableForFileSearches(), values[0] )
             self.assertEqual( pat.IsAcceptableForTagSearches(), values[1] )
@@ -463,40 +466,40 @@ class TestTagObjects( unittest.TestCase ):
             self.assertEqual( pat.inclusive, values[6] )
             
         
-        def search_text_tests( pat: ClientSearch.ParsedAutocompleteText, values ):
+        def search_text_tests( pat: ClientSearchAutocomplete.ParsedAutocompleteText, values ):
             
             self.assertEqual( pat.GetSearchText( False ), values[0] )
             self.assertEqual( pat.GetSearchText( True ), values[1] )
             
         
-        def read_predicate_tests( pat: ClientSearch.ParsedAutocompleteText, values ):
+        def read_predicate_tests( pat: ClientSearchAutocomplete.ParsedAutocompleteText, values ):
             
             self.assertEqual( pat.GetImmediateFileSearchPredicate( True ), values[0] )
             self.assertEqual( pat.GetNonTagFileSearchPredicates( True ), values[1] )
             
         
-        def write_predicate_tests( pat: ClientSearch.ParsedAutocompleteText, values ):
+        def write_predicate_tests( pat: ClientSearchAutocomplete.ParsedAutocompleteText, values ):
             
             self.assertEqual( pat.GetAddTagPredicate(), values[0] )
             
         
         tag_autocomplete_options = ClientTagsHandling.TagAutocompleteOptions( CC.COMBINED_TAG_SERVICE_KEY )
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, True, False, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ '', '' ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, False ] )
         search_text_tests( parsed_autocomplete_text, [ '', '' ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus', 'samus*' ] )
@@ -505,7 +508,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, False ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus', 'samus*' ] )
@@ -513,7 +516,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus*', 'samus*' ] )
@@ -521,7 +524,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'character:samus ', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'character:samus', 'character:samus*' ] )
@@ -530,7 +533,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-character:samus ', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-character:samus ', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, False ] )
         search_text_tests( parsed_autocomplete_text, [ 'character:samus', 'character:samus*' ] )
@@ -538,7 +541,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 's*s', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 's*s', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ 's*s', 's*s*' ] )
@@ -546,7 +549,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-s*s', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-s*s', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, False, False, False ] )
         search_text_tests( parsed_autocomplete_text, [ 's*s', 's*s*' ] )
@@ -554,21 +557,21 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'metroid:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, False, False, False, True, False, True ] )
         read_predicate_tests( parsed_autocomplete_text, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'metroid' ), [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'metroid' ) ] ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-metroid:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-metroid:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, False, False, False, True, False, False ] )
         read_predicate_tests( parsed_autocomplete_text, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'metroid', inclusive = False ), [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'metroid', inclusive = False ) ] ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 's*s a*n', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 's*s a*n', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ 's*s a*n', 's*s a*n*' ] )
@@ -576,7 +579,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( ' samus ', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( ' samus ', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus', 'samus*' ] )
@@ -585,7 +588,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '[samus]', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '[samus]', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus', 'samus*' ] )
@@ -594,21 +597,21 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'creator-id:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'creator-id:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, False, False, False, True, False, True ] )
         read_predicate_tests( parsed_autocomplete_text, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'creator-id' ), [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'creator-id' ) ] ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'creator-id:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'creator-id:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, False, False, True, True, False, True ] )
         read_predicate_tests( parsed_autocomplete_text, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'creator-id' ), [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_NAMESPACE, 'creator-id' ) ] ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'n*n g*s e*n:as*ka', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'n*n g*s e*n:as*ka', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'n*n g*s e*n:as*ka', 'n*n g*s e*n:as*ka*' ] )
@@ -616,9 +619,9 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'system:samus ', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'system:samus ', tag_autocomplete_options, True )
         
-        bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
+        bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, True ] )
         search_text_tests( parsed_autocomplete_text, [ 'samus', 'samus*' ] )
         
         #
@@ -641,43 +644,43 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, True, False, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, False ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, True, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, True, False, True ] )
         
@@ -701,43 +704,43 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, True, False, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, False ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, True, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, True, False, True ] )
         
@@ -761,43 +764,43 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, True, False, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, False ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, False, False, False, True, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, True, False, True ] )
         
@@ -821,37 +824,37 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, True, False, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '-', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, False, False, False, False, False, False ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, False, False, True, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, True, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( '*:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ False, True, False, True, False, False, True ] )
         
         #
         
-        parsed_autocomplete_text = ClientSearch.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
+        parsed_autocomplete_text = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:*', tag_autocomplete_options, True )
         
         bool_tests( parsed_autocomplete_text, [ True, True, False, True, True, False, True ] )
         
@@ -875,17 +878,17 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheInit()
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheInit()
         
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, True ), False )
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, False ), False )
@@ -920,19 +923,19 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_INBOX ) ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheSystem( predicates )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheSystem( predicates )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -969,15 +972,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -987,7 +990,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ samus, samus_aran, character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'samus', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'samus', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1032,15 +1035,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1048,7 +1051,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ samus ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'samus', True )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'samus', True )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1087,15 +1090,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1103,7 +1106,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'character:samus', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'character:samus', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1151,15 +1154,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1167,7 +1170,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'character:*', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'character:*', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1205,15 +1208,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, True ), False )
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, False ), False )
@@ -1258,15 +1261,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1274,7 +1277,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'character:', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'character:', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1312,15 +1315,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, True ), False )
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, False ), False )
@@ -1365,15 +1368,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1381,7 +1384,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, 'char', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, 'char', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1419,15 +1422,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, True ), False )
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, False ), False )
@@ -1472,15 +1475,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         samus = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus' )
         samus_aran = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'samus aran' )
@@ -1488,7 +1491,7 @@ class TestTagObjects( unittest.TestCase ):
         
         predicates = [ samus, samus_aran, character_samus_aran ]
         
-        predicate_results_cache = ClientSearch.PredicateResultsCacheTag( predicates, '*', False )
+        predicate_results_cache = ClientSearchAutocomplete.PredicateResultsCacheTag( predicates, '*', False )
         
         self.assertEqual( predicate_results_cache.GetPredicates(), predicates )
         
@@ -1526,15 +1529,15 @@ class TestTagObjects( unittest.TestCase ):
             fetch_all_allowed
         )
         
-        pat_empty = ClientSearch.ParsedAutocompleteText( '', tag_autocomplete_options, True )
-        pat_samus = ClientSearch.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
-        pat_samus_ar = ClientSearch.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
-        pat_samus_br = ClientSearch.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
-        pat_character_samus = ClientSearch.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
-        pat_character_samus_ar = ClientSearch.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
-        pat_character_samus_br = ClientSearch.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
-        pat_metroid = ClientSearch.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
-        pat_series_samus = ClientSearch.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
+        pat_empty = ClientSearchAutocomplete.ParsedAutocompleteText( '', tag_autocomplete_options, True )
+        pat_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus', tag_autocomplete_options, True )
+        pat_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus ar', tag_autocomplete_options, True )
+        pat_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'samus br', tag_autocomplete_options, True )
+        pat_character_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus', tag_autocomplete_options, True )
+        pat_character_samus_ar = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus ar', tag_autocomplete_options, True )
+        pat_character_samus_br = ClientSearchAutocomplete.ParsedAutocompleteText( 'character:samus br', tag_autocomplete_options, True )
+        pat_metroid = ClientSearchAutocomplete.ParsedAutocompleteText( 'metroid', tag_autocomplete_options, True )
+        pat_series_samus = ClientSearchAutocomplete.ParsedAutocompleteText( 'series:samus', tag_autocomplete_options, True )
         
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, True ), True )
         self.assertEqual( predicate_results_cache.CanServeTagResults( pat_empty, False ), True )
@@ -1713,7 +1716,7 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( CC.UNICODE_ALMOST_EQUAL_TO, 'delta', ( 1, 2, 3, 4 ) ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( HC.UNICODE_APPROX_EQUAL, 'delta', ( 1, 2, 3, 4 ) ) )
         
         self.assertEqual( p.ToString(), 'system:import time: around 1 year 2 months ago' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -1731,7 +1734,7 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '<', 200 ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 200 ) )
         
         self.assertEqual( p.ToString(), 'system:duration < 200 milliseconds' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -1779,9 +1782,21 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_TRANSPARENCY, True )
+        
+        self.assertEqual( p.ToString(), 'system:has transparency' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_TRANSPARENCY, False )
+        
+        self.assertEqual( p.ToString(), 'system:no transparency' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
         p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_EXIF, True )
         
-        self.assertEqual( p.ToString(), 'system:image has exif' )
+        self.assertEqual( p.ToString(), 'system:has exif' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
@@ -1793,7 +1808,7 @@ class TestTagObjects( unittest.TestCase ):
         
         p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_HUMAN_READABLE_EMBEDDED_METADATA, True )
         
-        self.assertEqual( p.ToString(), 'system:image has human-readable embedded metadata' )
+        self.assertEqual( p.ToString(), 'system:has human-readable embedded metadata' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
@@ -1805,7 +1820,7 @@ class TestTagObjects( unittest.TestCase ):
         
         p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_ICC_PROFILE, True )
         
-        self.assertEqual( p.ToString(), 'system:image has icc profile' )
+        self.assertEqual( p.ToString(), 'system:has icc profile' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
@@ -1815,13 +1830,25 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ( ( bytes.fromhex( 'abcd' ), ), 'sha256' ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_FORCED_FILETYPE, True )
         
-        self.assertEqual( p.ToString(), 'system:sha256 hash is abcd' )
+        self.assertEqual( p.ToString(), 'system:has forced filetype' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 2000 ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_FORCED_FILETYPE, False )
+        
+        self.assertEqual( p.ToString(), 'system:no forced filetype' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ( ( bytes.fromhex( 'abcd' ), ), 'sha256' ) )
+        
+        self.assertEqual( p.ToString(), 'system:hash is abcd' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 2000 ) )
         
         self.assertEqual( p.ToString(), 'system:height < 2,000' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -1857,9 +1884,9 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, ( HC.VIDEO_WEBM, HC.IMAGE_GIF ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, ( HC.VIDEO_WEBM, HC.ANIMATION_GIF ) )
         
-        self.assertEqual( p.ToString(), 'system:filetype is gif, webm' )
+        self.assertEqual( p.ToString(), 'system:filetype is animated gif, webm' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
@@ -1887,7 +1914,13 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '<', 5000 ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 5 ) )
+        
+        self.assertEqual( p.ToString(), 'system:number of urls < 5' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 5000 ) )
         
         self.assertEqual( p.ToString(), 'system:number of words < 5,000' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -1913,9 +1946,15 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ( ( bytes.fromhex( 'abcd' ), ), 5 ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_FILES, ( ( bytes.fromhex( 'abcd' ), ), 5 ) )
         
-        self.assertEqual( p.ToString(), 'system:similar to 1 files using max hamming of 5' )
+        self.assertEqual( p.ToString(), 'system:similar to 1 files with distance of 5' )
+        self.assertEqual( p.GetNamespace(), 'system' )
+        self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
+        
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_DATA, ( ( os.urandom( 32 ), ), ( os.urandom( 32 ), ), 2 ) )
+        
+        self.assertEqual( p.ToString(), 'system:similar to data (1 pixel, 1 perceptual hashes) with distance of 2' )
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
@@ -1925,7 +1964,7 @@ class TestTagObjects( unittest.TestCase ):
         self.assertEqual( p.GetNamespace(), 'system' )
         self.assertEqual( p.GetTextsAndNamespaces( render_for_user ), [ ( p.ToString(), 'namespace', p.GetNamespace() ) ] )
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '=', 1920 ) )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 1920 ) )
         
         self.assertEqual( p.ToString(), 'system:width = 1,920' )
         self.assertEqual( p.GetNamespace(), 'system' )
@@ -1969,7 +2008,7 @@ class TestTagObjects( unittest.TestCase ):
         
         #
         
-        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_OR_CONTAINER, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 2000 ) ), ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'blue eyes' ), ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'character:samus aran' ) ] )
+        p = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_OR_CONTAINER, [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 2000 ) ), ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'blue eyes' ), ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'character:samus aran' ) ] )
         
         self.assertEqual( p.ToString(), 'blue eyes OR character:samus aran OR system:height < 2,000' )
         self.assertEqual( p.GetNamespace(), '' )
@@ -1989,13 +2028,24 @@ class TestTagObjects( unittest.TestCase ):
     def test_system_predicate_parsing( self ):
         
         for ( expected_result_text, sys_pred_text ) in [
+            ( 'system:similar to 4 files with distance of 3', "system:similar to e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c08 e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c09 e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c10, e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c11 with distance 3" ),
+            ( 'system:similar to 1 files with distance of 5', "system:similar to e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c00 distance 5" ),
+            ( 'system:similar to 1 files with distance of 4', "system:similar to e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c00" ),
+            ( 'system:similar to 1 files with distance of 5', "system:similar to e2c1592ce2a3338767bb7990738ae06357cbdfe917669da9a0d04069f9759c00 with distance of 5" ),
+            ( 'system:similar to data (2 pixel hashes)', "system:similar to data b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd91 b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd92 distance 4" ),
+            ( 'system:similar to data (2 pixel hashes)', "system:similar to data b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd91 b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd92" ),
+            ( 'system:similar to data (2 perceptual hashes) with distance of 4', "system:similar to data 0702790ffeae5c8a 51ad07c228ab7469 distance 4" ),
+            ( 'system:similar to data (2 perceptual hashes) with distance of 8', "system:similar to data 0702790ffeae5c8a 51ad07c228ab7469" ),
+            ( 'system:similar to data (2 pixel, 2 perceptual hashes) with distance of 4', "system:similar to data b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd91 b51d75120456d6e2155416f26416a96290b0a524bf1582af50b4fcf46dedcd92 51ad07c228ab7469 0702790ffeae5c8a distance 4" ),
             ( 'system:everything', "system:everything" ),
             ( 'system:inbox', "system:inbox  " ),
             ( 'system:archive', "system:archive " ),
-            ( 'system:has duration', "system:has duration" ),
-            ( 'system:has duration', "system:has_duration" ),
-            ( 'system:no duration', "   system:no_duration" ),
-            ( 'system:no duration', "system:no duration" ),
+            ( 'system:archive', "system:archived " ),
+            ( 'system:archive', "system:archived" ),
+            ( 'system:duration: has duration', "system:has duration" ),
+            ( 'system:duration: has duration', "system:has_duration" ),
+            ( 'system:duration: no duration', "   system:no_duration" ),
+            ( 'system:duration: no duration', "system:no duration" ),
             ( 'system:is the best quality file of its duplicate group', "system:is the best quality file  of its group" ),
             ( 'system:is not the best quality file of its duplicate group', "system:isn't the best quality file of its duplicate group" ),
             ( 'system:is not the best quality file of its duplicate group', 'system:is not the best quality file of its duplicate group' ),
@@ -2004,64 +2054,99 @@ class TestTagObjects( unittest.TestCase ):
             ( 'system:has tags', "system:has tags" ),
             ( 'system:untagged', "system:no tags" ),
             ( 'system:untagged', "system:untagged" ),
-            ( 'system:image has human-readable embedded metadata', "system:has human readable embedded metadata" ),
+            ( 'system:has human-readable embedded metadata', "system:has human readable embedded metadata" ),
             ( 'system:no human-readable embedded metadata', "system:no human readable embedded metadata" ),
-            ( 'system:image has human-readable embedded metadata', "system:has embedded metadata" ),
+            ( 'system:has human-readable embedded metadata', "system:has embedded metadata" ),
             ( 'system:no human-readable embedded metadata', "system:no embedded metadata" ),
-            ( 'system:image has icc profile', "system:has icc profile" ),
+            ( 'system:has icc profile', "system:has icc profile" ),
             ( 'system:no icc profile', "system:no icc profile" ),
+            ( 'system:has forced filetype', "system:has forced filetype" ),
+            ( 'system:no forced filetype', "system:no forced filetype" ),
             ( 'system:number of tags > 5', "system:number of tags > 5" ),
-            ( 'system:number of tags \u2248 10', "system:number of tags ~= 10" ),
+            ( 'system:number of character tags > 5', "system:number of character tags > 5" ),
+            ( f'system:number of tags {HC.UNICODE_APPROX_EQUAL} 10', "system:number of tags ~= 10" ),
             ( 'system:has tags', "system:number of tags > 0  " ),
-            ( 'system:number of words < 2', "system:number of words < 2" ),
+            ( 'system:number of urls < 2', 'system:number of urls < 2' ),
+            ( 'system:number of urls < 2', 'system:num urls < 2' ),
+            ( 'system:number of urls: has urls', 'system:num urls > 0' ),
+            ( 'system:number of urls: has urls', 'system:num urls: has urls' ),
+            ( 'system:number of urls: no urls', 'system:num urls = 0' ),
+            ( 'system:number of urls: no urls', 'system:number of urls: no urls' ),
+            ( 'system:number of urls < 2', 'system:number of urls < 2' ),
+            ( 'system:number of urls < 2', 'system:num urls < 2' ),
+            ( 'system:number of words: has words', 'system:num words > 0' ),
+            ( 'system:number of words: has words', 'system:num words: has words' ),
+            ( 'system:number of words: no words', 'system:num words = 0' ),
+            ( 'system:number of words: no words', 'system:number of words: no words' ),
             ( 'system:height = 600', "system:height = 600px" ),
             ( 'system:height = 800', "system:height is 800" ),
             ( 'system:height > 900', "system:height > 900" ),
             ( 'system:width < 200', "system:width < 200" ),
             ( 'system:width > 1,000', "system:width > 1000 pixels" ),
-            ( 'system:filesize \u2248 50KB', "system:filesize ~= 50 kilobytes" ),
+            ( f'system:filesize {HC.UNICODE_APPROX_EQUAL} 50KB', "system:filesize ~= 50 kilobytes" ),
             ( 'system:filesize > 10MB', "system:filesize > 10megabytes" ),
             ( 'system:filesize < 1GB', "system:file size    < 1 GB" ),
             ( 'system:filesize > 0B', "system:file size > 0 B" ),
-            ( 'system:similar to 4 files using max hamming of 3', "system:similar to abcdef01 abcdef02 abcdef03, abcdef04 with distance 3" ),
-            ( 'system:similar to 1 files using max hamming of 5', "system:similar to abcdef distance 5" ),
             ( 'system:limit is 5,000', "system:limit is 5000" ),
             ( 'system:limit is 100', "system:limit = 100" ),
             ( 'system:filetype is jpeg', "system:filetype is jpeg" ),
             ( 'system:filetype is apng, jpeg, png', "system:filetype =   image/jpg, image/png, apng" ),
-            ( 'system:sha256 hash is in 3 hashes', "system:hash = abcdef01 abcdef02 abcdef03" ),
-            ( 'system:md5 hash is in 3 hashes', "system:hash = abcdef01 abcdef, abcdef04 md5" ),
-            ( 'system:md5 hash is abcdef01', "system:hash = abcdef01 md5" ),
-            ( 'system:md5 hash is abcdef01', "system:Hash = Abcdef01 md5" ),
-            ( 'system:md5 hash is not abcdef01', "system:Hash != Abcdef01 md5" ),
-            ( 'system:md5 hash is not abcdef01', "system:Hash is not Abcdef01 md5" ),
-            ( 'system:sha256 hash is abcdef0102', "system:hash = abcdef0102" ),
-            ( 'system:modified time: since 7 years 1 month ago', "system:modified date < 7  years 45 days 70h" ),
+            ( 'system:filetype is image', "system:filetype is image" ),
+            ( 'system:filetype is animated gif, static gif, jpeg', "system:filetype =   static gif, animated gif, jpeg" ),
+            ( 'system:hash is in 3 hashes', "system:hash = cf09faad262075f96bf9a30052b8ec224e096948a4f3a2776df5fa5a777bcfd8 a1b0ab771d11d9a6d1f993efee9d253d3aa78914387a7c8ceab520af88ab3de2 98a7d2f4735a5fcc70e7c94e2dadcc6ea45123fb2035b9cfe7ad1d78e48cae9e" ),
+            ( 'system:hash (md5) is in 3 hashes', "system:hash = ada7a31713ba24652c52e52c6f212e47 546fd4b8c39fc53e77e2f28b59cd1b18, cec888bacb79825621738454a4c9d226 md5" ),
+            ( 'system:hash (md5) is 666d0a395c8d4eebb5b15a0771972a01', "system:hash (md5) = 666d0a395c8d4eebb5b15a0771972a01" ),
+            ( 'system:hash (md5) is 123fec741ebe7596c1faf8d7689693b8', "system:Hash = 123feC741ebe7596c1faf8d7689693b8 md5" ),
+            ( 'system:hash (sha1) is not 2496baf1ded134b5ff7e44f72155240b9561ab5a', "system:Hash (sha1) != 2496baf1ded134b5ff7e44f72155240b9561ab5a" ),
+            ( 'system:hash is not b49f25453c6351403d62cc4d065321106c90f98b5653e83d289dbe0d55ba8c94', "system:Hash is not b49f25453c6351403d62cc4d065321106c90f98b5653e83d289dbe0d55ba8c94 sha256" ),
+            ( 'system:hash is 4d4ff3d42459f824295a36138782c444028f533b6ae5f0f67b27e9bf3c93de5d', "system:hash = 4d4ff3d42459f824295a36138782c444028f533b6ae5f0f67b27e9bf3c93de5d" ),
+            ( 'system:archived time: since 60 days ago', "system:archived date < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:archive date < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:archived time < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:archive time < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:date archived < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:time archived < 60 days" ),
+            ( 'system:archived time: since 60 days ago', "system:archived < 60 days" ),
+            ( 'system:modified time: since 60 days ago', "system:modified date < 60 days" ),
             ( 'system:modified time: since 2011-06-04', "system:modified date > 2011-06-04" ),
-            ( 'system:modified time: before 7 years 2 months ago', "system:date modified > 7 years 2    months" ),
+            ( 'system:modified time: before 60 days 4 hours ago', "system:date modified > 60 days 4    hours" ),
             ( 'system:modified time: since 1 day ago', "system:date modified < 1 day" ),
-            ( 'system:modified time: since 1 month 1 day ago', "system:date modified < 0 years 1 month 1 day 1 hour" ),
-            ( 'system:last view time: since 7 years 1 month ago', "system:last viewed time < 7 years 45 days 70h" ),
-            ( 'system:last view time: since 7 years 1 month ago', "system:last view time < 7 years 45 days 70h" ),
-            ( 'system:import time: since 7 years 1 month ago', "system:time_imported < 7 years 45 days 70h" ),
+            ( 'system:modified time: since 1 day ago', "system:time modified < 1 day" ),
+            ( 'system:modified time: since 1 day ago', "system:modified date < 1 day" ),
+            ( 'system:modified time: since 1 day ago', "system:modified time < 1 day" ),
+            ( 'system:last viewed time: since 60 days ago', "system:last viewed time < 60 days" ),
+            ( 'system:last viewed time: since 60 days ago', "system:last viewed date < 60 days" ),
+            ( 'system:last viewed time: since 60 days ago', "system:last view time < 60 days" ),
+            ( 'system:last viewed time: since 60 days ago', "system:last view date < 60 days" ),
+            ( 'system:last viewed time: since 60 days ago', "system:time last viewed < 60 days" ),
+            ( 'system:last viewed time: since 60 days ago', "system:date last viewed < 60 days" ),
+            ( 'system:import time: since 60 days ago', "system:time_imported < 60 days" ),
             ( 'system:import time: since 2011-06-04', "system:time imported > 2011-06-04" ),
-            ( 'system:import time: before 7 years 2 months ago', "system:time imported > 7 years 2 months" ),
+            ( 'system:import time: before 60 days 4 hours ago', "system:time imported > 60 days 4 hours" ),
+            ( 'system:import time: before 60 days 4 hours ago', "system:time imported > 60 days 4 hours" ),
             ( 'system:import time: since 1 day ago', "system:time imported < 1 day" ),
-            ( 'system:import time: since 1 month 1 day ago', "system:time imported < 0 years 1 month 1 day 1 hour" ),
             ( 'system:import time: a month either side of 2011-01-03', " system:time imported ~= 2011-1-3 " ),
             ( 'system:import time: a month either side of 1996-05-02', "system:time imported ~= 1996-05-2" ),
-            ( 'system:import time: since 7 years 1 month ago', "system:import_time < 7 years 45 days 70h" ),
+            ( 'system:import time: since 60 days ago', "system:import_time < 60 days" ),
             ( 'system:import time: since 2011-06-04', "system:import time > 2011-06-04" ),
-            ( 'system:import time: before 7 years 2 months ago', "system:import time > 7 years 2 months" ),
-            ( 'system:import time: since 1 day ago', "system:import time < 1 day" ),
+            ( 'system:import time: before 60 days 4 hours ago', "system:import time > 60 days 4 hours" ),
             ( 'system:import time: around 1 day ago', "system:import time = 1 day" ),
-            ( 'system:import time: since 1 month 1 day ago', "system:import time < 0 years 1 month 1 day 1 hour" ),
             ( 'system:import time: a month either side of 2011-01-03', " system:import time ~= 2011-1-3 " ),
             ( 'system:import time: a month either side of 1996-05-02', "system:import time ~= 1996-05-2" ),
+            ( 'system:import time: since 1 day ago', "system:import time < 1 day" ),
+            ( 'system:import time: since 1 day ago', "system:imported time < 1 day" ),
+            ( 'system:import time: since 1 day ago', "system:import date < 1 day" ),
+            ( 'system:import time: since 1 day ago', "system:imported date < 1 day" ),
+            ( 'system:import time: since 1 day ago', "system:time imported < 1 day" ),
+            ( 'system:import time: since 1 day ago', "system:date imported < 1 day" ),
+            ( 'system:import time: a month either side of 2020-01-03', "system:import time: the month of 2020-01-03" ),
+            ( 'system:import time: on the day of 2020-01-03', "system:import time: the day of 2020-01-03" ),
+            ( 'system:import time: around 7 days ago', "system:date imported around 7 days ago" ),
             ( 'system:duration < 5.0 seconds', "system:duration < 5 seconds" ),
-            ( 'system:duration \u2248 11.0 seconds', "system:duration ~= 5 sec 6000 msecs" ),
+            ( f'system:duration {HC.UNICODE_APPROX_EQUAL} 11.0 seconds {HC.UNICODE_PLUS_OR_MINUS}15%', "system:duration ~= 5 sec 6000 msecs" ),
             ( 'system:duration > 3 milliseconds', "system:duration > 3 milliseconds" ),
             ( 'system:is pending to my files', "system:file service is pending to my files" ),
+            ( 'system:is pending to my files', "system:file service is pending to MY FILES" ),
             ( 'system:is currently in my files', "   system:file service currently in my files" ),
             ( 'system:is not currently in my files', "system:file service isn't currently in my files" ),
             ( 'system:is not pending to my files', "system:file service is not pending to my files" ),
@@ -2069,16 +2154,19 @@ class TestTagObjects( unittest.TestCase ):
             ( 'system:num file relationships - has more than 3 not related/false positive', "system:number of file relationships > 3 false positives" ),
             ( 'system:ratio wider than 16:9', "system:ratio is wider than 16:9        " ),
             ( 'system:ratio = 16:9', "system:ratio is 16:9" ),
-            ( 'system:ratio taller than 1:1', "system:ratio taller than 1:1" ),
+            ( 'system:ratio is portrait', "system:ratio taller than 1:1" ),
+            ( 'system:ratio is square', "system:ratio is square" ),
+            ( 'system:ratio is portrait', "system:ratio is portrait" ),
+            ( 'system:ratio is landscape', "system:ratio is landscape" ),
             ( 'system:number of pixels > 50 pixels', "system:num pixels > 50 px" ),
             ( 'system:number of pixels < 1 megapixels', "system:num pixels < 1 megapixels " ),
-            ( 'system:number of pixels \u2248 5 kilopixels', "system:num pixels ~= 5 kilopixel" ),
-            ( 'system:media views \u2248 10', "system:media views ~= 10" ),
+            ( f'system:number of pixels {HC.UNICODE_APPROX_EQUAL} 5 kilopixels', "system:num pixels ~= 5 kilopixel" ),
+            ( f'system:media views {HC.UNICODE_APPROX_EQUAL} 10', "system:media views ~= 10" ),
             ( 'system:all views > 0', "system:all views > 0" ),
             ( 'system:preview views < 10', "system:preview views < 10  " ),
             ( 'system:media viewtime < 1 day 1 hour', "system:media viewtime < 1 days 1 hour 0 minutes" ),
             ( 'system:all viewtime > 1 hour 1 minute', "system:all viewtime > 1 hours 100 seconds" ),
-            ( 'system:preview viewtime \u2248 2 days 7 hours', "system:preview viewtime ~= 1 day 30 hours 100 minutes 90s" ),
+            ( f'system:preview viewtime {HC.UNICODE_APPROX_EQUAL} 2 days 7 hours', "system:preview viewtime ~= 1 day 30 hours 100 minutes 90s" ),
             ( 'system:has a url matching regex: index\\.php', " system:has url matching regex index\\.php" ),
             ( 'system:does not have a url matching regex: index\\.php', "system:does not have a url matching regex index\\.php" ),
             ( 'system:has url: https://safebooru.donmai.us/posts/4695284', "system:has_url https://safebooru.donmai.us/posts/4695284" ),
@@ -2087,7 +2175,49 @@ class TestTagObjects( unittest.TestCase ):
             ( 'system:does not have a url with domain: safebooru.com', "system:doesn't have domain safebooru.com" ),
             ( 'system:has safebooru file page url', "system:has a url with class safebooru file page" ),
             ( 'system:does not have safebooru file page url', "system:doesn't have a url with url class safebooru file page " ),
-            ( 'system:page less than 5', "system:tag as number page < 5" )
+            ( 'system:tag as number: page less than 5', "system:tag as number page < 5" ),
+            ( 'system:tag as number: page less than 5', "system:tag as number: page less than 5" ),
+            ( 'system:number of notes: has notes', 'system:has note' ),
+            ( 'system:number of notes: has notes', 'system:has notes' ),
+            ( 'system:number of notes: no notes', 'system:no note' ),
+            ( 'system:number of notes: no notes', 'system:has no note' ),
+            ( 'system:number of notes: no notes', 'system:no notes' ),
+            ( 'system:number of notes: no notes', 'system:does not have notes' ),
+            ( 'system:number of notes: no notes', 'system:does not have a note' ),
+            ( 'system:number of notes = 5', 'system:num notes = 5' ),
+            ( 'system:number of notes > 1', 'system:number of notes > 1' ),
+            ( 'system:number of notes: has notes', 'system:number of notes > 0' ),
+            ( 'system:number of notes: no notes', 'system:number of notes = 0' ),
+            ( 'system:has note with name "test"', 'system:has note with name test' ),
+            ( 'system:has note with name "test"', 'system:has a note with name test' ),
+            ( 'system:has note with name "test"', 'system:note with name test' ),
+            ( 'system:has note with name "test"', 'system:note with name "test"' ),
+            ( 'system:does not have note with name "test"', 'system:no note with name test' ),
+            ( 'system:does not have note with name "test"', 'system:does not have note with name test' ),
+            ( 'system:does not have note with name "test"', 'system:doesn\'t have note with name test' ),
+            ( 'system:does not have note with name "test"', 'system:does not have a note with name test' ),
+            ( 'system:does not have note with name "test"', 'system:does not have a note with name "test"' ),
+            ( 'system:has a rating for example local rating numerical service', 'system:has rating example local rating numerical service' ),
+            ( 'system:has a rating for example local rating numerical service', 'system:has a rating for example local rating numerical service' ),
+            ( 'system:does not have a rating for example local rating numerical service', 'system:no rating example local rating numerical service' ),
+            ( 'system:does not have a rating for example local rating numerical service', 'system:does not have a rating for example local rating numerical service' ),
+            ( 'system:rating for example local rating numerical service = 3/5', 'system:rating for example local rating numerical service = 3/5' ),
+            ( 'system:rating for example local rating numerical service = 3/5', 'system:rating for example local rating numerical service is 3/5' ),
+            ( f'system:rating for example local rating numerical service {HC.UNICODE_APPROX_EQUAL} 3/5', f'system:rating for example local rating numerical service {HC.UNICODE_APPROX_EQUAL} 3/5' ),
+            ( f'system:rating for example local rating numerical service {HC.UNICODE_APPROX_EQUAL} 3/5', 'system:rating for example local rating numerical service about 3/5' ),
+            ( 'system:rating for example local rating numerical service < 3/5', 'system:rating for example local rating numerical service < 3/5' ),
+            ( 'system:rating for example local rating numerical service < 3/5', 'system:rating for example local rating numerical service less than 3/5' ),
+            ( 'system:rating for example local rating numerical service > 3/5', 'system:rating for example local rating numerical service > 3/5' ),
+            ( 'system:rating for example local rating numerical service > 3/5', 'system:rating for example local rating numerical service more than 3/5' ),
+            ( 'system:rating for example local rating like service = like', 'system:rating for example local rating like service = like' ),
+            ( 'system:rating for example local rating like service = dislike', 'system:rating for example local rating like service = dislike' ),
+            ( 'system:rating for example local rating inc/dec service = 123', 'system:rating for example local rating inc/dec service = 123' ),
+            ( 'system:rating for example local rating inc/dec service > 123', 'system:rating for example local rating inc/dec service > 123' ),
+            ( 'system:rating for example local rating inc/dec service > 123', 'system:rating example local rating inc/dec service more than 123' ),
+            ( 'system:rating for example local rating inc/dec service < 123', 'system:rating for example local rating inc/dec service < 123' ),
+            ( 'system:rating for example local rating inc/dec service < 123', 'system:rating for example local rating inc/dec service less than 123' ),
+            ( f'system:rating for example local rating inc/dec service {HC.UNICODE_APPROX_EQUAL} 123', f'system:rating for example local rating inc/dec service {HC.UNICODE_APPROX_EQUAL} 123' ),
+            ( f'system:rating for example local rating inc/dec service {HC.UNICODE_APPROX_EQUAL} 123', 'system:rating for example local rating inc/dec service about 123' ),
         ]:
             
             ( sys_pred, ) = ClientSearchParseSystemPredicates.ParseSystemPredicateStringsToPredicates( ( sys_pred_text, ) )

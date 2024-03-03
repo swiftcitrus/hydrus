@@ -15,9 +15,9 @@ except:
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusExceptions
-from hydrus.core import HydrusFileHandling
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusSerialisable
+from hydrus.core.files import HydrusFileHandling
+from hydrus.core.files.images import HydrusImageHandling
 from hydrus.core.networking import HydrusNetwork
 
 INT_PARAMS = { 'expires', 'num', 'since', 'content_type', 'action', 'status' }
@@ -148,9 +148,7 @@ def DumpToGETQuery( args ):
     return query
     
 def ParseFileArguments( path, decompression_bombs_ok = False ):
-    
-    HydrusImageHandling.ConvertToPNGIfBMP( path )
-    
+
     hash = HydrusFileHandling.GetHashFromPath( path )
     
     try:
@@ -192,9 +190,9 @@ def ParseFileArguments( path, decompression_bombs_ok = False ):
             
             bounding_dimensions = HC.SERVER_THUMBNAIL_DIMENSIONS
             
-            ( clip_rect, target_resolution ) = HydrusImageHandling.GetThumbnailResolutionAndClipRegion( ( width, height ), bounding_dimensions, HydrusImageHandling.THUMBNAIL_SCALE_DOWN_ONLY, 100 )
+            target_resolution = HydrusImageHandling.GetThumbnailResolution( ( width, height ), bounding_dimensions, HydrusImageHandling.THUMBNAIL_SCALE_DOWN_ONLY, 100 )
             
-            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( path, target_resolution, mime, duration, num_frames, clip_rect = clip_rect )
+            thumbnail_bytes = HydrusFileHandling.GenerateThumbnailBytes( path, target_resolution, mime, duration, num_frames )
             
         except Exception as e:
             
@@ -416,6 +414,7 @@ def ParseTwistedRequestGETArgs( requests_args: dict, int_params, byte_params, st
 variable_type_to_text_lookup = collections.defaultdict( lambda: 'unknown!' )
 
 variable_type_to_text_lookup[ int ] = 'integer'
+variable_type_to_text_lookup[ float ] = 'float'
 variable_type_to_text_lookup[ str ] = 'string'
 variable_type_to_text_lookup[ bytes ] = 'hex-encoded bytestring'
 variable_type_to_text_lookup[ bool ] = 'boolean'
@@ -449,6 +448,11 @@ def GetValueFromDict( dictionary: dict, key, expected_type, expected_list_type =
 def TestVariableType( name: str, value: typing.Any, expected_type: type, expected_list_type = None, expected_dict_types = None, allowed_values = None ):
     
     if not isinstance( value, expected_type ):
+        
+        if expected_type is float and isinstance( value, int ):
+            
+            return
+            
         
         type_error_text = variable_type_to_text_lookup[ expected_type ]
         

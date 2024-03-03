@@ -6,21 +6,26 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
+from hydrus.core.files.images import HydrusImageHandling
 from hydrus.core.networking import HydrusNetwork
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
+from hydrus.client import ClientFilesPhysical
+from hydrus.client import ClientImageHandling
 from hydrus.client import ClientLocation
-from hydrus.client import ClientSearch
 from hydrus.client import ClientServices
 from hydrus.client.db import ClientDB
 from hydrus.client.exporting import ClientExportingFiles
-from hydrus.client.gui.pages import ClientGUIManagement
+from hydrus.client.gui.pages import ClientGUIManagementController
 from hydrus.client.gui.pages import ClientGUISession
 from hydrus.client.importing import ClientImportLocal
 from hydrus.client.importing import ClientImportFiles
 from hydrus.client.importing.options import FileImportOptions
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTags
+from hydrus.client.search import ClientSearch
 
 from hydrus.test import TestController
 
@@ -114,17 +119,17 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         content_updates = []
 
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'car', ( hash, ) ) ) )
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:cars', ( hash, ) ) ) )
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'maker:ford', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'car', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:cars', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'maker:ford', ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = content_updates
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         # cars
         
@@ -376,21 +381,21 @@ class TestClientDB( unittest.TestCase ):
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( '<', 'delta', ( 1, 1, 1, 1, ) ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( '<', 'delta', ( 0, 0, 0, 0, ) ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( CC.UNICODE_ALMOST_EQUAL_TO, 'delta', ( 1, 1, 1, 1, ) ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( CC.UNICODE_ALMOST_EQUAL_TO, 'delta', ( 0, 0, 0, 0, ) ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( HC.UNICODE_APPROX_EQUAL, 'delta', ( 1, 1, 1, 1, ) ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( HC.UNICODE_APPROX_EQUAL, 'delta', ( 0, 0, 0, 0, ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( '>', 'delta', ( 1, 1, 1, 1, ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_AGE, ( '>', 'delta', ( 0, 0, 0, 0, ) ), 1 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_ARCHIVE, None, 0 ) )
         
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '<', 100, ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '<', 0, ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( CC.UNICODE_ALMOST_EQUAL_TO, 100, ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( CC.UNICODE_ALMOST_EQUAL_TO, 0, ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '=', 100, ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '=', 0, ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '>', 100, ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ( '>', 0, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 100, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 0, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 100, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 0, ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 100, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 0, ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 100, ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 0, ), 0 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING, None, 1 ) )
         
@@ -406,6 +411,9 @@ class TestClientDB( unittest.TestCase ):
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_AUDIO, True, 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_AUDIO, False, 1 ) )
         
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_TRANSPARENCY, True, 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_TRANSPARENCY, False, 0 ) )
+        
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_EXIF, True, 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_EXIF, False, 1 ) )
         
@@ -415,19 +423,22 @@ class TestClientDB( unittest.TestCase ):
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_ICC_PROFILE, True, 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_ICC_PROFILE, False, 1 ) )
         
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_FORCED_FILETYPE, True, 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_FORCED_FILETYPE, False, 1 ) )
+        
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ( ( hash, ), 'sha256' ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ( ( bytes.fromhex( '0123456789abcdef' * 4 ), ), 'sha256' ), 0 ) )
         
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 201 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 200 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( CC.UNICODE_ALMOST_EQUAL_TO, 200 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( CC.UNICODE_ALMOST_EQUAL_TO, 60 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( CC.UNICODE_ALMOST_EQUAL_TO, 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '=', 200 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '=', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '>', 200 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '>', 199 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 201 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 200 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 200 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 60 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 200 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 200 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 199 ), 1 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_INBOX, None, 1 ) )
         
@@ -461,31 +472,48 @@ class TestClientDB( unittest.TestCase ):
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_TAGS, ( '', '>', 0 ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_TAGS, ( '', '>', 1 ), 0 ) )
         
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '<', 1 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '<', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( CC.UNICODE_ALMOST_EQUAL_TO, 0 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( CC.UNICODE_ALMOST_EQUAL_TO, 1 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '=', 0 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '=', 1 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '>', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ( '>', 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 0 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 0 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 1 ), 0 ) )
+        
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 1 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 0 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_URLS, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 1 ), 0 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( '=', 1, 1 ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( '=', 4, 3 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( CC.UNICODE_ALMOST_EQUAL_TO, 1, 1 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( CC.UNICODE_ALMOST_EQUAL_TO, 200, 201 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( CC.UNICODE_ALMOST_EQUAL_TO, 4, 1 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( HC.UNICODE_APPROX_EQUAL, 1, 1 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( HC.UNICODE_APPROX_EQUAL, 200, 201 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_RATIO, ( HC.UNICODE_APPROX_EQUAL, 4, 1 ), 0 ) )
         
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ( ( hash, ), 5 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ( ( bytes.fromhex( '0123456789abcdef' * 4 ), ), 5 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_FILES, ( ( hash, ), 5 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_FILES, ( ( bytes.fromhex( '0123456789abcdef' * 4 ), ), 5 ), 0 ) )
+        
+        pixel_hash = HydrusImageHandling.GetImagePixelHash( path, HC.IMAGE_PNG )
+        
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_DATA, ( ( pixel_hash, ), (), 0 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_DATA, ( ( os.urandom( 32 ), ), (), 0 ), 0 ) )
+        
+        perceptual_hashes = ClientImageHandling.GenerateShapePerceptualHashes( path, HC.IMAGE_PNG )
+        
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_DATA, ( (), tuple( perceptual_hashes ), 0 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO_DATA, ( (), ( os.urandom( 32 ), ), 0 ), 0 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '<', 0, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '<', 5270, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '<', 5271, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '=', 5270, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '=', 0, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( CC.UNICODE_ALMOST_EQUAL_TO, 5270, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( CC.UNICODE_ALMOST_EQUAL_TO, 0, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( HC.UNICODE_APPROX_EQUAL, 5270, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( HC.UNICODE_APPROX_EQUAL, 0, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 5270, HydrusData.ConvertUnitToInt( 'B' ) ), 0 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 5269, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 0, HydrusData.ConvertUnitToInt( 'B' ) ), 1 ) )
@@ -493,16 +521,16 @@ class TestClientDB( unittest.TestCase ):
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 0, HydrusData.ConvertUnitToInt( 'MB' ) ), 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ( '>', 0, HydrusData.ConvertUnitToInt( 'GB' ) ), 1 ) )
         
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '<', 201 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '<', 200 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '<', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( CC.UNICODE_ALMOST_EQUAL_TO, 200 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( CC.UNICODE_ALMOST_EQUAL_TO, 60 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( CC.UNICODE_ALMOST_EQUAL_TO, 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '=', 200 ), 1 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '=', 0 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '>', 200 ), 0 ) )
-        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ( '>', 199 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 201 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 200 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 200 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 60 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( HC.UNICODE_APPROX_EQUAL, 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 200 ), 1 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '=', 0 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 200 ), 0 ) )
+        tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_WIDTH, ClientSearch.NumberTest.STATICCreateFromCharacters( '>', 199 ), 1 ) )
         
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_LIMIT, 100, 1 ) )
         tests.append( ( ClientSearch.PREDICATE_TYPE_SYSTEM_LIMIT, 1, 1 ) )
@@ -512,12 +540,12 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
-        service_keys_to_content_updates[ CC.COMBINED_LOCAL_FILE_SERVICE_KEY ] = ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, ( hash, ) ), )
-        service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = ( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'car', ( hash, ) ) ), )
+        content_update_package.AddContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ARCHIVE, ( hash, ) ) )
+        content_update_package.AddContentUpdate( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'car', ( hash, ) ) ) )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         time.sleep( 0.5 )
         
@@ -577,16 +605,16 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         content_updates = []
         
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:cars', ( hash, ) ) ) )
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'maker:ford', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:cars', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'maker:ford', ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = content_updates
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -624,7 +652,7 @@ class TestClientDB( unittest.TestCase ):
         preds = []
         
         preds.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'car' ) )
-        preds.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ( '<', 201 ) ) )
+        preds.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_HEIGHT, ClientSearch.NumberTest.STATICCreateFromCharacters( '<', 201 ) ) )
         
         or_pred = ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_OR_CONTAINER, preds )
         
@@ -678,35 +706,35 @@ class TestClientDB( unittest.TestCase ):
         
         self._write( 'update_services', services )
         
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         content_updates = []
         
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 1.0, ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ TestController.LOCAL_RATING_LIKE_SERVICE_KEY ] = content_updates
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( TestController.LOCAL_RATING_LIKE_SERVICE_KEY, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        service_keys_to_content_updates = {}
-        
-        content_updates = []
-        
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.6, ( hash, ) ) ) )
-        
-        service_keys_to_content_updates[ TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ] = content_updates
-        
-        self._write( 'content_updates', service_keys_to_content_updates )
-        
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         content_updates = []
         
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 3, ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 0.6, ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ TestController.LOCAL_RATING_INCDEC_SERVICE_KEY ] = content_updates
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
+        
+        content_updates = []
+        
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( 3, ( hash, ) ) ) )
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( TestController.LOCAL_RATING_INCDEC_SERVICE_KEY, content_updates )
+        
+        self._write( 'content_updates', content_update_package )
         
         tests = []
         
@@ -735,11 +763,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -788,7 +816,7 @@ class TestClientDB( unittest.TestCase ):
         predicates.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_EVERYTHING, count = ClientSearch.PredicateCount.STATICCreateCurrentCount( 1 ) ) )
         predicates.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_INBOX, count = ClientSearch.PredicateCount.STATICCreateCurrentCount( 1 ) ) )
         predicates.append( ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_ARCHIVE, count = ClientSearch.PredicateCount.STATICCreateCurrentCount( 0 ) ) )
-        predicates.extend( [ ClientSearch.Predicate( predicate_type ) for predicate_type in [ ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_TAGS, ClientSearch.PREDICATE_TYPE_SYSTEM_LIMIT, ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ClientSearch.PREDICATE_TYPE_SYSTEM_TIME, ClientSearch.PREDICATE_TYPE_SYSTEM_KNOWN_URLS, ClientSearch.PREDICATE_TYPE_SYSTEM_HAS_AUDIO, ClientSearch.PREDICATE_TYPE_SYSTEM_EMBEDDED_METADATA, ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ClientSearch.PREDICATE_TYPE_SYSTEM_DIMENSIONS, ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.PREDICATE_TYPE_SYSTEM_NOTES, ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, ClientSearch.PREDICATE_TYPE_SYSTEM_RATING, ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_SERVICE, ClientSearch.PREDICATE_TYPE_SYSTEM_TAG_AS_NUMBER, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_VIEWING_STATS ] ] )
+        predicates.extend( [ ClientSearch.Predicate( predicate_type ) for predicate_type in [ ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_TAGS, ClientSearch.PREDICATE_TYPE_SYSTEM_LIMIT, ClientSearch.PREDICATE_TYPE_SYSTEM_SIZE, ClientSearch.PREDICATE_TYPE_SYSTEM_TIME, ClientSearch.PREDICATE_TYPE_SYSTEM_URLS, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_PROPERTIES, ClientSearch.PREDICATE_TYPE_SYSTEM_HASH, ClientSearch.PREDICATE_TYPE_SYSTEM_DIMENSIONS, ClientSearch.PREDICATE_TYPE_SYSTEM_DURATION, ClientSearch.PREDICATE_TYPE_SYSTEM_NOTES, ClientSearch.PREDICATE_TYPE_SYSTEM_NUM_WORDS, ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, ClientSearch.PREDICATE_TYPE_SYSTEM_RATING, ClientSearch.PREDICATE_TYPE_SYSTEM_SIMILAR_TO, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_SERVICE, ClientSearch.PREDICATE_TYPE_SYSTEM_TAG_AS_NUMBER, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_RELATIONSHIPS, ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_VIEWING_STATS ] ] )
         
         self.assertEqual( set( result ), set( predicates ) )
         
@@ -850,11 +878,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         ( media_result, ) = self._read( 'media_results', ( hash, ) )
         
@@ -872,11 +900,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_UNDELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         ( media_result, ) = self._read( 'media_results', ( hash, ) )
         
@@ -894,11 +922,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         ( media_result, ) = self._read( 'media_results', ( hash, ) )
         
@@ -945,17 +973,17 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         ( media_result, ) = self._read( 'media_results', ( hash, ) )
         
@@ -994,22 +1022,22 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        service_keys_to_content_updates = {}
+        content_update_package = ClientContentUpdates.ContentUpdatePackage()
         
         content_updates = []
         
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'character:samus aran', ( hash, ) ) ) )
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:metroid', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'character:samus aran', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'series:metroid', ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ CC.DEFAULT_LOCAL_TAG_SERVICE_KEY ] = content_updates
+        content_update_package.AddContentUpdates( CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, content_updates )
         
         content_updates = []
         
-        content_updates.append( HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'clothing:bodysuit', ( hash, ) ) ) )
+        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( 'clothing:bodysuit', ( hash, ) ) ) )
         
-        service_keys_to_content_updates[ new_service_key ] = content_updates
+        content_update_package.AddContentUpdates( new_service_key, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         result = self._read( 'filter_existing_tags', CC.DEFAULT_LOCAL_TAG_SERVICE_KEY, { 'character:samus aran', 'series:metroid', 'clothing:bodysuit' } )
         
@@ -1031,7 +1059,7 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        management_controller = ClientGUIManagement.CreateManagementControllerImportGallery()
+        management_controller = ClientGUIManagementController.CreateManagementControllerImportGallery()
         
         page_name = management_controller.GetPageName()
         
@@ -1047,7 +1075,7 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        management_controller = ClientGUIManagement.CreateManagementControllerImportMultipleWatcher()
+        management_controller = ClientGUIManagementController.CreateManagementControllerImportMultipleWatcher()
         
         page_name = management_controller.GetPageName()
         
@@ -1065,7 +1093,7 @@ class TestClientDB( unittest.TestCase ):
         
         service_keys_to_tags = ClientTags.ServiceKeysToTags( { HydrusData.GenerateKey() : [ 'some', 'tags' ] } )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerImportHDD( [ 'some', 'paths' ], FileImportOptions.FileImportOptions(), [], { 'paths' : service_keys_to_tags }, True )
+        management_controller = ClientGUIManagementController.CreateManagementControllerImportHDD( [ 'some', 'paths' ], FileImportOptions.FileImportOptions(), [], { 'paths' : service_keys_to_tags }, True )
         
         management_controller.GetVariable( 'hdd_import' ).PausePlay() # to stop trying to import 'some' 'paths'
         
@@ -1083,7 +1111,7 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        management_controller = ClientGUIManagement.CreateManagementControllerImportSimpleDownloader()
+        management_controller = ClientGUIManagementController.CreateManagementControllerImportSimpleDownloader()
         
         page_name = management_controller.GetPageName()
         
@@ -1099,7 +1127,7 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        management_controller = ClientGUIManagement.CreateManagementControllerPetitions( HG.test_controller.example_tag_repo_service_key )
+        management_controller = ClientGUIManagementController.CreateManagementControllerPetitions( HG.test_controller.example_tag_repo_service_key )
         
         page_name = management_controller.GetPageName()
         
@@ -1119,7 +1147,7 @@ class TestClientDB( unittest.TestCase ):
         
         fsc = ClientSearch.FileSearchContext( location_context = location_context, predicates = [] )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', fsc, True )
+        management_controller = ClientGUIManagementController.CreateManagementControllerQuery( 'search', fsc, True )
         
         page_name = management_controller.GetPageName()
         
@@ -1141,7 +1169,7 @@ class TestClientDB( unittest.TestCase ):
         
         fsc = ClientSearch.FileSearchContext( location_context = location_context, tag_context = tag_context, predicates = [] )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'search', fsc, False )
+        management_controller = ClientGUIManagementController.CreateManagementControllerQuery( 'search', fsc, False )
         
         page_name = management_controller.GetPageName()
         
@@ -1161,7 +1189,7 @@ class TestClientDB( unittest.TestCase ):
         
         fsc = ClientSearch.FileSearchContext( location_context = location_context, predicates = [ ClientSearch.SYSTEM_PREDICATE_ARCHIVE ] )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', fsc, True )
+        management_controller = ClientGUIManagementController.CreateManagementControllerQuery( 'files', fsc, True )
         
         page_name = management_controller.GetPageName()
         
@@ -1181,7 +1209,7 @@ class TestClientDB( unittest.TestCase ):
         
         fsc = ClientSearch.FileSearchContext( location_context = location_context, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_TAG, 'tag', count = ClientSearch.PredicateCount.STATICCreateStaticCount( 1, 3 ) ) ] )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'wew lad', fsc, True )
+        management_controller = ClientGUIManagementController.CreateManagementControllerQuery( 'wew lad', fsc, True )
         
         page_name = management_controller.GetPageName()
         
@@ -1201,7 +1229,7 @@ class TestClientDB( unittest.TestCase ):
         
         fsc = ClientSearch.FileSearchContext( location_context = location_context, predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_RATING, ( '>', 0.2, TestController.LOCAL_RATING_NUMERICAL_SERVICE_KEY ) ), ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_FILE_SERVICE, ( True, HC.CONTENT_STATUS_CURRENT, CC.LOCAL_FILE_SERVICE_KEY ) ) ] )
         
-        management_controller = ClientGUIManagement.CreateManagementControllerQuery( 'files', fsc, True )
+        management_controller = ClientGUIManagementController.CreateManagementControllerQuery( 'files', fsc, True )
         
         page_name = management_controller.GetPageName()
         
@@ -1252,8 +1280,8 @@ class TestClientDB( unittest.TestCase ):
         test_files.append( ( 'muh_webm.webm', '55b6ce9d067326bf4b2fbe66b8f51f366bc6e5f776ba691b0351364383c43fcb', 84069, HC.VIDEO_WEBM, 640, 360, { 4010 }, { 120 }, True, None ) )
         test_files.append( ( 'muh_jpg.jpg', '5d884d84813beeebd59a35e474fa3e4742d0f2b6679faa7609b245ddbbd05444', 42296, HC.IMAGE_JPEG, 392, 498, { None }, { None }, False, None ) )
         test_files.append( ( 'muh_png.png', 'cdc67d3b377e6e1397ffa55edc5b50f6bdf4482c7a6102c6f27fa351429d6f49', 31452, HC.IMAGE_PNG, 191, 196, { None }, { None }, False, None ) )
-        test_files.append( ( 'muh_apng.png', '9e7b8b5abc7cb11da32db05671ce926a2a2b701415d1b2cb77a28deea51010c3', 616956, HC.IMAGE_APNG, 500, 500, { 3133, 1880, 1125, 1800 }, { 27, 47 }, False, None ) )
-        test_files.append( ( 'muh_gif.gif', '00dd9e9611ebc929bfc78fde99a0c92800bbb09b9d18e0946cea94c099b211c2', 15660, HC.IMAGE_GIF, 329, 302, { 600 }, { 5 }, False, None ) )
+        test_files.append( ( 'muh_apng.png', '9e7b8b5abc7cb11da32db05671ce926a2a2b701415d1b2cb77a28deea51010c3', 616956, HC.ANIMATION_APNG, 500, 500, { 3133, 1880, 1125, 1800 }, { 27, 47 }, False, None ) )
+        test_files.append( ( 'muh_gif.gif', '00dd9e9611ebc929bfc78fde99a0c92800bbb09b9d18e0946cea94c099b211c2', 15660, HC.ANIMATION_GIF, 329, 302, { 600 }, { 5 }, False, None ) )
         
         file_import_options = FileImportOptions.FileImportOptions()
         file_import_options.SetIsDefault( True )
@@ -1290,7 +1318,7 @@ class TestClientDB( unittest.TestCase ):
             
             mr_inbox = mr_locations_manager.inbox
             
-            now = HydrusData.GetNow()
+            now = HydrusTime.GetNow()
             
             self.assertEqual( mr_hash, hash )
             self.assertEqual( mr_inbox, True )
@@ -1349,13 +1377,16 @@ class TestClientDB( unittest.TestCase ):
         
         self.assertTrue( os.path.exists( client_files_default ) )
         
+        base_location = ClientFilesPhysical.FilesStorageBaseLocation( client_files_default, 1 )
+        
         for prefix in HydrusData.IterateHexPrefixes():
             
             for c in ( 'f', 't' ):
                 
-                dir = os.path.join( client_files_default, c + prefix )
+                subfolder = ClientFilesPhysical.FilesStorageSubfolder( c + prefix, base_location )
                 
-                self.assertTrue( os.path.exists( dir ) )
+                self.assertTrue( os.path.exists( subfolder.path ) )
+                self.assertTrue( subfolder.PathExists() )
                 
             
         
@@ -1412,11 +1443,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1481,11 +1512,11 @@ class TestClientDB( unittest.TestCase ):
         
         #
         
-        content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
+        content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, ( hash, ), reason = 'test delete' )
         
-        service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : ( content_update, ) }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1528,7 +1559,7 @@ class TestClientDB( unittest.TestCase ):
         
         mr_inbox = mr_locations_manager.inbox
         
-        now = HydrusData.GetNow()
+        now = HydrusTime.GetNow()
         
         self.assertEqual( mr_hash, hash )
         self.assertEqual( mr_inbox, True )
@@ -1550,7 +1581,7 @@ class TestClientDB( unittest.TestCase ):
         
         mr_inbox = mr_locations_manager.inbox
         
-        now = HydrusData.GetNow()
+        now = HydrusTime.GetNow()
         
         self.assertEqual( mr_hash, hash )
         self.assertEqual( mr_inbox, True )
@@ -1563,6 +1594,82 @@ class TestClientDB( unittest.TestCase ):
         self.assertEqual( mr_num_frames, None )
         self.assertEqual( mr_has_audio, False )
         self.assertEqual( mr_num_words, None )
+        
+    
+    def test_mr_bones( self ):
+        
+        TestClientDB._clear_db()
+        
+        test_files = []
+        
+        test_files.append( 'muh_swf.swf' )
+        test_files.append( 'muh_mp4.mp4' )
+        
+        file_import_options = FileImportOptions.FileImportOptions()
+        file_import_options.SetIsDefault( True )
+        
+        for filename in test_files:
+            
+            HG.test_controller.SetRead( 'hash_status', ClientImportFiles.FileImportStatus.STATICGetUnknownStatus() )
+            
+            path = os.path.join( HC.STATIC_DIR, 'testing', filename )
+            
+            file_import_job = ClientImportFiles.FileImportJob( path, file_import_options )
+            
+            file_import_job.GeneratePreImportHashAndStatus()
+            
+            file_import_job.GenerateInfo()
+            
+            file_import_status = self._write( 'import_file', file_import_job )
+            
+        
+        swf_hash_hex = 'edfef9905fdecde38e0752a5b6ab7b6df887c3968d4246adc9cffc997e168cdf'
+        
+        media_result = self._read( 'media_result', bytes.fromhex( swf_hash_hex ) )
+        
+        earliest_import_timestamp = HydrusTime.SecondiseMS( media_result.GetLocationsManager().GetTimesManager().GetImportedTimestampMS( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY ) )
+        
+        result = self._read( 'boned_stats' )
+        
+        expected_result = {
+            'earliest_import_time': earliest_import_timestamp,
+            'num_archive': 0,
+            'num_deleted': 0,
+            'num_inbox': 2,
+            'size_archive': 0,
+            'size_deleted': 0,
+            'size_inbox': 1027308,
+            'total_alternate_files': 0,
+            'total_duplicate_files': 0,
+            'total_viewtime': (0, 0, 0, 0)
+        }
+        
+        self.assertEqual( result, expected_result )
+        
+        #
+        
+        location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
+        
+        predicates = [ ClientSearch.Predicate( ClientSearch.PREDICATE_TYPE_SYSTEM_MIME, value = ( HC.APPLICATION_FLASH, ) ) ]
+        
+        file_search_context = ClientSearch.FileSearchContext( location_context = location_context, predicates = predicates )
+        
+        result = self._read( 'boned_stats', file_search_context = file_search_context )
+        
+        expected_result = {
+            'earliest_import_time': earliest_import_timestamp,
+            'num_archive': 0,
+            'num_deleted': 0,
+            'num_inbox': 1,
+            'size_archive': 0,
+            'size_deleted': 0,
+            'size_inbox': 456774,
+            'total_alternate_files': 0,
+            'total_duplicate_files': 0,
+            'total_viewtime': (0, 0, 0, 0)
+        }
+        
+        self.assertEqual( result, expected_result )
         
     
     def test_nums_pending( self ):
@@ -1618,11 +1725,11 @@ class TestClientDB( unittest.TestCase ):
         
         tags = [ 'this', 'is', 'a:test' ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in tags ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in tags ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1630,17 +1737,17 @@ class TestClientDB( unittest.TestCase ):
         
         tags = [ 'bad tag', 'bad' ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( tag, hashes ) ) for tag in tags ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_ADD, ( tag, hashes ) ) for tag in tags ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( tag, hashes ), reason = 'yo' ) for tag in tags ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PETITION, ( tag, hashes ), reason = 'yo' ) for tag in tags ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1651,11 +1758,11 @@ class TestClientDB( unittest.TestCase ):
             ( 'sib tag 4a', 'sib tag 4b' )
         ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PEND, pair, reason = 'good sibling m8' ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PEND, pair, reason = 'good sibling m8' ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1664,17 +1771,17 @@ class TestClientDB( unittest.TestCase ):
             ( 'lara croft', 'princess peach' )
         ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_ADD, pair ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_ADD, pair ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PETITION, pair, reason = 'mistake' ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_SIBLINGS, HC.CONTENT_UPDATE_PETITION, pair, reason = 'mistake' ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1684,11 +1791,11 @@ class TestClientDB( unittest.TestCase ):
             ( 'par tag 3a', 'par tag 3b' )
         ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PEND, pair, reason = 'good parent m8' ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PEND, pair, reason = 'good parent m8' ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1696,37 +1803,37 @@ class TestClientDB( unittest.TestCase ):
             ( 'ayanami rei', 'zelda' )
         ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_ADD, pair ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_ADD, pair ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PETITION, pair, reason = 'mistake' ) for pair in pairs ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TAG_PARENTS, HC.CONTENT_UPDATE_PETITION, pair, reason = 'mistake' ) for pair in pairs ]
         
-        service_keys_to_content_updates = { tag_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( tag_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
         hashes = [ os.urandom( 32 ) for i in range( 15 ) ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PEND, hashes ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PEND, hashes ) ]
         
-        service_keys_to_content_updates = { file_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( file_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
         hashes = [ os.urandom( 32 ) for i in range( 20 ) ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PEND, hashes ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PEND, hashes ) ]
         
-        service_keys_to_content_updates = { ipfs_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( ipfs_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1758,33 +1865,33 @@ class TestClientDB( unittest.TestCase ):
         
         media_results = self._read( 'media_results', hashes )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, ( mr.GetFileInfoManager(), 100 ) ) for mr in media_results ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, ( mr.GetFileInfoManager(), 100000 ) ) for mr in media_results ]
         
-        service_keys_to_content_updates = { file_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( file_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, ( mr.GetFileInfoManager(), os.urandom( 16 ).hex() ) ) for mr in media_results ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_ADD, ( mr.GetFileInfoManager(), os.urandom( 16 ).hex() ) ) for mr in media_results ]
         
-        service_keys_to_content_updates = { ipfs_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( ipfs_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
-        
-        #
-        
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = 'nope' ) ]
-        
-        service_keys_to_content_updates = { file_sk : content_updates }
-        
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         #
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes ) ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = 'nope' ) ]
         
-        service_keys_to_content_updates = { ipfs_sk : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( file_sk, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
+        
+        #
+        
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes ) ]
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( ipfs_sk, content_updates )
+        
+        self._write( 'content_updates', content_update_package )
         
         #
         
@@ -1836,11 +1943,11 @@ class TestClientDB( unittest.TestCase ):
         
         tags = [ 'this', 'is', 'a:test' ]
         
-        content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in tags ]
+        content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_MAPPINGS, HC.CONTENT_UPDATE_PEND, ( tag, hashes ) ) for tag in tags ]
         
-        service_keys_to_content_updates = { service_key : content_updates }
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( service_key, content_updates )
         
-        self._write( 'content_updates', service_keys_to_content_updates )
+        self._write( 'content_updates', content_update_package )
         
         result = self._read( 'pending', service_key, ( HC.CONTENT_TYPE_MAPPINGS, ) )
         

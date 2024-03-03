@@ -8,6 +8,8 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 
+from hydrus.client import ClientGlobals as CG
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import QtPorting as QP
 
 # this does one thing neatly
@@ -34,7 +36,7 @@ class AsyncQtJob( object ):
         message += os.linesep * 2
         message += 'Error summary: {}'.format( value )
         
-        QW.QMessageBox.warning( self._win, 'Error', message )
+        ClientGUIDialogsMessage.ShowCritical( self._win, 'Error', message )
         
         if self._errback_ui_cleanup_callable is not None:
             
@@ -73,7 +75,7 @@ class AsyncQtJob( object ):
             
             try:
                 
-                HG.client_controller.CallBlockingToQt( self._win, c, etype, value, tb )
+                CG.client_controller.CallBlockingToQt( self._win, c, etype, value, tb )
                 
             except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.ShutdownException ):
                 
@@ -85,7 +87,7 @@ class AsyncQtJob( object ):
         
         try:
             
-            HG.client_controller.CallBlockingToQt( self._win, qt_deliver_result, result )
+            CG.client_controller.CallBlockingToQt( self._win, qt_deliver_result, result )
             
         except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.ShutdownException ):
             
@@ -106,7 +108,7 @@ class AsyncQtJob( object ):
             
             try:
                 
-                HG.client_controller.CallBlockingToQt( self._win, c, etype, value, tb )
+                CG.client_controller.CallBlockingToQt( self._win, c, etype, value, tb )
                 
             except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.ShutdownException ):
                 
@@ -117,7 +119,7 @@ class AsyncQtJob( object ):
     
     def start( self ):
         
-        HG.client_controller.CallToThread( self._doWork )
+        CG.client_controller.CallToThread( self._doWork )
         
     
 # this can refresh dirty stuff n times and won't spam work
@@ -172,7 +174,7 @@ class AsyncQtUpdater( object ):
                 
                 try:
                     
-                    pre_work_args = HG.client_controller.CallBlockingToQt( self._win, self._pre_work_callable )
+                    pre_work_args = CG.client_controller.CallBlockingToQt( self._win, self._pre_work_callable )
                     
                 except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.ShutdownException ):
                     
@@ -186,7 +188,7 @@ class AsyncQtUpdater( object ):
             
             try:
                 
-                HG.client_controller.CallBlockingToQt( self._win, qt_deliver_result, result )
+                CG.client_controller.CallBlockingToQt( self._win, qt_deliver_result, result )
                 
             except ( HydrusExceptions.QtDeadWindowException, HydrusExceptions.ShutdownException ):
                 
@@ -211,7 +213,7 @@ class AsyncQtUpdater( object ):
     
     def _startWork( self ):
         
-        HG.client_controller.CallToThread( self._doWork )
+        CG.client_controller.CallToThread( self._doWork )
         
     
     def update( self ):

@@ -1,14 +1,17 @@
 from functools import reduce
 
+import math
 import numpy
 import numpy.core.multiarray # important this comes before cv!
 
 import cv2
 
-from hydrus.client import ClientConstants as CC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusImageHandling
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core.files.images import HydrusImageHandling
+
+from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 
 cv_interpolation_enum_lookup = {}
 
@@ -24,12 +27,14 @@ def DiscardBlankPerceptualHashes( perceptual_hashes ):
     
     return perceptual_hashes
     
+
 def GenerateNumPyImage( path, mime ):
     
-    force_pil = HG.client_controller.new_options.GetBoolean( 'load_images_with_pil' )
+    force_pil = CG.client_controller.new_options.GetBoolean( 'load_images_with_pil' )
     
     return HydrusImageHandling.GenerateNumPyImage( path, mime, force_pil = force_pil )
     
+
 def GenerateShapePerceptualHashes( path, mime ):
     
     if HG.phash_generation_report_mode:
@@ -37,7 +42,36 @@ def GenerateShapePerceptualHashes( path, mime ):
         HydrusData.ShowText( 'phash generation: loading image' )
         
     
-    numpy_image = GenerateNumPyImage( path, mime )
+    try:
+        
+        numpy_image = GenerateNumPyImage( path, mime )
+        
+        return GenerateShapePerceptualHashesNumPy( numpy_image )
+        
+    except:
+        
+        return set()
+        
+    
+
+def PILDCT( greyscale_numpy_image: numpy.array ):
+    # this emulates cv2.dct and was figured out by prkc. there is some OpenCV secret magic that differs from 'typical' DCT
+    # it should be a complete drop-in other than tiny floating-point calc differences 3.9204849e+02 vs 3.92048486e+02
+    # experimentally, I ran the final phash on 500 different files and every single one was exactly the same!
+    # also, W and Norm can be precomputed if you like!
+    w, h = 2 * greyscale_numpy_image.shape[0], 2 * greyscale_numpy_image.shape[1]
+    extended = numpy.zeros((w,h), numpy.float64)
+    extended[0:w//2,0:h//2] = greyscale_numpy_image
+    extended[0:w//2,h//2:h] = numpy.fliplr(greyscale_numpy_image)
+    extended[w//2:w,:] = numpy.flipud(extended[0:w//2,:])
+    dct_ = numpy.fft.fft2(extended, norm="ortho")[0:w//2,0:h//2]
+    invsqrt2 = 1/math.sqrt(2)
+    W = lambda N, k: numpy.exp(-1j*k*math.pi/N)*(invsqrt2 if k == 0 else 1.0)
+    Norm = numpy.fromfunction(numpy.vectorize(lambda i,j: W(w,i)*W(h,j)), (w//2,h//2), dtype=numpy.cdouble)
+    return numpy.real(numpy.multiply(Norm,dct_))
+    
+
+def GenerateShapePerceptualHashesNumPy( numpy_image ):
     
     if HG.phash_generation_report_mode:
         
@@ -49,7 +83,7 @@ def GenerateShapePerceptualHashes( path, mime ):
     if depth == 4:
         
         # doing this on 10000x10000 pngs eats ram like mad
-        # we don't want to do GetThumbnailResolutionAndClipRegion as for extremely wide or tall images, we'll then scale below 32 pixels for one dimension, losing information!
+        # we don't want to do GetThumbnailResolution as for extremely wide or tall images, we'll then scale below 32 pixels for one dimension, losing information!
         # however, it does not matter if we stretch the image a bit, since we'll be coercing 32x32 in a minute
         
         new_x = min( 256, x )
@@ -112,7 +146,7 @@ def GenerateShapePerceptualHashes( path, mime ):
         HydrusData.ShowText( 'phash generation: generating dct' )
         
     
-    dct = cv2.dct( numpy_image_tiny_float )
+    dct = PILDCT( numpy_image_tiny_float )
     
     # take top left 8x8 of dct
     
@@ -205,7 +239,7 @@ def GenerateShapePerceptualHashes( path, mime ):
 def ResizeNumPyImageForMediaViewer( mime, numpy_image, target_resolution ):
     
     ( target_width, target_height ) = target_resolution
-    new_options = HG.client_controller.new_options
+    new_options = CG.client_controller.new_options
     
     ( scale_up_quality, scale_down_quality ) = new_options.GetMediaZoomQuality( mime )
     

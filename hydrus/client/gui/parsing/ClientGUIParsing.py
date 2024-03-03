@@ -1,6 +1,5 @@
 import itertools
 import os
-import threading
 import traceback
 import typing
 
@@ -15,10 +14,11 @@ from hydrus.core import HydrusSerialisable
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
-from hydrus.client import ClientPaths
 from hydrus.client import ClientStrings
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUISerialisable
@@ -51,7 +51,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_sharing.html' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_SHARING )
         
         menu_items.append( ( 'normal', 'open the downloader sharing help', 'Open the help page for sharing downloaders in your web browser.', page_func ) )
         
@@ -110,7 +110,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
             
         else:
             
-            QW.QMessageBox.information( self, 'Information', 'No headers/bandwidth rules found!' )
+            ClientGUIDialogsMessage.ShowInformation( self, 'No headers/bandwidth rules found!' )
             
         
     
@@ -397,7 +397,7 @@ class DownloaderExportPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         for domain_metadata in domain_metadatas:
             
-            QW.QMessageBox.information( self, 'Information', domain_metadata.GetDetailedSafeSummary() )
+            ClientGUIDialogsMessage.ShowInformation( self, domain_metadata.GetDetailedSafeSummary() )
             
         
         return domain_metadatas
@@ -497,7 +497,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_content_parsers.html#content_parsers' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_CONTENT_PARSERS_CONTENT_PARSERS )
         
         menu_items.append( ( 'normal', 'open the content parsers help', 'Open the help page for content parsers in your web browser.', page_func ) )
         
@@ -592,7 +592,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._timestamp_type = ClientGUICommon.BetterChoice( self._timestamp_panel )
         
-        self._timestamp_type.addItem( 'source time', HC.TIMESTAMP_TYPE_SOURCE )
+        self._timestamp_type.addItem( 'source time', HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN )
         
         #
         
@@ -911,7 +911,7 @@ class EditContentParserPanel( ClientGUIScrolledPanels.EditPanel ):
         elif content_type == HC.CONTENT_TYPE_TITLE:
             
             self._title_panel.show()
-
+            
         elif content_type == HC.CONTENT_TYPE_HTTP_HEADERS:
             
             self._header_panel.show()
@@ -1184,7 +1184,7 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_parsers_page_parsers.html#page_parsers' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_PARSERS_PAGE_PARSERS_PAGE_PARSERS )
         
         menu_items.append( ( 'normal', 'open the page parser help', 'Open the help page for page parsers in your web browser.', page_func ) )
         
@@ -1592,9 +1592,9 @@ class EditPageParserPanel( ClientGUIScrolledPanels.EditPanel ):
         
         network_job.OverrideBandwidth()
         
-        HG.client_controller.network_engine.AddJob( network_job )
+        CG.client_controller.network_engine.AddJob( network_job )
         
-        HG.client_controller.CallToThread( wait_and_do_it, network_job )
+        CG.client_controller.CallToThread( wait_and_do_it, network_job )
         
     
     def GetFormula( self ):

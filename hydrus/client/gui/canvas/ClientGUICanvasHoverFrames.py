@@ -13,6 +13,7 @@ from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
 from hydrus.client import ClientDuplicates
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIDragDrop
 from hydrus.client.gui import ClientGUICore as CGC
 from hydrus.client.gui import ClientGUIFunctions
@@ -29,6 +30,7 @@ from hydrus.client.gui.canvas import ClientGUIMPV
 from hydrus.client.gui.lists import ClientGUIListBoxes
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.gui.widgets import ClientGUIMenuButton
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientRatings
 
 class RatingIncDecCanvas( ClientGUIRatings.RatingIncDec ):
@@ -44,8 +46,8 @@ class RatingIncDecCanvas( ClientGUIRatings.RatingIncDec ):
         
         self._hashes = set()
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
-        HG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
         
     
     def _Draw( self, painter ):
@@ -55,8 +57,6 @@ class RatingIncDecCanvas( ClientGUIRatings.RatingIncDec ):
         painter.eraseRect( painter.viewport() )
         
         if self._current_media is not None:
-            
-            ( self._rating_state, self._rating ) = ClientRatings.GetIncDecStateFromMedia( ( self._current_media, ), self._service_key )
             
             ClientGUIRatings.DrawIncDec( painter, 0, 0, self._service_key, self._rating_state, self._rating )
             
@@ -68,17 +68,17 @@ class RatingIncDecCanvas( ClientGUIRatings.RatingIncDec ):
         
         if self._current_media is not None and rating is not None:
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
             
-            HG.client_controller.Write( 'content_updates', { self._service_key : ( content_update, ) } )
+            CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( self._service_key, content_update ) )
             
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 for content_update in content_updates:
                     
@@ -114,9 +114,14 @@ class RatingIncDecCanvas( ClientGUIRatings.RatingIncDec ):
                 
                 self._hashes = set()
                 
+                self._rating_state = None
+                self._rating = None
+                
             else:
                 
                 self._hashes = self._current_media.GetHashes()
+                
+                ( self._rating_state, self._rating ) = ClientRatings.GetIncDecStateFromMedia( ( self._current_media, ), self._service_key )
                 
             
             self.update()
@@ -134,9 +139,10 @@ class RatingLikeCanvas( ClientGUIRatings.RatingLike ):
         
         self._canvas_key = canvas_key
         self._current_media = None
+        self._hashes = set()
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
-        HG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
         
     
     def _Draw( self, painter ):
@@ -158,9 +164,9 @@ class RatingLikeCanvas( ClientGUIRatings.RatingLike ):
             if self._rating_state == ClientRatings.LIKE: rating = None
             else: rating = 1
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
             
-            HG.client_controller.Write( 'content_updates', { self._service_key : ( content_update, ) } )
+            CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( self._service_key, content_update ) )
             
         
     
@@ -171,17 +177,17 @@ class RatingLikeCanvas( ClientGUIRatings.RatingLike ):
             if self._rating_state == ClientRatings.DISLIKE: rating = None
             else: rating = 0
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
             
-            HG.client_controller.Write( 'content_updates', { self._service_key : ( content_update, ) } )
+            CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( self._service_key, content_update ) )
             
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 for content_update in content_updates:
                     
@@ -253,8 +259,8 @@ class RatingNumericalCanvas( ClientGUIRatings.RatingNumerical ):
         
         self._hashes = set()
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
-        HG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
         
     
     def _ClearRating( self ):
@@ -265,9 +271,9 @@ class RatingNumericalCanvas( ClientGUIRatings.RatingNumerical ):
             
             rating = None
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
             
-            HG.client_controller.Write( 'content_updates', { self._service_key : ( content_update, ) } )
+            CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( self._service_key, content_update ) )
             
         
     
@@ -291,17 +297,17 @@ class RatingNumericalCanvas( ClientGUIRatings.RatingNumerical ):
         
         if self._current_media is not None and rating is not None:
             
-            content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
+            content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, self._hashes ) )
             
-            HG.client_controller.Write( 'content_updates', { self._service_key : ( content_update, ) } )
+            CG.client_controller.Write( 'content_updates', ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( self._service_key, content_update ) )
             
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 for content_update in content_updates:
                     
@@ -352,7 +358,12 @@ class RatingNumericalCanvas( ClientGUIRatings.RatingNumerical ):
 # Note that I go setFocusPolicy( QC.Qt.TabFocus ) on all the icon buttons in the hover windows
 # this means that a user can click a button and not give it focus, allowing the arrow keys and space to still propagate up to the main canvas
 
+TOP_HOVER_PROPORTION = 0.6
+SIDE_HOVER_PROPORTIONS = ( 1 - TOP_HOVER_PROPORTION ) / 2
+
 class CanvasHoverFrame( QW.QFrame ):
+    
+    hoverResizedOrMoved = QC.Signal()
     
     sendApplicationCommand = QC.Signal( CAC.ApplicationCommand )
     
@@ -375,6 +386,8 @@ class CanvasHoverFrame( QW.QFrame ):
         self._canvas_key = canvas_key
         self._current_media = None
         
+        self._hover_panels_that_can_be_on_top_of_us = []
+        
         self._always_on_top = False
         
         self._last_ideal_position = None
@@ -388,7 +401,7 @@ class CanvasHoverFrame( QW.QFrame ):
         
         parent.installEventFilter( self )
         
-        HG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
+        CG.client_controller.sub( self, 'SetDisplayMedia', 'canvas_new_display_media' )
         
     
     def _GetIdealSizeAndPosition( self ):
@@ -452,20 +465,36 @@ class CanvasHoverFrame( QW.QFrame ):
                 self.resize( my_ideal_size )
                 
             
-            if my_ideal_position != self.pos():
+            should_move = my_ideal_position != self.pos()
+            
+            if should_move:
                 
                 self.move( my_ideal_position )
                 
             
             self._position_initialised = True
             
+            if should_resize or should_move:
+                
+                self.hoverResizedOrMoved.emit()
+                
+            
         
     
-    def eventFilter( self, object, event ):
+    def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.Resize:
+        try:
             
-            self._SizeAndPosition()
+            if event.type() == QC.QEvent.Resize:
+                
+                self._SizeAndPosition()
+                
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
+            
+            return True
             
         
         return False
@@ -485,17 +514,9 @@ class CanvasHoverFrame( QW.QFrame ):
         event.accept()
         
     
-    def PositionIsInitialised( self ):
+    def AddHoverThatCanBeOnTop( self, win: "CanvasHoverFrame" ):
         
-        return self._position_initialised
-        
-    
-    def SetDisplayMedia( self, canvas_key, media ):
-        
-        if canvas_key == self._canvas_key:
-            
-            self._current_media = media
-            
+        self._hover_panels_that_can_be_on_top_of_us.append( win )
         
     
     def DoRegularHideShow( self ):
@@ -508,26 +529,6 @@ class CanvasHoverFrame( QW.QFrame ):
         current_focus_tlw = QW.QApplication.activeWindow()
         
         focus_is_good = current_focus_tlw == self.window()
-        
-        mouse_is_over_self_or_child = False
-        
-        for tlw in list( QW.QApplication.topLevelWidgets() ):
-            
-            if not tlw.isVisible():
-                
-                continue
-                
-            
-            if tlw == self or ClientGUIFunctions.IsQtAncestor( tlw, self, through_tlws = True ):
-                
-                if ClientGUIFunctions.MouseIsOverWidget( tlw ):
-                    
-                    mouse_is_over_self_or_child = True
-                    
-                    break
-                    
-                
-            
         
         if self._ShouldBeShown():
             
@@ -598,10 +599,20 @@ class CanvasHoverFrame( QW.QFrame ):
         # this used to have the flash media window test to ensure mouse over flash window hid hovers going over it
         mouse_is_over_something_else_important = mouse_is_near_animation_bar
         
+        mouse_is_over_a_dominant_hover = False
+        
+        for win in self._hover_panels_that_can_be_on_top_of_us:
+            
+            if win.geometry().contains( mouse_pos ):
+                
+                mouse_is_over_a_dominant_hover = True
+                
+            
+        
         hide_focus_is_good = focus_is_good or current_focus_tlw is None # don't hide if focus is either gone to another problem or temporarily sperging-out due to a click-transition or similar
         
-        ready_to_show = in_position and not mouse_is_over_something_else_important and focus_is_good and not dialog_is_open and not menu_open
-        ready_to_hide = not menu_open and not mouse_is_over_self_or_child and ( not in_position or dialog_is_open or not hide_focus_is_good )
+        ready_to_show = in_position and not mouse_is_over_something_else_important and focus_is_good and not dialog_is_open and not menu_open and not mouse_is_over_a_dominant_hover
+        ready_to_hide = not menu_open and ( not in_position or dialog_is_open or not hide_focus_is_good or mouse_is_over_a_dominant_hover )
         
         def get_logic_report_string():
             
@@ -636,6 +647,19 @@ class CanvasHoverFrame( QW.QFrame ):
             
         
     
+    def PositionIsInitialised( self ):
+        
+        return self._position_initialised
+        
+    
+    def SetDisplayMedia( self, canvas_key, media ):
+        
+        if canvas_key == self._canvas_key:
+            
+            self._current_media = media
+            
+        
+    
 class CanvasHoverFrameTop( CanvasHoverFrame ):
     
     def __init__( self, parent, my_canvas, canvas_key ):
@@ -667,8 +691,8 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         
         self.setLayout( vbox )
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
-        HG.client_controller.sub( self, 'SetIndexString', 'canvas_new_index_string' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'SetIndexString', 'canvas_new_index_string' )
         
     
     def _Archive( self ):
@@ -700,14 +724,14 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         my_width = my_size.width()
         my_height = my_size.height()
         
-        my_ideal_width = max( int( parent_width * 0.6 ), self.sizeHint().width() )
+        my_ideal_width = max( int( parent_width * TOP_HOVER_PROPORTION ), self.sizeHint().width() )
         
         my_ideal_height = self.sizeHint().height()
         
         should_resize = my_ideal_width != my_width or my_ideal_height != my_height
         
         ideal_size = QC.QSize( my_ideal_width, my_ideal_height )
-        ideal_position = QC.QPoint( int( parent_width * 0.2 ), 0 )
+        ideal_position = QC.QPoint( int( parent_width * SIDE_HOVER_PROPORTIONS ), 0 )
         
         return ( should_resize, ideal_size, ideal_position )
         
@@ -717,15 +741,15 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         self._archive_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().archive, self._Archive )
         self._archive_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        self._trash_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().delete, HG.client_controller.pub, 'canvas_delete', self._canvas_key )
+        self._trash_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().delete, CG.client_controller.pub, 'canvas_delete', self._canvas_key )
         self._trash_button.setToolTip( 'send to trash' )
         self._trash_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        self._delete_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().trash_delete, HG.client_controller.pub, 'canvas_delete', self._canvas_key )
+        self._delete_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().trash_delete, CG.client_controller.pub, 'canvas_delete', self._canvas_key )
         self._delete_button.setToolTip( 'delete completely' )
         self._delete_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        self._undelete_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().undelete, HG.client_controller.pub, 'canvas_undelete', self._canvas_key )
+        self._undelete_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().undelete, CG.client_controller.pub, 'canvas_undelete', self._canvas_key )
         self._undelete_button.setToolTip( 'undelete' )
         self._undelete_button.setFocusPolicy( QC.Qt.TabFocus )
         
@@ -772,7 +796,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         self._show_embedded_metadata_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().listctrl, self._ShowFileEmbeddedMetadata )
         self._show_embedded_metadata_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        fullscreen_switch = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().fullscreen_switch, HG.client_controller.pub, 'canvas_fullscreen_switch', self._canvas_key )
+        fullscreen_switch = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().fullscreen_switch, CG.client_controller.pub, 'canvas_fullscreen_switch', self._canvas_key )
         fullscreen_switch.setToolTip( 'fullscreen switch' )
         fullscreen_switch.setFocusPolicy( QC.Qt.TabFocus )
         
@@ -792,7 +816,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         drag_button.pressed.connect( self.DragButtonHit )
         drag_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        close = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().stop, HG.client_controller.pub, 'canvas_close', self._canvas_key )
+        close = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().stop, CG.client_controller.pub, 'canvas_close', self._canvas_key )
         close.setToolTip( 'close' )
         close.setFocusPolicy( QC.Qt.TabFocus )
         
@@ -843,7 +867,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
                 self._delete_button.hide()
                 
             
-            if set( locations_manager.GetDeleted() ).isdisjoint( HG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) ) ):
+            if set( locations_manager.GetDeleted() ).isdisjoint( CG.client_controller.services_manager.GetServiceKeys( ( HC.LOCAL_FILE_DOMAIN, ) ) ):
                 
                 self._undelete_button.hide()
                 
@@ -854,8 +878,11 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
             
             has_exif = self._current_media.GetMediaResult().GetFileInfoManager().has_exif
             has_human_readable_embedded_metadata = self._current_media.GetMediaResult().GetFileInfoManager().has_human_readable_embedded_metadata
+            has_extra_rows = self._current_media.GetMime() == HC.IMAGE_JPEG
             
-            if has_exif or has_human_readable_embedded_metadata:
+            stuff_to_show = has_exif or has_human_readable_embedded_metadata or has_extra_rows
+            
+            if stuff_to_show:
                 
                 tt_components = []
                 
@@ -866,7 +893,12 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
                 
                 if has_human_readable_embedded_metadata:
                     
-                    tt_components.append( 'non-exif human-readable embedded metadata')
+                    tt_components.append( 'non-exif human-readable embedded metadata' )
+                    
+                
+                if has_extra_rows:
+                    
+                    tt_components.append( 'extra info' )
                     
                 
                 tt = 'show {}'.format( ' and '.join( tt_components ) )
@@ -874,7 +906,8 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
                 self._show_embedded_metadata_button.setToolTip( tt )
                 
             
-            self._show_embedded_metadata_button.setVisible( has_exif or has_human_readable_embedded_metadata )
+            # enabled, not visible, so it doesn't bounce the others around on scroll
+            self._show_embedded_metadata_button.setEnabled( stuff_to_show )
             
         
     
@@ -912,7 +945,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
     
     def _FlipActiveDefaultCustomShortcut( self, name ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         default_media_viewer_custom_shortcuts = list( new_options.GetStringList( 'default_media_viewer_custom_shortcuts' ) )
         
@@ -942,20 +975,20 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
     
     def _ShowShortcutMenu( self ):
         
-        all_shortcut_names = HG.client_controller.Read( 'serialisable_names', HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET )
+        all_shortcut_names = CG.client_controller.Read( 'serialisable_names', HydrusSerialisable.SERIALISABLE_TYPE_SHORTCUT_SET )
         
         custom_shortcuts_names = [ name for name in all_shortcut_names if name not in ClientGUIShortcuts.SHORTCUTS_RESERVED_NAMES ]
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         ClientGUIMenus.AppendMenuItem( menu, 'edit shortcuts', 'edit your sets of shortcuts, and change what shortcuts are currently active on this media viewer', ClientGUIShortcutControls.ManageShortcuts, self )
         
         if len( custom_shortcuts_names ) > 0:
             
             my_canvas_active_custom_shortcuts = self._my_canvas.GetActiveCustomShortcutNames()
-            default_media_viewer_custom_shortcuts = HG.client_controller.new_options.GetStringList( 'default_media_viewer_custom_shortcuts' )
+            default_media_viewer_custom_shortcuts = CG.client_controller.new_options.GetStringList( 'default_media_viewer_custom_shortcuts' )
             
-            current_menu = QW.QMenu( menu )
+            current_menu = ClientGUIMenus.GenerateMenu( menu )
             
             for name in custom_shortcuts_names:
                 
@@ -964,7 +997,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
             
             ClientGUIMenus.AppendMenu( menu, current_menu, 'set current shortcuts' )
             
-            defaults_menu = QW.QMenu( menu )
+            defaults_menu = ClientGUIMenus.GenerateMenu( menu )
             
             for name in custom_shortcuts_names:
                 
@@ -1006,7 +1039,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
         event.ignore()
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
@@ -1014,7 +1047,7 @@ class CanvasHoverFrameTop( CanvasHoverFrame ):
             
             do_redraw = False
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 if True in ( my_hash in content_update.GetHashes() for content_update in content_updates ):
                     
@@ -1193,7 +1226,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
         
         like_hbox = QP.HBoxLayout( spacing = 0 )
         
-        like_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
+        like_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
         
         if len( like_services ) > 0:
             
@@ -1213,7 +1246,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
         
         # each numerical one in turn
         
-        numerical_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
+        numerical_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
         
         for service in numerical_services:
             
@@ -1230,7 +1263,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
         
         incdec_hbox = QP.HBoxLayout( spacing = 0 )
         
-        incdec_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_INCDEC, ) )
+        incdec_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_INCDEC, ) )
         
         if len( incdec_services ) > 0:
             
@@ -1258,7 +1291,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
         
         self._ResetData()
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
         
     
     def _Archive( self ):
@@ -1383,7 +1416,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
                 
                 QP.ClearLayout( self._urls_vbox, delete_widgets = True )
                 
-                url_tuples = HG.client_controller.network_engine.domain_manager.ConvertURLsToMediaViewerTuples( urls )
+                url_tuples = CG.client_controller.network_engine.domain_manager.ConvertURLsToMediaViewerTuples( urls )
                 
                 for ( display_string, url ) in url_tuples:
                     
@@ -1399,7 +1432,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
         self._SizeAndPosition()
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
@@ -1407,7 +1440,7 @@ class CanvasHoverFrameTopRight( CanvasHoverFrame ):
             
             do_redraw = False
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 # ratings updates do not change the shape of this hover but file changes of several kinds do
                 
@@ -1471,7 +1504,7 @@ class NotePanel( QW.QWidget ):
         vbox = QP.VBoxLayout( margin = 0 )
         
         QP.AddToLayout( vbox, self._note_name, CC.FLAGS_EXPAND_PERPENDICULAR )
-        QP.AddToLayout( vbox, self._note_text, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._note_text, CC.FLAGS_EXPAND_BOTH_WAYS )
         
         self._note_text.setVisible( self._note_visible )
         
@@ -1481,20 +1514,29 @@ class NotePanel( QW.QWidget ):
         self._note_text.installEventFilter( self )
         
     
-    def eventFilter( self, object, event ):
+    def eventFilter( self, watched, event ):
         
-        if event.type() == QC.QEvent.MouseButtonPress:
+        try:
             
-            if event.button() == QC.Qt.LeftButton:
+            if event.type() == QC.QEvent.MouseButtonPress:
                 
-                self.editNote.emit( self._name )
+                if event.button() == QC.Qt.LeftButton:
+                    
+                    self.editNote.emit( self._name )
+                    
+                else:
+                    
+                    self._note_text.setVisible( not self._note_text.isVisible() )
+                    
+                    self._note_visible = self._note_text.isVisible()
+                    
                 
-            else:
+                return True
                 
-                self._note_text.setVisible( not self._note_text.isVisible() )
-                
-                self._note_visible = self._note_text.isVisible()
-                
+            
+        except Exception as e:
+            
+            HydrusData.ShowException( e )
             
             return True
             
@@ -1546,6 +1588,14 @@ class NotePanel( QW.QWidget ):
         return self._note_visible
         
     
+    def sizeHint( self ) -> QC.QSize:
+        
+        width = self.parentWidget().GetNoteWidth()
+        height = self.heightForWidth( width )
+        
+        return QC.QSize( width, height )
+        
+    
 class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
     
     def __init__( self, parent, my_canvas, top_right_hover: CanvasHoverFrameTopRight, canvas_key ):
@@ -1554,7 +1604,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         
         self._top_right_hover = top_right_hover
         
-        self._vbox = QP.VBoxLayout()
+        self._vbox = QP.VBoxLayout( spacing = 2, margin = 2 )
         self._names_to_note_panels = {}
         
         self.setSizePolicy( QW.QSizePolicy.Fixed, QW.QSizePolicy.Expanding )
@@ -1563,7 +1613,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         
         self._ResetNotes()
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
         
     
     def _EditNotes( self, name ):
@@ -1589,7 +1639,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         my_width = my_size.width()
         my_height = my_size.height()
         
-        my_ideal_width = self.sizeHint().width()
+        my_ideal_width = min( self.sizeHint().width(), parent_width * SIDE_HOVER_PROPORTIONS )
         
         ideal_position = QC.QPoint( parent_width - my_width, 0 )
         
@@ -1611,7 +1661,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         # the problem here is that sizeHint produces what width the static text wants based on its own word wrap rules
         # we want to say 'with this fixed width, how tall are we?'
         # VBoxLayout doesn't support heightForWidth, but statictext does, so let's hack it
-        # ideal solution here is to write a new layout that delivers heightforwidth, but lmao. maybe Qt6 will do it
+        # ideal solution here is to write a new layout that delivers heightforwidth, but lmao. maybe Qt6 will do it. EDIT: It didn't really work?
         
         spacing = self.layout().spacing()
         margin = self.layout().contentsMargins().top()
@@ -1640,7 +1690,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         
         note_panel_names_with_hidden_notes = set()
         
-        for ( name, note_panel ) in self._names_to_note_panels.items():
+        for ( name, note_panel ) in list( self._names_to_note_panels.items() ):
             
             if not note_panel.IsNoteVisible():
                 
@@ -1687,7 +1737,14 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
         return CanvasHoverFrame._ShouldBeHidden( self )
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def GetNoteWidth( self ):
+        
+        note_panel_width = self.width() - ( self.frameWidth() + self.layout().contentsMargins().left() ) * 2
+        
+        return note_panel_width
+        
+    
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
@@ -1695,7 +1752,7 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
             
             do_redraw = False
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 # ratings updates do not change the shape of this hover but file changes of several kinds do
                 
@@ -1731,6 +1788,8 @@ class CanvasHoverFrameRightNotes( CanvasHoverFrame ):
                 
                 self._ResetNotes()
                 
+                self._position_initialised = False
+                
             
         
     
@@ -1738,11 +1797,9 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
     
     showPairInPage = QC.Signal()
     
-    def __init__( self, parent: QW.QWidget, my_canvas: QW.QWidget, right_notes_hover: CanvasHoverFrameRightNotes, canvas_key: bytes ):
+    def __init__( self, parent: QW.QWidget, my_canvas: QW.QWidget, canvas_key: bytes ):
         
         CanvasHoverFrame.__init__( self, parent, my_canvas, canvas_key )
-        
-        self._right_notes_hover = right_notes_hover
         
         self._always_on_top = True
         
@@ -1754,7 +1811,7 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         self._show_in_a_page_button.setToolTip( 'send pair to the duplicates media page, for later processing' )
         self._show_in_a_page_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        self._trash_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().delete, HG.client_controller.pub, 'canvas_delete', self._canvas_key )
+        self._trash_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().delete, CG.client_controller.pub, 'canvas_delete', self._canvas_key )
         self._trash_button.setToolTip( 'send to trash' )
         self._trash_button.setFocusPolicy( QC.Qt.TabFocus )
         
@@ -1763,7 +1820,7 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         menu_items.append( ( 'normal', 'edit duplicate metadata merge options for \'this is better\'', 'edit what content is merged when you filter files', HydrusData.Call( self._EditMergeOptions, HC.DUPLICATE_BETTER ) ) )
         menu_items.append( ( 'normal', 'edit duplicate metadata merge options for \'same quality\'', 'edit what content is merged when you filter files', HydrusData.Call( self._EditMergeOptions, HC.DUPLICATE_SAME_QUALITY ) ) )
         
-        if HG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
+        if CG.client_controller.new_options.GetBoolean( 'advanced_mode' ):
             
             menu_items.append( ( 'normal', 'edit duplicate metadata merge options for \'alternates\' (advanced!)', 'edit what content is merged when you filter files', HydrusData.Call( self._EditMergeOptions, HC.DUPLICATE_ALTERNATE ) ) )
             
@@ -1774,7 +1831,7 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         self._cog_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().cog, menu_items )
         self._cog_button.setFocusPolicy( QC.Qt.TabFocus )
         
-        close_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().stop, HG.client_controller.pub, 'canvas_close', self._canvas_key )
+        close_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().stop, CG.client_controller.pub, 'canvas_close', self._canvas_key )
         close_button.setToolTip( 'close filter' )
         close_button.setFocusPolicy( QC.Qt.TabFocus )
         
@@ -1838,7 +1895,7 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         
         self._comparison_statements_vbox = QP.VBoxLayout()
         
-        self._comparison_statement_names = [ 'filesize', 'resolution', 'ratio', 'mime', 'num_tags', 'time_imported', 'jpeg_quality', 'pixel_duplicates', 'exif_data', 'embedded_metadata', 'icc_profile' ]
+        self._comparison_statement_names = [ 'filesize', 'resolution', 'ratio', 'mime', 'num_tags', 'time_imported', 'jpeg_quality', 'pixel_duplicates', 'has_transparency', 'exif_data', 'embedded_metadata', 'icc_profile', 'has_audio' ]
         
         self._comparison_statements_sts = {}
         
@@ -1889,13 +1946,13 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         
         self.setLayout( vbox )
         
-        HG.client_controller.sub( self, 'SetDuplicatePair', 'canvas_new_duplicate_pair' )
-        HG.client_controller.sub( self, 'SetIndexString', 'canvas_new_index_string' )
+        CG.client_controller.sub( self, 'SetDuplicatePair', 'canvas_new_duplicate_pair' )
+        CG.client_controller.sub( self, 'SetIndexString', 'canvas_new_index_string' )
         
     
     def _EditBackgroundSwitchIntensity( self ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         for ( message, tooltip, variable_name ) in [
             ( 'intensity for A', 'This changes the background colour when you are looking at A. If you have a pure white/black background, it helps to highlight transparency vs opaque white/black image background.', 'duplicate_background_switch_intensity_a' ),
@@ -1930,7 +1987,7 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
     
     def _EditMergeOptions( self, duplicate_type ):
         
-        new_options = HG.client_controller.new_options
+        new_options = CG.client_controller.new_options
         
         duplicate_content_merge_options = new_options.GetDuplicateContentMergeOptions( duplicate_type )
         
@@ -1977,30 +2034,6 @@ class CanvasHoverFrameRightDuplicates( CanvasHoverFrame ):
         
         ideal_size = QC.QSize( my_ideal_width, my_ideal_height )
         ideal_position = QC.QPoint( int( parent_width - my_ideal_width ), int( parent_height * 0.3 ) )
-        
-        ideal_rect = QC.QRect( ideal_position, ideal_size )
-        
-        right_notes_hover_geometry = self._right_notes_hover.geometry()
-        
-        if ideal_rect.intersects( right_notes_hover_geometry ):
-            
-            # the notes are tall enough to overlap us
-            
-            right_notes_correct_bottom = right_notes_hover_geometry.y() + right_notes_hover_geometry.height()
-            
-            if self._my_canvas.height() - right_notes_correct_bottom > my_ideal_height:
-                
-                # if we can slide down and still fit in the gap, do that
-                
-                ideal_position.setY( right_notes_correct_bottom )
-                
-            else:
-                
-                # slide it right
-                
-                ideal_position.setX( right_notes_hover_geometry.x() - my_ideal_width )
-                
-            
         
         return ( should_resize, ideal_size, ideal_position )
         
@@ -2092,7 +2125,7 @@ class CanvasHoverFrameTags( CanvasHoverFrame ):
         
         self.setLayout( vbox )
         
-        HG.client_controller.sub( self, 'ProcessContentUpdates', 'content_updates_gui' )
+        CG.client_controller.sub( self, 'ProcessContentUpdatePackage', 'content_updates_gui' )
         
     
     def _GetIdealSizeAndPosition( self ):
@@ -2129,7 +2162,7 @@ class CanvasHoverFrameTags( CanvasHoverFrame ):
             
         
     
-    def ProcessContentUpdates( self, service_keys_to_content_updates ):
+    def ProcessContentUpdatePackage( self, content_update_package: ClientContentUpdates.ContentUpdatePackage ):
         
         if self._current_media is not None:
             
@@ -2137,7 +2170,7 @@ class CanvasHoverFrameTags( CanvasHoverFrame ):
             
             do_redraw = False
             
-            for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+            for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                 
                 if True in ( my_hash in content_update.GetHashes() for content_update in content_updates ):
                     

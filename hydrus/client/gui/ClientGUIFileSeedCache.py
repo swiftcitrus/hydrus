@@ -12,11 +12,14 @@ from hydrus.core import HydrusPaths
 from hydrus.core import HydrusText
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientLocation
 from hydrus.client import ClientPaths
 from hydrus.client import ClientSerialisable
+from hydrus.client import ClientTime
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIMenus
 from hydrus.client.gui import ClientGUISerialisable
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -27,6 +30,7 @@ from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.widgets import ClientGUICommon
 from hydrus.client.importing import ClientImportFileSeeds
 from hydrus.client.importing.options import PresentationImportOptions
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientTagSorting
 
 def ClearFileSeeds( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSeedCache, statuses_to_remove ):
@@ -35,7 +39,7 @@ def ClearFileSeeds( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.File
     
     result = ClientGUIDialogsQuick.GetYesNo( win, message )
     
-    if result == QW.QDialog.DialogCode.Accepted:
+    if result == QW.QDialog.Accepted:
         
         file_seed_cache.RemoveFileSeedsByStatus( statuses_to_remove )
         
@@ -71,7 +75,7 @@ def ExportToClipboard( file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
     payload = GetExportableSourcesString( file_seed_cache )
     
-    HG.client_controller.pub( 'clipboard', 'text', payload )
+    CG.client_controller.pub( 'clipboard', 'text', payload )
     
 def ExportToPNG( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
@@ -90,11 +94,11 @@ def ImportFromClipboard( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds
     
     try:
         
-        raw_text = HG.client_controller.GetClipboardText()
+        raw_text = CG.client_controller.GetClipboardText()
         
     except HydrusExceptions.DataMissing as e:
         
-        QW.QMessageBox.critical( win, 'Error', str(e) )
+        ClientGUIDialogsMessage.ShowCritical( win, 'Problem pasting!', str(e) )
         
         return
         
@@ -105,13 +109,12 @@ def ImportFromClipboard( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds
         
         ImportSources( file_seed_cache, sources )
         
-    except:
+    except Exception as e:
         
-        QW.QMessageBox.critical( win, 'Error', 'Could not import!' )
-        
-        raise
+        ClientGUIFunctions.PresentClipboardParseError( win, raw_text, 'Lines of URLs or file paths', e )
         
     
+
 def ImportFromPNG( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
     with QP.FileDialog( win, 'select the png with the sources', wildcard = 'PNG (*.png)' ) as dlg:
@@ -128,15 +131,16 @@ def ImportFromPNG( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileS
                 
                 ImportSources( file_seed_cache, sources )
                 
-            except:
+            except Exception as e:
                 
-                QW.QMessageBox.critical( win, 'Error', 'Could not import!' )
+                ClientGUIDialogsMessage.ShowCritical( win, 'Could not import!', str( e ) )
                 
                 raise
                 
             
         
     
+
 def ImportSources( file_seed_cache, sources ):
     
     if sources[0].startswith( 'http' ):
@@ -152,13 +156,14 @@ def ImportSources( file_seed_cache, sources ):
     
     file_seed_cache.AddFileSeeds( file_seeds )
     
+
 def RetryErrors( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
     message = 'Are you sure you want to retry all the files that encountered errors?'
     
     result = ClientGUIDialogsQuick.GetYesNo( win, message )
     
-    if result == QW.QDialog.DialogCode.Accepted:
+    if result == QW.QDialog.Accepted:
         
         file_seed_cache.RetryFailed()
         
@@ -177,6 +182,7 @@ def RetryIgnored( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSe
     
     file_seed_cache.RetryIgnored( ignored_regex = ignored_regex )
     
+
 def ReverseFileSeedCache( win: QW.QWidget, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
     message = 'Reverse this file log? Any outstanding imports will process in the opposite order.'
@@ -208,16 +214,19 @@ def ShowFilesInNewPage( file_seed_cache: ClientImportFileSeeds.FileSeedCache, sh
         
         location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
         
-        HG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
+        CG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
         
     
+
 def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
     
-    num_successful = file_seed_cache.GetFileSeedCount( CC.STATUS_SUCCESSFUL_AND_NEW ) + file_seed_cache.GetFileSeedCount( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT )
+    num_already_in = file_seed_cache.GetFileSeedCount( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT )
+    num_successful = file_seed_cache.GetFileSeedCount( CC.STATUS_SUCCESSFUL_AND_NEW ) + num_already_in
     num_vetoed = file_seed_cache.GetFileSeedCount( CC.STATUS_VETOED )
     num_deleted = file_seed_cache.GetFileSeedCount( CC.STATUS_DELETED )
     num_errors = file_seed_cache.GetFileSeedCount( CC.STATUS_ERROR )
     num_skipped = file_seed_cache.GetFileSeedCount( CC.STATUS_SKIPPED )
+    num_unknown = file_seed_cache.GetFileSeedCount( CC.STATUS_UNKNOWN )
     
     if num_errors > 0:
         
@@ -234,6 +243,11 @@ def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache:
     if num_successful > 0:
         
         ClientGUIMenus.AppendMenuItem( menu, 'delete {} \'successful\' file import items from the queue'.format( HydrusData.ToHumanInt( num_successful ) ), 'Tell this log to clear out successful files, reducing the size of the queue.', ClearFileSeeds, win, file_seed_cache, ( CC.STATUS_SUCCESSFUL_AND_NEW, CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, CC.STATUS_SUCCESSFUL_AND_CHILD_FILES ) )
+        
+    
+    if num_already_in > 0:
+        
+        ClientGUIMenus.AppendMenuItem( menu, 'delete {} \'already in db\' file import items from the queue'.format( HydrusData.ToHumanInt( num_already_in ) ), 'Tell this log to clear out successful but non-new files, reducing the size of the queue.', ClearFileSeeds, win, file_seed_cache, ( CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, ) )
         
     
     if num_deleted > 0:
@@ -256,6 +270,25 @@ def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache:
         ClientGUIMenus.AppendMenuItem( menu, 'delete {} \'skipped\' file import items from the queue'.format( HydrusData.ToHumanInt( num_skipped ) ), 'Tell this log to clear out skipped files, reducing the size of the queue.', ClearFileSeeds, win, file_seed_cache, ( CC.STATUS_SKIPPED, ) )
         
     
+    if num_unknown > 0:
+        
+        ClientGUIMenus.AppendMenuItem( menu, 'delete {} \'unknown\' (i.e. unstarted) file import items from the queue'.format( HydrusData.ToHumanInt( num_unknown ) ), 'Tell this log to clear out any items that have not yet been started (or have been restarted and not yet worked on), reducing the size of the queue.', ClearFileSeeds, win, file_seed_cache, ( CC.STATUS_UNKNOWN, ) )
+        
+    
+    if len( file_seed_cache ) > 0:
+        
+        ClientGUIMenus.AppendSeparator( menu )
+        
+        ClientGUIMenus.AppendMenuItem( menu, f'delete everything ({HydrusData.ToHumanInt( len( file_seed_cache ) )} items) from the queue', 'Tell this log to clear out everything, resetting the queue to empty.', ClearFileSeeds, win, file_seed_cache, ( CC.STATUS_UNKNOWN, CC.STATUS_SUCCESSFUL_AND_NEW, CC.STATUS_SUCCESSFUL_BUT_REDUNDANT, CC.STATUS_DELETED, CC.STATUS_ERROR, CC.STATUS_VETOED, CC.STATUS_SKIPPED, CC.STATUS_SUCCESSFUL_AND_CHILD_FILES ) )
+        
+    
+    if num_unknown > 0:
+        
+        ClientGUIMenus.AppendSeparator( menu )
+        
+        ClientGUIMenus.AppendMenuItem( menu, 'set {} \'unknown\' (i.e. unstarted) file import items to \'skipped\''.format( HydrusData.ToHumanInt( num_unknown ) ), 'Tell this log to skip any outstanding items in the queue.', file_seed_cache.SetStatusToStatus, CC.STATUS_UNKNOWN, CC.STATUS_SKIPPED )
+        
+    
     ClientGUIMenus.AppendSeparator( menu )
     
     if num_successful > 0:
@@ -272,7 +305,7 @@ def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache:
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         ClientGUIMenus.AppendMenuItem( submenu, 'to clipboard', 'Copy all the sources in this list to the clipboard.', ExportToClipboard, file_seed_cache )
         ClientGUIMenus.AppendMenuItem( submenu, 'to png', 'Export all the sources in this list to a png file.', ExportToPNG, win, file_seed_cache )
@@ -280,7 +313,7 @@ def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache:
         ClientGUIMenus.AppendMenu( menu, submenu, 'export all sources' )
         
     
-    submenu = QW.QMenu( menu )
+    submenu = ClientGUIMenus.GenerateMenu( menu )
     
     ClientGUIMenus.AppendMenuItem( submenu, 'from clipboard', 'Import new urls or paths to this list from the clipboard.', ImportFromClipboard, win, file_seed_cache )
     ClientGUIMenus.AppendMenuItem( submenu, 'from png', 'Import new urls or paths to this list from a png file.', ImportFromPNG, win, file_seed_cache )
@@ -290,7 +323,7 @@ def PopulateFileSeedCacheMenu( win: QW.QWidget, menu: QW.QMenu, file_seed_cache:
 
 class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
     
-    def __init__( self, parent, controller, file_seed_cache ):
+    def __init__( self, parent, controller, file_seed_cache: ClientImportFileSeeds.FileSeedCache ):
         
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
         
@@ -318,7 +351,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         
         self.widget().setLayout( vbox )
         
-        self._list_ctrl.AddMenuCallable( self._GetListCtrlMenu )
+        self._list_ctrl.AddRowsMenuCallable( self._GetListCtrlMenu )
         
         self._controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
         
@@ -348,9 +381,9 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         note = file_seed.note
         
         pretty_file_seed_data = str( file_seed_data )
-        pretty_status = CC.status_string_lookup[ status ]
-        pretty_added = ClientData.TimestampToPrettyTimeDelta( added )
-        pretty_modified = ClientData.TimestampToPrettyTimeDelta( modified )
+        pretty_status = CC.status_string_lookup[ status ] if status != CC.STATUS_UNKNOWN else ''
+        pretty_added = ClientTime.TimestampToPrettyTimeDelta( added )
+        pretty_modified = ClientTime.TimestampToPrettyTimeDelta( modified )
         
         if source_time is None:
             
@@ -358,7 +391,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            pretty_source_time = ClientData.TimestampToPrettyTimeDelta( source_time )
+            pretty_source_time = ClientTime.TimestampToPrettyTimeDelta( source_time )
             
         
         sort_source_time = ClientGUIListCtrl.SafeNoneInt( source_time )
@@ -391,7 +424,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
             text = separator.join( notes )
             
-            HG.client_controller.pub( 'clipboard', 'text', text )
+            CG.client_controller.pub( 'clipboard', 'text', text )
             
         
     
@@ -405,7 +438,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
             text = separator.join( ( file_seed.file_seed_data for file_seed in file_seeds ) )
             
-            HG.client_controller.pub( 'clipboard', 'text', text )
+            CG.client_controller.pub( 'clipboard', 'text', text )
             
         
     
@@ -430,7 +463,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         
         selected_file_seeds = self._list_ctrl.GetData( only_selected = True )
         
-        menu = QW.QMenu()
+        menu = ClientGUIMenus.GenerateMenu( self )
         
         if len( selected_file_seeds ) == 0:
             
@@ -467,7 +500,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                 
             else:
                 
-                hash_submenu = QW.QMenu( menu )
+                hash_submenu = ClientGUIMenus.GenerateMenu( menu )
                 
                 for hash_type in ( 'sha256', 'md5', 'sha1', 'sha512' ):
                     
@@ -496,7 +529,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                     
                 else:
                     
-                    url_submenu = QW.QMenu( menu )
+                    url_submenu = ClientGUIMenus.GenerateMenu( menu )
                     
                     if referral_url is not None:
                         
@@ -540,7 +573,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                     
                 else:
                     
-                    header_submenu = QW.QMenu( menu )
+                    header_submenu = ClientGUIMenus.GenerateMenu( menu )
                     
                     for ( key, value ) in headers.items():
                         
@@ -563,7 +596,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                     
                 else:
                     
-                    tag_submenu = QW.QMenu( menu )
+                    tag_submenu = ClientGUIMenus.GenerateMenu( menu )
                     
                     for tag in tags:
                         
@@ -577,7 +610,16 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        ClientGUIMenus.AppendMenuItem( menu, 'open sources', 'Open all the selected sources in your file explorer or web browser.', self._OpenSelectedFileSeedData )
+        if self._file_seed_cache.IsURLFileSeeds():
+            
+            open_sources_text = 'open URLs'
+            
+        else:
+            
+            open_sources_text = 'open files\' locations'
+            
+        
+        ClientGUIMenus.AppendMenuItem( menu, open_sources_text, 'Open all the selected sources in your file explorer or web browser.', self._OpenSelectedFileSeedData )
         
         ClientGUIMenus.AppendSeparator( menu )
         
@@ -589,7 +631,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
         
         ClientGUIMenus.AppendSeparator( menu )
         
-        submenu = QW.QMenu( menu )
+        submenu = ClientGUIMenus.GenerateMenu( menu )
         
         PopulateFileSeedCacheMenu( self, submenu, self._file_seed_cache )
         
@@ -634,7 +676,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                     
                 except Exception as e:
                     
-                    QW.QMessageBox.critical( self, 'Error', str(e) )
+                    ClientGUIDialogsMessage.ShowCritical( self, 'Problem opening files!', str(e) )
                     
                 
             
@@ -654,7 +696,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 result = ClientGUIDialogsQuick.GetYesNo( self, message )
                 
-                if result == QW.QDialog.DialogCode.Accepted:
+                if result == QW.QDialog.Accepted:
                     
                     deletee_hashes = { file_seed.GetHash() for file_seed in deleted_and_clearable_file_seeds }
                     
@@ -662,11 +704,11 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
                     
                     ClientGUIMediaActions.UndeleteFiles( deletee_hashes )
                     
-                    content_update_erase_record = HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, deletee_hashes )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, deletee_hashes )
                     
-                    service_keys_to_content_updates = { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update_erase_record ] }
+                    content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update )
                     
-                    HG.client_controller.WriteSynchronous( 'content_updates', service_keys_to_content_updates )
+                    CG.client_controller.WriteSynchronous( 'content_updates', content_update_package )
                     
                 
             
@@ -695,7 +737,7 @@ class EditFileSeedCachePanel( ClientGUIScrolledPanels.EditPanel ):
             
             location_context = ClientLocation.LocationContext.STATICCreateSimple( CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY )
             
-            HG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
+            CG.client_controller.pub( 'new_page_query', location_context, initial_hashes = hashes )
             
         
     
@@ -880,7 +922,7 @@ class FileSeedCacheStatusControl( QW.QFrame ):
         
         #
         
-        HG.client_controller.gui.RegisterUIUpdateWindow( self )
+        CG.client_controller.gui.RegisterUIUpdateWindow( self )
         
     
     def _GetFileSeedCache( self ):
@@ -957,7 +999,7 @@ class FileSeedCacheStatusControl( QW.QFrame ):
                     
                     do_it_anyway = True # to update the gauge
                     
-                    HG.client_controller.pub( 'refresh_page_name', self._page_key )
+                    CG.client_controller.pub( 'refresh_page_name', self._page_key )
                     
                 
             

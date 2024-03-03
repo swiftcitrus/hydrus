@@ -10,12 +10,15 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetworking
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIDragDrop
 from hydrus.client.gui import ClientGUICharts
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -126,7 +129,7 @@ class EditCookiePanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _UpdateExpiresText( self ):
         
-        self._expires_st.setText( HydrusData.ConvertTimestampToPrettyExpires(self._expires) )
+        self._expires_st.setText( HydrusTime.TimestampToPrettyExpires(self._expires) )
         self._expires_st_utc.setText( str(self._expires) )
         
     
@@ -134,7 +137,7 @@ class EditCookiePanel( ClientGUIScrolledPanels.EditPanel ):
         
         time_delta = self._expires_time_delta.GetValue()
         
-        expires = HydrusData.GetNow() + time_delta
+        expires = HydrusTime.GetNow() + time_delta
         
         self._expires = expires
         
@@ -176,7 +179,7 @@ class EditNetworkContextPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._context_data_services = ClientGUICommon.BetterChoice( self )
         
-        for service in HG.client_controller.services_manager.GetServices( HC.REPOSITORIES ):
+        for service in CG.client_controller.services_manager.GetServices( HC.REPOSITORIES ):
             
             self._context_data_services.addItem( service.GetName(), service.GetServiceKey() )
             
@@ -190,7 +193,7 @@ class EditNetworkContextPanel( ClientGUIScrolledPanels.EditPanel ):
             self._context_data_none.setVisible( False )
             
         
-        names = HG.client_controller.Read( 'serialisable_names', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_LEGACY )
+        names = CG.client_controller.Read( 'serialisable_names', HydrusSerialisable.SERIALISABLE_TYPE_SUBSCRIPTION_LEGACY )
         
         for name in names:
             
@@ -597,7 +600,7 @@ class ReviewAllBandwidthPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         self._bandwidths.Sort()
         
-        self._update_job = HG.client_controller.CallRepeatingQtSafe( self, 0.5, 5.0, 'repeating all bandwidth status update', self._Update )
+        self._update_job = CG.client_controller.CallRepeatingQtSafe( self, 0.5, 5.0, 'repeating all bandwidth status update', self._Update )
         
         #
         
@@ -692,7 +695,7 @@ class ReviewAllBandwidthPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         if waiting_estimate > 0:
             
-            pretty_blocked = HydrusData.TimeDeltaToPrettyTimeDelta( waiting_estimate )
+            pretty_blocked = HydrusTime.TimeDeltaToPrettyTimeDelta( waiting_estimate )
             
         else:
             
@@ -776,11 +779,11 @@ class ReviewAllBandwidthPanel( ClientGUIScrolledPanels.ReviewPanel ):
         help_text += os.linesep * 2
         help_text += 'There are two special ephemeral \'instance\' contexts, for downloaders and thread watchers. These represent individual queries, either a single gallery search or a single watched thread. It can be useful to set default rules for these so your searches will gather a fast initial sample of results in the first few minutes--so you can make sure you are happy with them--but otherwise trickle the rest in over time. This keeps your CPU and other bandwidth limits less hammered and helps to avoid accidental downloads of many thousands of small bad files or a few hundred gigantic files all in one go.'
         help_text += os.linesep * 2
-        help_text += 'Please note that this system bases its calendar dates on UTC/GMT time (it helps servers and clients around the world stay in sync a bit easier). This has no bearing on what, for instance, the \'past 24 hours\' means, but monthly transitions may occur a few hours off whatever your midnight is.'
+        help_text += 'Please note that this system bases its calendar dates on UTC time (it helps servers and clients around the world stay in sync a bit easier). This has no bearing on what, for instance, the \'past 24 hours\' means, but monthly transitions may occur a few hours off whatever your midnight is.'
         help_text += os.linesep * 2
         help_text += 'If you do not understand what is going on here, you can safely leave it alone. The default settings make for a _reasonable_ and polite profile that will not accidentally cause you to download way too much in one go or piss off servers by being too aggressive. If you want to throttle your client, the simplest way is to add a simple rule like \'500MB per day\' to the global context.'
         
-        QW.QMessageBox.information( self, 'Information', help_text )
+        ClientGUIDialogsMessage.ShowInformation( self, help_text )
         
     
     def _Update( self ):
@@ -956,9 +959,9 @@ class ReviewNetworkContextBandwidthPanel( ClientGUIScrolledPanels.ReviewPanel ):
         
         #
         
-        self._rules_job = HG.client_controller.CallRepeatingQtSafe( self, 0.5, 5.0, 'repeating bandwidth rules update', self._UpdateRules )
+        self._rules_job = CG.client_controller.CallRepeatingQtSafe( self, 0.5, 5.0, 'repeating bandwidth rules update', self._UpdateRules )
         
-        self._update_job = HG.client_controller.CallRepeatingQtSafe( self, 0.5, 1.0, 'repeating bandwidth status update', self._Update )
+        self._update_job = CG.client_controller.CallRepeatingQtSafe( self, 0.5, 1.0, 'repeating bandwidth status update', self._Update )
         
     
     def _EditRules( self ):
@@ -1271,7 +1274,7 @@ class ReviewNetworkSessionsPanel( ClientGUIScrolledPanels.ReviewPanel ):
             try:
                 
                 expiry = max( expires_numbers )
-                pretty_expiry = HydrusData.ConvertTimestampToPrettyExpires( expiry )
+                pretty_expiry = HydrusTime.TimestampToPrettyExpires( expiry )
                 
             except:
                 
@@ -1316,7 +1319,7 @@ class ReviewNetworkSessionsPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
                 HydrusData.ShowException( e )
                 
-                QW.QMessageBox.critical( self, 'Error', 'It looks like that cookies.txt failed to load. Unfortunately, not all formats are supported (for now!).' )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', 'It looks like that cookies.txt failed to load. Unfortunately, not all formats are supported.' )
                 
                 return
                 
@@ -1331,7 +1334,7 @@ class ReviewNetworkSessionsPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
             
         
-        QW.QMessageBox.information( self, 'Information', 'Added '+HydrusData.ToHumanInt(num_added)+' cookies!' )
+        ClientGUIDialogsMessage.ShowInformation( self, f'Added {HydrusData.ToHumanInt(num_added)} cookies!' )
         
         self._Update()
         
@@ -1435,7 +1438,7 @@ class ReviewNetworkSessionPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
             
             path = '/'
-            expires = HydrusData.GetNow() + 30 * 86400
+            expires = HydrusTime.GetNow() + 30 * 86400
             
             panel = EditCookiePanel( dlg, name, value, domain, path, expires )
             
@@ -1476,7 +1479,7 @@ class ReviewNetworkSessionPanel( ClientGUIScrolledPanels.ReviewPanel ):
             
         else:
             
-            pretty_expiry = HydrusData.ConvertTimestampToPrettyExpires( expiry )
+            pretty_expiry = HydrusTime.TimestampToPrettyExpires( expiry )
             
         
         sort_expiry = ClientGUIListCtrl.SafeNoneInt( expiry )
@@ -1572,7 +1575,7 @@ class ReviewNetworkSessionPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
                 HydrusData.ShowException( e )
                 
-                QW.QMessageBox.critical( self, 'Error', 'It looks like that cookies.txt failed to load. Unfortunately, not all formats are supported (for now!).' )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Problem loading!', 'It looks like that cookies.txt failed to load. Unfortunately, not all formats are supported.' )
                 
                 return
                 
@@ -1585,7 +1588,7 @@ class ReviewNetworkSessionPanel( ClientGUIScrolledPanels.ReviewPanel ):
                 
             
         
-        QW.QMessageBox.information( self, 'Information', 'Added '+HydrusData.ToHumanInt(num_added)+' cookies!' )
+        ClientGUIDialogsMessage.ShowInformation( self, f'Added {HydrusData.ToHumanInt(num_added)} cookies!' )
         
         self._Update()
         

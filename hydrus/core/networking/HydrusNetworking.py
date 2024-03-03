@@ -13,8 +13,9 @@ urllib3.disable_warnings( InsecureRequestWarning ) # stopping log-moaning when r
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
-# The calendar portion of this works in GMT. A new 'day' or 'month' is calculated based on GMT time, so it won't tick over at midnight for most people.
+# The calendar portion of this works in UTC. A new 'day' or 'month' is calculated based on UTC time, so it won't tick over at midnight for most people.
 # But this means a server can pass a bandwidth object to a lad and everyone can agree on when a new day is.
 
 def ConvertBandwidthRuleToString( rule ):
@@ -41,7 +42,7 @@ def ConvertBandwidthRuleToString( rule ):
         
     else:
         
-        s += ' per ' + HydrusData.TimeDeltaToPrettyTimeDelta( time_delta )
+        s += ' per ' + HydrusTime.TimeDeltaToPrettyTimeDelta( time_delta )
         
     
     return s
@@ -274,7 +275,7 @@ class BandwidthRules( HydrusSerialisable.SerialisableBase ):
                     
                 else:
                     
-                    s += ' in the past ' + HydrusData.TimeDeltaToPrettyTimeDelta( time_delta )
+                    s += ' in the past ' + HydrusTime.TimeDeltaToPrettyTimeDelta( time_delta )
                     
                 
                 rows.append( ( s, ( usage, max_allowed ) ) )
@@ -316,7 +317,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
         
         self._lock = threading.Lock()
         
-        self._next_cache_maintenance_timestamp = HydrusData.GetNow() + self.CACHE_MAINTENANCE_TIME_DELTA
+        self._next_cache_maintenance_timestamp = HydrusTime.GetNow() + self.CACHE_MAINTENANCE_TIME_DELTA
         
         self._months_bytes = collections.Counter()
         self._days_bytes = collections.Counter()
@@ -369,7 +370,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
     def _GetCurrentDateTime( self ):
         
         # keep getnow in here for the moment to aid in testing, which patches it to do time shifting
-        return datetime.datetime.utcfromtimestamp( HydrusData.GetNow() )
+        return datetime.datetime.utcfromtimestamp( HydrusTime.GetNow() )
         
     
     def _GetWindowAndCounter( self, bandwidth_type, time_delta ):
@@ -435,7 +436,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
         return month_time
         
     
-    def _GetRawUsage( self, bandwidth_type, time_delta ):
+    def _GetRawUsage( self, bandwidth_type, time_delta ) -> int:
         
         if time_delta is None:
             
@@ -462,7 +463,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
             # this causes 50% consumption as we consume in the second after the one we verified was clear
             # so, let's just check the current second and be happy with it
             
-            now = HydrusData.GetNow()
+            now = HydrusTime.GetNow()
             
             if now in counter:
                 
@@ -480,7 +481,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
             
             search_time_delta = time_delta + window
             
-            now = HydrusData.GetNow()
+            now = HydrusTime.GetNow()
             since = now - search_time_delta
             
             # we test 'now' as upper bound because a lad once had a motherboard reset and lost his clock time, ending up with a lump of data recorded several decades in the future
@@ -510,7 +511,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
         return ( month_time, day_time, hour_time, minute_time, second_time )
         
     
-    def _GetUsage( self, bandwidth_type, time_delta, for_user ):
+    def _GetUsage( self, bandwidth_type, time_delta, for_user ) -> int:
         
         if for_user and time_delta is not None and bandwidth_type == HC.BANDWIDTH_TYPE_DATA and time_delta <= self.MIN_TIME_DELTA_FOR_USER:
             
@@ -526,13 +527,13 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
         return usage
         
     
-    def _GetWeightedApproximateUsage( self, time_delta ):
+    def _GetWeightedApproximateUsage( self, time_delta ) -> int:
         
         SEARCH_DELTA = self.MIN_TIME_DELTA_FOR_USER
         
         counter = self._seconds_bytes
         
-        now = HydrusData.GetNow()
+        now = HydrusTime.GetNow()
         
         since = now - SEARCH_DELTA
         
@@ -554,14 +555,14 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
         
         time_delta_average_per_sec = total_bytes / SAMPLE_DELTA
         
-        return time_delta_average_per_sec * time_delta
+        return int( time_delta_average_per_sec * time_delta )
         
     
     def _MaintainCache( self ):
         
-        if HydrusData.TimeHasPassed( self._next_cache_maintenance_timestamp ):
+        if HydrusTime.TimeHasPassed( self._next_cache_maintenance_timestamp ):
             
-            now = HydrusData.GetNow()
+            now = HydrusTime.GetNow()
             
             oldest_second = now - self.MAX_SECONDS_TIME_DELTA
             oldest_minute = now - self.MAX_MINUTES_TIME_DELTA
@@ -587,7 +588,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
             clear_counter( self._seconds_bytes, oldest_second )
             clear_counter( self._seconds_requests, oldest_second )
             
-            self._next_cache_maintenance_timestamp = HydrusData.GetNow() + self.CACHE_MAINTENANCE_TIME_DELTA
+            self._next_cache_maintenance_timestamp = HydrusTime.GetNow() + self.CACHE_MAINTENANCE_TIME_DELTA
             
         
     
@@ -660,7 +661,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
                 
                 next_month_time = int( calendar.timegm( next_month_dt.timetuple() ) )
                 
-                return HydrusData.GetTimeDeltaUntilTime( next_month_time )
+                return HydrusTime.GetTimeDeltaUntilTime( next_month_time )
                 
             else:
                 
@@ -676,7 +677,7 @@ class BandwidthTracker( HydrusSerialisable.SerialisableBase ):
                 
                 time_and_values.sort( reverse = True )
                 
-                now = HydrusData.GetNow()
+                now = HydrusTime.GetNow()
                 usage = 0
                 
                 for ( timestamp, value ) in time_and_values:

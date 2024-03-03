@@ -1,4 +1,3 @@
-import abc
 import collections.abc
 import json
 import os
@@ -12,6 +11,8 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusLists
+from hydrus.core import HydrusPaths
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 from hydrus.core import HydrusText
@@ -19,22 +20,30 @@ from hydrus.core import HydrusText
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDuplicates
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientTime
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import ClientGUITags
+from hydrus.client.gui import ClientGUITime
 from hydrus.client.gui import ClientGUITopLevelWindowsPanels
+from hydrus.client.gui import QtInit
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.canvas import ClientGUIMPV
 from hydrus.client.gui.importing import ClientGUIImportOptions
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.gui.widgets import ClientGUIMenuButton
 from hydrus.client.importing.options import NoteImportOptions
 from hydrus.client.importing.options import TagImportOptions
 from hydrus.client.media import ClientMedia
+from hydrus.client.media import ClientMediaFileFilter
+from hydrus.client.metadata import ClientContentUpdates
 
 class EditChooseMultiple( ClientGUIScrolledPanels.EditPanel ):
     
@@ -289,7 +298,7 @@ class EditDefaultImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 json_string = note_import_options.DumpToString()
                 
-                HG.client_controller.pub( 'clipboard', 'text', json_string )
+                CG.client_controller.pub( 'clipboard', 'text', json_string )
                 
             
         
@@ -310,7 +319,7 @@ class EditDefaultImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 json_string = tag_import_options.DumpToString()
                 
-                HG.client_controller.pub( 'clipboard', 'text', json_string )
+                CG.client_controller.pub( 'clipboard', 'text', json_string )
                 
             
         
@@ -482,11 +491,11 @@ class EditDefaultImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -519,9 +528,7 @@ class EditDefaultImportOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
         except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'I could not understand what was in the clipboard' )
-            
-            HydrusData.ShowException( e )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'An instance of JSON-serialised tag or note import options', e )
             
         
     
@@ -554,11 +561,11 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._default_reason = default_reason
         
-        local_file_services = list( HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
+        local_file_service_domains = list( CG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
         
         if suggested_file_service_key is None:
             
-            suggested_file_service_key = local_file_services[0].GetServiceKey()
+            suggested_file_service_key = local_file_service_domains[0].GetServiceKey()
             
         
         self._media = self._FilterForDeleteLock( ClientMedia.FlattenMedia( media ), suggested_file_service_key )
@@ -569,7 +576,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._simple_description = ClientGUICommon.BetterStaticText( self, label = 'init' )
         
-        self._num_actionable_local_file_services = 0
+        self._num_actionable_local_file_service_domains = 0
         self._permitted_action_choices = []
         self._this_dialog_includes_service_keys = False
         
@@ -581,9 +588,9 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         selection_success = False
         
-        if HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_special_action' ):
+        if CG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_special_action' ):
             
-            last_advanced_file_deletion_special_action = HG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_special_action' )
+            last_advanced_file_deletion_special_action = CG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_special_action' )
             
             selection_success = self._TryToSelectAction( last_advanced_file_deletion_special_action )
             
@@ -610,9 +617,9 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             permitted_reason_choices.append( ( default_reason, default_reason ) )
             
         
-        if HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ):
+        if CG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ):
             
-            last_advanced_file_deletion_reason = HG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_reason' )
+            last_advanced_file_deletion_reason = CG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_reason' )
             
         else:
             
@@ -628,7 +635,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             selection_index = None # text or custom
             
         
-        for ( i, s ) in enumerate( HG.client_controller.new_options.GetStringList( 'advanced_file_deletion_reasons' ) ):
+        for ( i, s ) in enumerate( CG.client_controller.new_options.GetStringList( 'advanced_file_deletion_reasons' ) ):
             
             if self._existing_shared_file_deletion_reason is not None and s == self._existing_shared_file_deletion_reason and not existing_reason_was_in_list:
                 
@@ -680,22 +687,24 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         #
         
-        ( file_service_key, list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, description ) = self._action_radio.GetValue()
+        ( file_service_key, content_update_packages, save_reason, hashes_physically_deleted, description ) = self._action_radio.GetValue()
         
         self._simple_description.setText( description )
         
         if len( self._permitted_action_choices ) == 1:
             
             self._action_radio.hide()
+            self._action_radio.setEnabled( False )
             
         else:
             
             self._simple_description.hide()
             
         
-        if not HG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
+        if not CG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
             
             self._reason_panel.hide()
+            self._reason_panel.setEnabled( False )
             
         
         self._action_radio.radioBoxChanged.connect( self._UpdateControls )
@@ -730,11 +739,11 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _FilterForDeleteLock( self, media, suggested_file_service_key: bytes ):
         
-        service = HG.client_controller.services_manager.GetService( suggested_file_service_key )
+        service = CG.client_controller.services_manager.GetService( suggested_file_service_key )
         
         if service.GetServiceType() in HC.LOCAL_FILE_SERVICES:
             
-            media = ClientMedia.FilterAndReportDeleteLockFailures( media )
+            media = ClientMediaFileFilter.FilterAndReportDeleteLockFailures( media )
             
         
         return media
@@ -773,7 +782,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _GetReason( self ):
         
-        if self._reason_panel.isVisible() and self._reason_panel.isEnabled():
+        if self._reason_panel.isEnabled():
             
             reason = self._reason_radio.GetValue()
             
@@ -804,21 +813,28 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _InitialisePermittedActionChoices( self ):
         
+        we_are_advanced_delete_dialog = CG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' )
+        
         possible_file_service_keys = []
         
-        local_file_services = list( HG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
-        local_file_service_keys = { service.GetServiceKey() for service in local_file_services }
+        local_file_service_domains = list( CG.client_controller.services_manager.GetServices( ( HC.LOCAL_FILE_DOMAIN, ) ) )
+        local_file_service_domain_keys = { service.GetServiceKey() for service in local_file_service_domains }
         
-        possible_file_service_keys.extend( ( ( lfs.GetServiceKey(), lfs.GetServiceKey() ) for lfs in local_file_services ) )
+        possible_file_service_keys.extend( ( ( lfs.GetServiceKey(), lfs.GetServiceKey() ) for lfs in local_file_service_domains ) )
         
         possible_file_service_keys.append( ( CC.TRASH_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
         
-        if HG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
+        if we_are_advanced_delete_dialog:
             
             possible_file_service_keys.append( ( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
             
+        else:
+            
+            # if not advanced, we still want regular users, in odd fixing situations, able to delete update files
+            possible_file_service_keys.append( ( CC.LOCAL_UPDATE_SERVICE_KEY, CC.COMBINED_LOCAL_FILE_SERVICE_KEY ) )
+            
         
-        possible_file_service_keys.extend( ( ( rfs.GetServiceKey(), rfs.GetServiceKey() ) for rfs in HG.client_controller.services_manager.GetServices( ( HC.FILE_REPOSITORY, ) ) ) )
+        possible_file_service_keys.extend( ( ( rfs.GetServiceKey(), rfs.GetServiceKey() ) for rfs in CG.client_controller.services_manager.GetServices( ( HC.FILE_REPOSITORY, ) ) ) )
         
         keys_to_hashes = { ( selection_file_service_key, deletee_file_service_key ) : [ m.GetHash() for m in self._media if selection_file_service_key in m.GetLocationsManager().GetCurrent() ] for ( selection_file_service_key, deletee_file_service_key ) in possible_file_service_keys }
         
@@ -832,9 +848,10 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
         
         possible_file_service_keys_and_hashes = [ ( fsk, keys_to_hashes[ fsk ] ) for fsk in possible_file_service_keys if fsk in keys_to_hashes and len( keys_to_hashes[ fsk ] ) > 0 ]
         
-        self._num_actionable_local_file_services = len( local_file_service_keys.intersection( ( fsk[0] for ( fsk, hashes ) in possible_file_service_keys_and_hashes ) ) )
+        self._num_actionable_local_file_service_domains = len( local_file_service_domain_keys.intersection( ( fsk[0] for ( fsk, hashes ) in possible_file_service_keys_and_hashes ) ) )
         
-        all_local_jobs = []
+        possibilities_involve_spicy_physical_delete = False
+        
         num_local_services_done = 0
         
         for ( fsk, hashes ) in possible_file_service_keys_and_hashes:
@@ -843,7 +860,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             
             ( selection_file_service_key, deletee_file_service_key ) = fsk
             
-            deletee_service = HG.client_controller.services_manager.GetService( deletee_file_service_key )
+            deletee_service = CG.client_controller.services_manager.GetService( deletee_file_service_key )
             
             deletee_service_type = deletee_service.GetServiceType()
             
@@ -860,7 +877,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                     file_desc = '{} files'.format( HydrusData.ToHumanInt( num_to_delete ) )
                     
                 
-                if self._num_actionable_local_file_services == 1:
+                if self._num_actionable_local_file_service_domains == 1:
                     
                     template = 'Send {} from {} to trash?'
                     
@@ -871,40 +888,38 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 text = template.format( file_desc, deletee_service.GetName() )
                 
-                chunks_of_hashes = HydrusData.SplitListIntoChunks( hashes, 64 )
+                chunks_of_hashes = HydrusLists.SplitListIntoChunks( hashes, 64 )
                 
-                content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
                 
-                list_of_service_keys_to_content_updates = [ { deletee_file_service_key : [ content_update ] } for content_update in content_updates ]
-                
-                all_local_jobs.extend( list_of_service_keys_to_content_updates )
+                content_update_packages = [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( deletee_file_service_key, content_update ) for content_update in content_updates ]
                 
                 save_reason = True
                 
-                involves_physical_delete = False
+                hashes_physically_deleted = []
                 
                 num_local_services_done += 1
                 
                 # this is an ugly place to put this, and the mickey-mouse append, but it works
-                if self._num_actionable_local_file_services > 1 and num_local_services_done == self._num_actionable_local_file_services:
+                if self._num_actionable_local_file_service_domains > 1 and num_local_services_done == self._num_actionable_local_file_service_domains:
                     
-                    self._permitted_action_choices.append( ( text, ( deletee_file_service_key, list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, text ) ) )
+                    self._permitted_action_choices.append( ( text, ( deletee_file_service_key, content_update_packages, save_reason, hashes_physically_deleted, text ) ) )
                     
                     deletee_file_service_key = CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY
                     
                     h = [ m.GetHash() for m in self._media if CC.COMBINED_LOCAL_MEDIA_SERVICE_KEY in m.GetLocationsManager().GetCurrent() ]
                     
-                    chunks_of_hashes = HydrusData.SplitListIntoChunks( h, 64 )
+                    chunks_of_hashes = HydrusLists.SplitListIntoChunks( h, 64 )
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                    content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
                     
-                    list_of_service_keys_to_content_updates = [ { deletee_file_service_key : [ content_update ] } for content_update in content_updates ]
+                    content_update_packages = [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( deletee_file_service_key, content_update ) for content_update in content_updates ]
                     
                     text = 'Delete from all local services? (force send to trash)'
                     
                     save_reason = True
                     
-                    involves_physical_delete = False
+                    hashes_physically_deleted = []
                     
                 
             elif deletee_service_type == HC.FILE_REPOSITORY:
@@ -937,14 +952,16 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                         reason = None
                         
                     
-                    content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = reason ) ]
+                    content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_PETITION, hashes, reason = reason ) ]
                     
-                    list_of_service_keys_to_content_updates = [ { deletee_file_service_key : content_updates } ]
+                    content_update_packages = [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( deletee_file_service_key, content_updates ) ]
                     
-                    involves_physical_delete = False
+                    hashes_physically_deleted = []
                     
                 
             elif deletee_file_service_key == CC.COMBINED_LOCAL_FILE_SERVICE_KEY:
+                
+                possibilities_involve_spicy_physical_delete = True
                 
                 # do a physical delete now, skipping or force-removing from trash
                 
@@ -970,27 +987,29 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 text = 'Permanently delete {}?'.format( suffix )
                 
-                chunks_of_hashes = HydrusData.SplitListIntoChunks( hashes, 64 )
+                chunks_of_hashes = HydrusLists.SplitListIntoChunks( hashes, 64 )
                 
-                content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
                 
-                list_of_service_keys_to_content_updates = [ { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] } for content_update in content_updates ]
+                content_update_packages = [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update ) for content_update in content_updates ]
                 
                 save_reason = True
                 
-                involves_physical_delete = True
+                hashes_physically_deleted = hashes
                 
             
-            self._permitted_action_choices.append( ( text, ( deletee_file_service_key, list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, text ) ) )
+            self._permitted_action_choices.append( ( text, ( deletee_file_service_key, content_update_packages, save_reason, hashes_physically_deleted, text ) ) )
             
         
-        if self._num_actionable_local_file_services == 1 and not HC.options[ 'confirm_trash' ]:
+        unnatural_spicy_physical_delete = possibilities_involve_spicy_physical_delete and not we_are_advanced_delete_dialog
+        
+        if self._num_actionable_local_file_service_domains == 1 and not unnatural_spicy_physical_delete and not HC.options[ 'confirm_trash' ]:
             
             # this dialog will never show
             self._question_is_already_resolved = True
             
         
-        if HG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
+        if CG.client_controller.new_options.GetBoolean( 'use_advanced_file_deletion_dialog' ):
             
             hashes = [ m.GetHash() for m in self._media if CC.COMBINED_LOCAL_FILE_SERVICE_KEY in m.GetLocationsManager().GetCurrent() ]
             
@@ -1007,23 +1026,23 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                     text = 'Permanently delete these ' + HydrusData.ToHumanInt( num_to_delete ) + ' files and do not save a deletion record?'
                     
                 
-                chunks_of_hashes = list( HydrusData.SplitListIntoChunks( hashes, 64 ) ) # iterator, so list it to use it more than once, jej
+                chunks_of_hashes = list( HydrusLists.SplitListIntoChunks( hashes, 64 ) ) # iterator, so list it to use it more than once, jej
                 
-                list_of_service_keys_to_content_updates = []
+                content_update_packages = []
                 
-                content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_DELETE, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
                 
-                list_of_service_keys_to_content_updates.extend( [ { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] } for content_update in content_updates ] )
+                content_update_packages.extend( [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update ) for content_update in content_updates ] )
                 
-                content_updates = [ HydrusData.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
+                content_updates = [ ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_FILES, HC.CONTENT_UPDATE_CLEAR_DELETE_RECORD, chunk_of_hashes ) for chunk_of_hashes in chunks_of_hashes ]
                 
-                list_of_service_keys_to_content_updates.extend( [ { CC.COMBINED_LOCAL_FILE_SERVICE_KEY : [ content_update ] } for content_update in content_updates ] )
+                content_update_packages.extend( [ ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdate( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_update ) for content_update in content_updates ] )
                 
                 save_reason = False
                 
-                involves_physical_delete = True
+                hashes_physically_deleted = hashes
                 
-                self._permitted_action_choices.append( ( text, ( 'clear_delete', list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, text ) ) )
+                self._permitted_action_choices.append( ( text, ( 'clear_delete', content_update_packages, save_reason, hashes_physically_deleted, text ) ) )
                 
             
         
@@ -1035,11 +1054,11 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _SetFocus( self ):
         
-        if self._action_radio.isVisible():
+        if self._action_radio.isEnabled():
             
             self._action_radio.setFocus( QC.Qt.OtherFocusReason )
             
-        elif self._reason_panel.isVisible() and self._reason_panel.isEnabled():
+        elif self._reason_panel.isEnabled():
             
             self._reason_radio.setFocus( QC.Qt.OtherFocusReason )
             
@@ -1085,7 +1104,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def _UpdateControls( self ):
         
-        ( file_service_key, list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, description ) = self._action_radio.GetValue()
+        ( file_service_key, content_update_packages, save_reason, hashes_physically_deleted, description ) = self._action_radio.GetValue()
         
         reason_permitted = save_reason
         
@@ -1117,17 +1136,15 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             return ( False, [] )
             
         
-        involves_physical_delete = False
-        
-        ( file_service_key, list_of_service_keys_to_content_updates, save_reason, involves_physical_delete, description ) = self._action_radio.GetValue()
+        ( file_service_key, content_update_packages, save_reason, hashes_physically_deleted, description ) = self._action_radio.GetValue()
         
         if save_reason:
             
             reason = self._GetReason()
             
-            for service_keys_to_content_updates in list_of_service_keys_to_content_updates:
+            for content_update_package in content_update_packages:
                 
-                for ( service_key, content_updates ) in service_keys_to_content_updates.items():
+                for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
                     
                     for content_update in content_updates:
                         
@@ -1145,7 +1162,7 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             
         else:
             
-            previous_last_advanced_file_deletion_special_action = HG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_special_action' )
+            previous_last_advanced_file_deletion_special_action = CG.client_controller.new_options.GetNoneableString( 'last_advanced_file_deletion_special_action' )
             
             # if there is nothing to do but physically delete, then we don't want to overwrite an existing 'use service' setting
             # HACKMODE ALERT. len() == 64 is a stupid test for 'looks like a service key mate'
@@ -1157,12 +1174,12 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
             last_advanced_file_deletion_special_action = file_service_key
             
         
-        if save_action and HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_special_action' ):
+        if save_action and CG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_special_action' ):
             
-            HG.client_controller.new_options.SetNoneableString( 'last_advanced_file_deletion_special_action', last_advanced_file_deletion_special_action )
+            CG.client_controller.new_options.SetNoneableString( 'last_advanced_file_deletion_special_action', last_advanced_file_deletion_special_action )
             
         
-        if save_reason and HG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ):
+        if save_reason and CG.client_controller.new_options.GetBoolean( 'remember_last_advanced_file_deletion_reason' ):
             
             reasons_ok = self._reason_radio.isVisible() and self._reason_radio.isEnabled()
             
@@ -1179,11 +1196,11 @@ class EditDeleteFilesPanel( ClientGUIScrolledPanels.EditPanel ):
                     last_advanced_file_deletion_reason = reason
                     
                 
-                HG.client_controller.new_options.SetNoneableString( 'last_advanced_file_deletion_reason', last_advanced_file_deletion_reason )
+                CG.client_controller.new_options.SetNoneableString( 'last_advanced_file_deletion_reason', last_advanced_file_deletion_reason )
                 
             
         
-        return ( involves_physical_delete, list_of_service_keys_to_content_updates )
+        return ( hashes_physically_deleted, content_update_packages )
         
     
     def QuestionIsAlreadyResolved( self ):
@@ -1198,6 +1215,17 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
         
         self._duplicate_action = duplicate_action
+        
+        note = 'Editing for "{}".'.format( HC.duplicate_type_string_lookup[ self._duplicate_action ] )
+        
+        if self._duplicate_action != HC.DUPLICATE_BETTER:
+            
+            note += '\n' * 2
+            note += 'Note that this has fewer actions than the "this is better" decision. You can mostly just copy in both directions.'
+            
+        
+        self._not_better_note_st = ClientGUICommon.BetterStaticText( self, label = note )
+        self._not_better_note_st.setWordWrap( True )
         
         #
         
@@ -1224,10 +1252,12 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         rating_services_listctrl_panel.SetListCtrl( self._rating_service_actions )
         
         rating_services_listctrl_panel.AddButton( 'add', self._AddRating )
+        
         if self._duplicate_action == HC.DUPLICATE_BETTER: # because there is only one valid action otherwise
             
             rating_services_listctrl_panel.AddButton( 'edit', self._EditRating, enabled_only_on_selection = True )
             
+        
         rating_services_listctrl_panel.AddButton( 'delete', self._DeleteRating, enabled_only_on_selection = True )
         
         #
@@ -1239,19 +1269,23 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         self._sync_archive_action.addItem( 'always archive both', ClientDuplicates.SYNC_ARCHIVE_DO_BOTH_REGARDLESS )
         
         self._sync_urls_action = ClientGUICommon.BetterChoice( self )
+        self._sync_file_modified_date_action = ClientGUICommon.BetterChoice( self )
         self._sync_notes_action = ClientGUICommon.BetterChoice( self )
         
-        self._sync_urls_action.addItem( 'make no change', HC.CONTENT_MERGE_ACTION_NONE )
-        self._sync_notes_action.addItem( 'make no change', HC.CONTENT_MERGE_ACTION_NONE )
+        self._sync_urls_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_NONE ], HC.CONTENT_MERGE_ACTION_NONE )
+        self._sync_file_modified_date_action.addItem( HC.content_modified_date_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_NONE ], HC.CONTENT_MERGE_ACTION_NONE )
+        self._sync_notes_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_NONE ], HC.CONTENT_MERGE_ACTION_NONE )
         
         if self._duplicate_action == HC.DUPLICATE_BETTER:
             
             self._sync_urls_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_COPY ], HC.CONTENT_MERGE_ACTION_COPY )
+            self._sync_file_modified_date_action.addItem( HC.content_modified_date_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_COPY ], HC.CONTENT_MERGE_ACTION_COPY )
             self._sync_notes_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_COPY ], HC.CONTENT_MERGE_ACTION_COPY )
             self._sync_notes_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_MOVE ], HC.CONTENT_MERGE_ACTION_MOVE )
             
         
         self._sync_urls_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE ], HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE )
+        self._sync_file_modified_date_action.addItem( HC.content_modified_date_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE ], HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE )
         self._sync_notes_action.addItem( HC.content_merge_string_lookup[ HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE ], HC.CONTENT_MERGE_ACTION_TWO_WAY_MERGE )
         
         self._sync_note_import_options_button = ClientGUICommon.BetterButton( self, 'note merge settings', self._EditNoteImportOptions )
@@ -1262,10 +1296,11 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         rating_service_options = duplicate_content_merge_options.GetRatingServiceActions()
         sync_archive_action = duplicate_content_merge_options.GetSyncArchiveAction()
         sync_urls_action = duplicate_content_merge_options.GetSyncURLsAction()
+        sync_file_modified_date_action = duplicate_content_merge_options.GetSyncFileModifiedDateAction()
         sync_notes_action = duplicate_content_merge_options.GetSyncNotesAction()
         self._sync_note_import_options = duplicate_content_merge_options.GetSyncNoteImportOptions()
         
-        services_manager = HG.client_controller.services_manager
+        services_manager = CG.client_controller.services_manager
         
         self._service_keys_to_tag_options = { service_key : ( action, tag_filter ) for ( service_key, action, tag_filter ) in tag_service_options if services_manager.ServiceExists( service_key ) }
         
@@ -1286,14 +1321,17 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         if self._duplicate_action in ( HC.DUPLICATE_ALTERNATE, HC.DUPLICATE_FALSE_POSITIVE ) and not for_custom_action:
             
             self._sync_urls_action.setEnabled( False )
+            self._sync_file_modified_date_action.setEnabled( False )
             self._sync_notes_action.setEnabled( False )
             
             self._sync_urls_action.SetValue( HC.CONTENT_MERGE_ACTION_NONE )
+            self._sync_file_modified_date_action.SetValue( HC.CONTENT_MERGE_ACTION_NONE )
             self._sync_notes_action.SetValue( HC.CONTENT_MERGE_ACTION_NONE )
             
         else:
             
             self._sync_urls_action.SetValue( sync_urls_action )
+            self._sync_file_modified_date_action.SetValue( sync_file_modified_date_action )
             self._sync_notes_action.SetValue( sync_notes_action )
             
         
@@ -1309,12 +1347,14 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         
         vbox = QP.VBoxLayout()
         
+        QP.AddToLayout( vbox, self._not_better_note_st, CC.FLAGS_EXPAND_PERPENDICULAR )
         QP.AddToLayout( vbox, tag_services_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         QP.AddToLayout( vbox, rating_services_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
         
         rows = []
         
         rows.append( ( 'sync archived status?: ', self._sync_archive_action ) )
+        rows.append( ( 'sync file modified time?: ', self._sync_file_modified_date_action ) )
         rows.append( ( 'sync known urls?: ', self._sync_urls_action ) )
         rows.append( ( 'sync notes?: ', self._sync_notes_action ) )
         rows.append( ( '', self._sync_note_import_options_button ) )
@@ -1332,7 +1372,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
     
     def _AddRating( self ):
         
-        services_manager = HG.client_controller.services_manager
+        services_manager = CG.client_controller.services_manager
         
         choice_tuples = []
         
@@ -1350,7 +1390,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         
         if len( choice_tuples ) == 0:
             
-            QW.QMessageBox.critical( self, 'Error', 'You have no more tag or rating services to add! Try editing the existing ones instead!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'You have no more tag or rating services to add! Try editing the existing ones instead!' )
             
         else:
             
@@ -1410,7 +1450,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
     
     def _AddTag( self ):
         
-        services_manager = HG.client_controller.services_manager
+        services_manager = CG.client_controller.services_manager
         
         choice_tuples = []
         
@@ -1428,7 +1468,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         
         if len( choice_tuples ) == 0:
             
-            QW.QMessageBox.critical( self, 'Error', 'You have no more tag or rating services to add! Try editing the existing ones instead!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'You have no more tag or rating services to add! Try editing the existing ones instead!' )
             
         else:
             
@@ -1474,7 +1514,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
             
             with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit which tags will be merged' ) as dlg_3:
                 
-                namespaces = HG.client_controller.network_engine.domain_manager.GetParserNamespaces()
+                namespaces = CG.client_controller.network_engine.domain_manager.GetParserNamespaces()
                 
                 panel = ClientGUITags.EditTagFilterPanel( dlg_3, tag_filter, namespaces = namespaces )
                 
@@ -1500,7 +1540,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         
         try:
             
-            service = HG.client_controller.services_manager.GetService( service_key )
+            service = CG.client_controller.services_manager.GetService( service_key )
             
             service_name = service.GetName()
             
@@ -1535,7 +1575,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         
         try:
             
-            service_name = HG.client_controller.services_manager.GetName( service_key )
+            service_name = CG.client_controller.services_manager.GetName( service_key )
             
         except HydrusExceptions.DataMissing:
             
@@ -1608,7 +1648,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
             
             if self._duplicate_action == HC.DUPLICATE_BETTER:
                 
-                service = HG.client_controller.services_manager.GetService( service_key )
+                service = CG.client_controller.services_manager.GetService( service_key )
                 
                 service_type = service.GetServiceType()
                 
@@ -1681,7 +1721,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
             
             with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit which tags will be merged' ) as dlg_3:
                 
-                namespaces = HG.client_controller.network_engine.domain_manager.GetParserNamespaces()
+                namespaces = CG.client_controller.network_engine.domain_manager.GetParserNamespaces()
                 
                 panel = ClientGUITags.EditTagFilterPanel( dlg_3, tag_filter, namespaces = namespaces )
                 
@@ -1718,6 +1758,7 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         rating_service_actions = [ ( service_key, action ) for ( service_key, action ) in self._service_keys_to_rating_options.items() ]
         sync_archive_action = self._sync_archive_action.GetValue()
         sync_urls_action = self._sync_urls_action.GetValue()
+        sync_file_modified_date_action = self._sync_file_modified_date_action.GetValue()
         sync_notes_action = self._sync_notes_action.GetValue()
         
         duplicate_content_merge_options = ClientDuplicates.DuplicateContentMergeOptions()
@@ -1726,18 +1767,155 @@ class EditDuplicateContentMergeOptionsPanel( ClientGUIScrolledPanels.EditPanel )
         duplicate_content_merge_options.SetRatingServiceActions( rating_service_actions )
         duplicate_content_merge_options.SetSyncArchiveAction( sync_archive_action )
         duplicate_content_merge_options.SetSyncURLsAction( sync_urls_action )
+        duplicate_content_merge_options.SetSyncFileModifiedDateAction( sync_file_modified_date_action )
         duplicate_content_merge_options.SetSyncNotesAction( sync_notes_action )
         duplicate_content_merge_options.SetSyncNoteImportOptions( self._sync_note_import_options )
         
         return duplicate_content_merge_options
         
     
-class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationCommandProcessorMixin ):
+
+class EditFilesForcedFiletypePanel( ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent: QW.QWidget, original_mimes_count: typing.Dict[ int, int ], forced_mimes_count: typing.Dict[ int, int ] ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        
+        total_file_count = sum( original_mimes_count.values() )
+        total_forced_mimes_count = sum( forced_mimes_count.values() )
+        
+        self._forced_mime = ClientGUICommon.BetterChoice( self )
+        
+        if total_forced_mimes_count > 0:
+            
+            self._forced_mime.addItem( 'remove all forced filetypes', None )
+            
+        
+        do_not_allow_this_mime = None
+        
+        if len( original_mimes_count.keys() ) == 1:
+            
+            # we only have one filetype to start with, so don't let user say set to that
+            
+            do_not_allow_this_mime = list( original_mimes_count.keys() )[0]
+            
+        
+        general_mime_types = [
+            HC.GENERAL_IMAGE,
+            HC.GENERAL_ANIMATION,
+            HC.GENERAL_VIDEO,
+            HC.GENERAL_AUDIO,
+            HC.GENERAL_APPLICATION,
+            HC.GENERAL_IMAGE_PROJECT,
+            HC.GENERAL_APPLICATION_ARCHIVE
+        ]
+        
+        mimes_in_order = []
+        
+        for general_mime_type in general_mime_types:
+            
+            mimes_in_order.extend( HC.general_mimetypes_to_mime_groups[ general_mime_type ] )
+            
+        
+        mimes_in_order.append( HC.APPLICATION_HYDRUS_UPDATE_DEFINITIONS )
+        mimes_in_order.append( HC.APPLICATION_HYDRUS_UPDATE_CONTENT )
+        
+        for mime in mimes_in_order:
+            
+            if mime == do_not_allow_this_mime:
+                
+                continue
+                
+            
+            label = HC.mime_string_lookup[ mime ]
+            
+            if mime in HC.mimes_to_general_mimetypes:
+                
+                general_mime = HC.mimes_to_general_mimetypes[ mime ]
+                
+                label = f'{HC.mime_string_lookup[ general_mime ]} - {label}'
+                
+            
+            self._forced_mime.addItem( label, mime )
+            
+        
+        #
+        
+        original_filetype_statements = []
+        
+        for mime in mimes_in_order:
+            
+            if mime in original_mimes_count:
+                
+                count = original_mimes_count[ mime ]
+                
+                original_filetype_statements.append( f'{HydrusData.ToHumanInt(count)} {HC.mime_string_lookup[ mime ]}')
+                
+            
+        
+        original_filetype_summary = ', '.join( original_filetype_statements )
+        
+        if total_forced_mimes_count == 0:
+            
+            forced_filetype_summary = 'None are currently forced to be anything else.'
+            
+        else:
+            
+            forced_filetype_statements = []
+            
+            for mime in mimes_in_order:
+                
+                if mime in forced_mimes_count:
+                    
+                    count = forced_mimes_count[ mime ]
+                    
+                    forced_filetype_statements.append( f'{HydrusData.ToHumanInt(count)} {HC.mime_string_lookup[ mime ]}')
+                    
+                
+            
+            forced_filetype_summary = ', '.join( forced_filetype_statements )
+            
+            if total_forced_mimes_count == total_file_count:
+                
+                forced_filetype_summary = f'All are currently being forced: {forced_filetype_summary}.'
+                
+            else:
+                
+                forced_filetype_summary = f'{HydrusData.ToHumanInt(total_forced_mimes_count)} are currently being forced, to: {forced_filetype_summary}.'
+                
+            
+        
+        vbox = QP.VBoxLayout()
+        
+        text = 'WARNING: This is advanced and experimental! Be careful!'
+        text += '\n\n'
+        text += 'This will override what hydrus thinks the filetype is for all of these files. Files will be renamed to receive their new file extensions. The original filetype is not forgotten, and this can be undone.'
+        text += '\n\n'
+        text += f'Of the {HydrusData.ToHumanInt( total_file_count )} files, there are {original_filetype_summary}. {forced_filetype_summary}'
+        
+        st = ClientGUICommon.BetterStaticText( self, text )
+        st.setWordWrap( True )
+        
+        QP.AddToLayout( vbox, st, CC.FLAGS_EXPAND_PERPENDICULAR )
+        QP.AddToLayout( vbox, self._forced_mime, CC.FLAGS_EXPAND_PERPENDICULAR )
+        
+        self.widget().setLayout( vbox )
+        
+    
+    def GetValue( self ):
+        
+        forced_mime = self._forced_mime.GetValue()
+        
+        return forced_mime
+        
+    
+
+class EditFileNotesPanel( CAC.ApplicationCommandProcessorMixin, ClientGUIScrolledPanels.EditPanel ):
     
     def __init__( self, parent: QW.QWidget, names_to_notes: typing.Dict[ str, str ], name_to_start_on: typing.Optional[ str ] ):
         
-        CAC.ApplicationCommandProcessorMixin.__init__( self )
         ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         
         self._original_names = set()
         
@@ -1790,13 +1968,13 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
         
         ClientGUIFunctions.SetFocusLater( first_panel )
         
-        if HG.client_controller.new_options.GetBoolean( 'start_note_editing_at_end' ):
+        if CG.client_controller.new_options.GetBoolean( 'start_note_editing_at_end' ):
             
-            HG.client_controller.CallAfterQtSafe( first_panel, 'moving cursor to end', first_panel.moveCursor, QG.QTextCursor.End )
+            CG.client_controller.CallAfterQtSafe( first_panel, 'moving cursor to end', first_panel.moveCursor, QG.QTextCursor.End )
             
         else:
             
-            HG.client_controller.CallAfterQtSafe( first_panel, 'moving cursor to start', first_panel.moveCursor, QG.QTextCursor.Start )
+            CG.client_controller.CallAfterQtSafe( first_panel, 'moving cursor to start', first_panel.moveCursor, QG.QTextCursor.Start )
             
         
         #
@@ -1859,7 +2037,7 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
         
         ClientGUIFunctions.SetFocusLater( control )
         
-        HG.client_controller.CallAfterQtSafe( control, 'moving cursor to end', control.moveCursor, QG.QTextCursor.End )
+        CG.client_controller.CallAfterQtSafe( control, 'moving cursor to end', control.moveCursor, QG.QTextCursor.End )
         
         self._UpdateButtons()
         
@@ -1870,18 +2048,18 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
         
         text = json.dumps( names_to_notes )
         
-        HG.client_controller.pub( 'clipboard', 'text', text )
+        CG.client_controller.pub( 'clipboard', 'text', text )
         
     
     def _Paste( self ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
             
             return
             
@@ -1899,7 +2077,7 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
             
             for item in names_and_notes:
                 
-                if not isinstance( item, collections.abc.Collection ):
+                if not HydrusData.IsAListLikeCollection( item ):
                     
                     continue
                     
@@ -1926,9 +2104,9 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
             
             names_and_notes = clean_names_and_notes
             
-        except:
+        except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'Did not understand what was in the clipboard!' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON names and notes, either as an Object or a list of pairs', e )
             
             return
             
@@ -2094,6 +2272,927 @@ class EditFileNotesPanel( ClientGUIScrolledPanels.EditPanel, CAC.ApplicationComm
         return True
         
     
+
+class EditFileTimestampsPanel( CAC.ApplicationCommandProcessorMixin, ClientGUIScrolledPanels.EditPanel ):
+    
+    def __init__( self, parent: QW.QWidget, ordered_medias: typing.List[ ClientMedia.MediaSingleton ] ):
+        
+        ClientGUIScrolledPanels.EditPanel.__init__( self, parent )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
+        
+        self._ordered_medias = ordered_medias
+        
+        #
+        
+        # TODO: wangle archived time so it can set time to null-time medias that are nonetheless not hasinbox
+        # it'll have to do one of those 'do you want to set this changed value for just the files that already have a time, or all of them?'
+        self._archived_time = ClientGUITime.DateTimesButton( self, milliseconds_allowed = True, only_past_dates = True )
+        self._file_modified_time = ClientGUITime.DateTimesButton( self, milliseconds_allowed = True, only_past_dates = True )
+        
+        self._last_viewed_media_viewer_time = ClientGUITime.DateTimesButton( self, milliseconds_allowed = True, only_past_dates = True )
+        self._last_viewed_preview_viewer_time = ClientGUITime.DateTimesButton( self, milliseconds_allowed = True, only_past_dates = True )
+        
+        self._file_modified_time_warning_st = ClientGUICommon.BetterStaticText( self, label = 'initialising' )
+        self._file_modified_time_warning_st.setObjectName( 'HydrusWarning' )
+        self._file_modified_time_warning_st.setAlignment( QC.Qt.AlignCenter )
+        self._file_modified_time_warning_st.setVisible( False )
+        
+        domain_box = ClientGUICommon.StaticBox( self, 'web domain times' )
+        
+        self._domain_modified_list_ctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( domain_box )
+        
+        self._domain_modified_list_ctrl = ClientGUIListCtrl.BetterListCtrl( self._domain_modified_list_ctrl_panel, CGLC.COLUMN_LIST_DOMAIN_MODIFIED_TIMESTAMPS.ID, 8, self._ConvertDomainToDomainModifiedListCtrlTuples, use_simple_delete = True, activation_callback = self._EditDomainModifiedTimestamp )
+        
+        self._domain_modified_list_ctrl_panel.SetListCtrl( self._domain_modified_list_ctrl )
+        
+        self._domain_modified_list_ctrl_panel.AddButton( 'add', self._AddDomainModifiedTimestamp )
+        self._domain_modified_list_ctrl_panel.AddButton( 'edit', self._EditDomainModifiedTimestamp, enabled_only_on_selection = True )
+        self._domain_modified_list_ctrl_panel.AddDeleteButton()
+        
+        self._domain_modified_list_ctrl_data_dict = {}
+        
+        file_services_box = ClientGUICommon.StaticBox( self, 'file services' )
+        
+        self._file_services_list_ctrl_panel = ClientGUIListCtrl.BetterListCtrlPanel( file_services_box )
+        
+        self._file_services_list_ctrl = ClientGUIListCtrl.BetterListCtrl( self._file_services_list_ctrl_panel, CGLC.COLUMN_LIST_FILE_SERVICE_TIMESTAMPS.ID, 8, self._ConvertDataRowToFileServiceListCtrlTuples, activation_callback = self._EditFileServiceTimestamp )
+        
+        self._file_services_list_ctrl_panel.SetListCtrl( self._file_services_list_ctrl )
+        
+        self._file_services_list_ctrl_panel.AddButton( 'edit', self._EditFileServiceTimestamp, enabled_only_on_selection = True )
+        # TODO: An extension here is to add an 'add' button for files that have a _missing_ delete time
+        # and/or wangle the controls and stuff so a None result is piped along and displays and is settable here
+        
+        self._file_services_list_ctrl_data_dict = {}
+        
+        #
+        
+        rows = []
+        
+        #
+        
+        datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+        
+        for media in self._ordered_medias:
+            
+            datetime_value_range.AddValueTimestampMS( media.GetTimesManager().GetFileModifiedTimestampMS() )
+            
+        
+        if datetime_value_range.IsAllNull():
+            
+            self._file_modified_time.setEnabled( False )
+            self._file_modified_time.setText( 'unknown -- run file maintenance to determine' )
+            
+        else:
+            
+            self._file_modified_time.SetValue( datetime_value_range )
+            
+        
+        rows.append( ( 'file modified time: ', self._file_modified_time ) )
+        
+        rows.append( self._file_modified_time_warning_st )
+        
+        #
+        
+        datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+        
+        for media in self._ordered_medias:
+            
+            if media.HasInbox():
+                
+                continue
+                
+            
+            datetime_value_range.AddValueTimestampMS( media.GetTimesManager().GetArchivedTimestampMS() )
+            
+        
+        if datetime_value_range.IsAllNull():
+            
+            self._archived_time.setVisible( False )
+            self._archived_time.setEnabled( False )
+            
+        else:
+            
+            self._archived_time.SetValue( datetime_value_range )
+            
+            rows.append( ( 'archived time: ', self._archived_time ) )
+            
+        
+        #
+        
+        datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+        
+        for media in self._ordered_medias:
+            
+            datetime_value_range.AddValueTimestampMS( media.GetTimesManager().GetLastViewedTimestampMS( CC.CANVAS_MEDIA_VIEWER ) )
+            
+        
+        if datetime_value_range.IsAllNull():
+            
+            self._last_viewed_media_viewer_time.setVisible( False )
+            self._last_viewed_media_viewer_time.setEnabled( False )
+            
+        else:
+            
+            self._last_viewed_media_viewer_time.SetValue( datetime_value_range )
+            
+            rows.append( ( 'last viewed in media viewer: ', self._last_viewed_media_viewer_time ) )
+            
+        
+        datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+        
+        for media in self._ordered_medias:
+            
+            datetime_value_range.AddValueTimestampMS( media.GetTimesManager().GetLastViewedTimestampMS( CC.CANVAS_PREVIEW ) )
+            
+        
+        if datetime_value_range.IsAllNull():
+            
+            self._last_viewed_preview_viewer_time.setVisible( False )
+            self._last_viewed_preview_viewer_time.setEnabled( False )
+            
+        else:
+            
+            self._last_viewed_preview_viewer_time.SetValue( datetime_value_range )
+            
+            rows.append( ( 'last viewed in preview viewer: ', self._last_viewed_preview_viewer_time ) )
+            
+        
+        #
+        
+        domains_to_datetime_value_ranges = collections.defaultdict( ClientGUITime.DateTimeWidgetValueRange )
+        domains_to_hashes = collections.defaultdict( list )
+        
+        for media in self._ordered_medias:
+            
+            hash = media.GetHash()
+            
+            for ( domain, timestamp_ms ) in media.GetTimesManager().GetDomainModifiedTimestampsMS().items():
+                
+                domains_to_hashes[ domain ].append( hash )
+                
+                domains_to_datetime_value_ranges[ domain ].AddValueTimestampMS( timestamp_ms )
+                
+            
+        
+        user_has_edited = False
+        
+        domains = list( domains_to_hashes.keys() )
+        
+        self._original_domain_modified_domains = set( domains )
+        
+        for domain in domains:
+            
+            hashes = domains_to_hashes[ domain ]
+            datetime_value_range = domains_to_datetime_value_ranges[ domain ]
+            
+            datetime_value_range.AddValueQtDateTime( None, num_to_add = len( self._ordered_medias ) - len( hashes ) )
+            
+            self._domain_modified_list_ctrl_data_dict[ domain ] = ( hashes, datetime_value_range, user_has_edited )
+            
+        
+        self._domain_modified_list_ctrl.AddDatas( domains )
+        self._domain_modified_list_ctrl.Sort()
+        
+        file_service_keys_to_datetime_value_ranges = collections.defaultdict( ClientGUITime.DateTimeWidgetValueRange )
+        file_service_keys_and_timestamp_types_to_hashes = collections.defaultdict( list )
+        
+        for media in self._ordered_medias:
+            
+            for timestamp_data in media.GetTimesManager().GetFileServiceTimestampDatas():
+                
+                file_service_key = timestamp_data.location
+                timestamp_type = timestamp_data.timestamp_type
+                
+                row = ( file_service_key, timestamp_type )
+                
+                file_service_keys_and_timestamp_types_to_hashes[ row ].append( media.GetHash() )
+                
+                file_service_keys_to_datetime_value_ranges[ row ].AddValueTimestampMS( timestamp_data.timestamp_ms )
+                
+            
+        
+        user_has_edited = False
+        
+        file_service_keys_and_timestamp_types = list( file_service_keys_and_timestamp_types_to_hashes.keys() )
+        
+        for row in file_service_keys_and_timestamp_types:
+            
+            hashes = file_service_keys_and_timestamp_types_to_hashes[ row ]
+            datetime_value_range = file_service_keys_to_datetime_value_ranges[ row ]
+            
+            datetime_value_range.AddValueQtDateTime( None, num_to_add = len( self._ordered_medias ) - len( hashes ) )
+            
+            self._file_services_list_ctrl_data_dict[ row ] = ( hashes, datetime_value_range, user_has_edited )
+            
+        
+        self._file_services_list_ctrl.AddDatas( file_service_keys_and_timestamp_types )
+        self._file_services_list_ctrl.Sort()
+        
+        #
+        
+        menu_items = []
+        
+        menu_items.append( ( 'normal', 'all times', 'Copy every time here for pasting in another file\'s dialog.', self._Copy ) )
+        
+        c = HydrusData.Call( self._Copy, allowed_timestamp_types = ( HC.TIMESTAMP_TYPE_IMPORTED, HC.TIMESTAMP_TYPE_PREVIOUSLY_IMPORTED, HC.TIMESTAMP_TYPE_DELETED ) )
+        
+        menu_items.append( ( 'normal', 'all file service times', 'Copy every imported/deleted/previously imported time here for pasting in another file\'s dialog.', c ) )
+        
+        self._copy_button = ClientGUIMenuButton.MenuBitmapButton( self, CC.global_pixmaps().copy, menu_items )
+        self._copy_button.setToolTip( 'Copy timestamps to the clipboard.' )
+        
+        self._paste_button = ClientGUICommon.BetterBitmapButton( self, CC.global_pixmaps().paste, self._Paste )
+        self._paste_button.setToolTip( 'Paste timestamps from another timestamps dialog.' )
+        
+        #
+        
+        gridbox = ClientGUICommon.WrapInGrid( self, rows )
+        
+        domain_box.Add( self._domain_modified_list_ctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        file_services_box.Add( self._file_services_list_ctrl_panel, CC.FLAGS_EXPAND_BOTH_WAYS )
+        
+        button_hbox = QP.HBoxLayout()
+        
+        if len( self._ordered_medias ) != 1:
+            
+            self._copy_button.hide()
+            
+        
+        QP.AddToLayout( button_hbox, self._copy_button )
+        QP.AddToLayout( button_hbox, self._paste_button )
+        
+        vbox = QP.VBoxLayout()
+        
+        QP.AddToLayout( vbox, gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
+        QP.AddToLayout( vbox, domain_box, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, file_services_box, CC.FLAGS_EXPAND_BOTH_WAYS )
+        QP.AddToLayout( vbox, button_hbox, CC.FLAGS_ON_RIGHT )
+        
+        vbox.addStretch( 1 )
+        
+        self.widget().setLayout( vbox )
+        
+        self._my_shortcut_handler = ClientGUIShortcuts.ShortcutsHandler( self, [ 'global', 'media' ] )
+        
+        self._file_modified_time.dateTimeChanged.connect( self._ShowFileModifiedWarning )
+        
+        ClientGUIFunctions.SetFocusLater( self )
+        
+    
+    def _ConvertDomainToDomainModifiedListCtrlTuples( self, domain ):
+        
+        ( hashes, datetime_value_range, user_has_edited ) = self._domain_modified_list_ctrl_data_dict[ domain ]
+        
+        pretty_timestamp = datetime_value_range.ToString()
+        sort_timestamp = datetime_value_range
+        
+        display_tuple = ( domain, pretty_timestamp )
+        sort_tuple = ( domain, sort_timestamp )
+        
+        return ( display_tuple, sort_tuple )
+        
+    
+    def _ConvertDataRowToFileServiceListCtrlTuples( self, row ):
+        
+        ( file_service_key, timestamp_type ) = row
+        
+        ( hashes, datetime_value_range, user_has_edited ) = self._file_services_list_ctrl_data_dict[ row ]
+        
+        try:
+            
+            pretty_name = CG.client_controller.services_manager.GetName( file_service_key )
+            
+        except HydrusExceptions.DataMissing:
+            
+            pretty_name = 'unknown service!'
+            
+        
+        sort_name = pretty_name
+        
+        pretty_timestamp_type = HC.timestamp_type_str_lookup[ timestamp_type ]
+        sort_timestamp_type = pretty_timestamp_type
+        
+        pretty_timestamp = datetime_value_range.ToString()
+        
+        sort_timestamp = datetime_value_range
+        
+        display_tuple = ( pretty_name, pretty_timestamp_type, pretty_timestamp )
+        sort_tuple = ( sort_name, sort_timestamp_type, sort_timestamp )
+        
+        return ( display_tuple, sort_tuple )
+        
+    
+    def _Copy( self, allowed_timestamp_types = None ):
+        
+        if len( self._ordered_medias ) > 1:
+            
+            return
+            
+        
+        list_of_timestamp_data = HydrusSerialisable.SerialisableList( [ timestamp_data for ( hashes, timestamp_data, step_ms ) in self._GetValidTimestampDatas() ] )
+        
+        if allowed_timestamp_types is not None:
+            
+            list_of_timestamp_data = HydrusSerialisable.SerialisableList( [ timestamp_data for timestamp_data in list_of_timestamp_data if timestamp_data.timestamp_type in allowed_timestamp_types ] )
+            
+        
+        text = json.dumps( list_of_timestamp_data.GetSerialisableTuple() )
+        
+        CG.client_controller.pub( 'clipboard', 'text', text )
+        
+    
+    def _AddDomainModifiedTimestamp( self ):
+        
+        message = 'Enter domain'
+        
+        with ClientGUIDialogs.DialogTextEntry( self, message, allow_blank = False ) as dlg:
+            
+            if dlg.exec() == QW.QDialog.Accepted:
+                
+                domain = dlg.GetValue()
+                
+                for existing_domain in self._domain_modified_list_ctrl.GetData():
+                    
+                    if domain == existing_domain:
+                        
+                        ClientGUIDialogsMessage.ShowWarning( self, 'Sorry, that domain already exists!' )
+                        
+                        return
+                        
+                    
+                
+                with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit datetime' ) as dlg_2:
+                    
+                    hashes = [ m.GetHash() for m in self._ordered_medias ]
+                    
+                    panel = ClientGUIScrolledPanels.EditSingleCtrlPanel( dlg_2 )
+                    
+                    control = ClientGUITime.DateTimesCtrl( self, seconds_allowed = True, milliseconds_allowed = True, none_allowed = False, only_past_dates = True )
+                    
+                    datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+                    
+                    qt_datetime = QC.QDateTime.currentDateTime()
+                    
+                    datetime_value_range.AddValueQtDateTime( qt_datetime, num_to_add = len( hashes ) )
+                    
+                    control.SetValue( datetime_value_range )
+                    
+                    panel.SetControl( control )
+                    
+                    dlg_2.SetPanel( panel )
+                    
+                    if dlg_2.exec() == QW.QDialog.Accepted: # no 'haschanges' check here, we are ok with starting value
+                        
+                        new_datetime_value_range = control.GetValue()
+                        
+                        user_has_edited = True
+                        
+                        self._domain_modified_list_ctrl_data_dict[ domain ] = ( hashes, new_datetime_value_range, user_has_edited )
+                        
+                        self._domain_modified_list_ctrl.AddDatas( ( domain, ) )
+                        
+                        self._domain_modified_list_ctrl.Sort()
+                        
+                    
+                
+            
+        
+    
+    def _EditDomainModifiedTimestamp( self ):
+        
+        selected_domains = self._domain_modified_list_ctrl.GetData( only_selected = True )
+        
+        for domain in selected_domains:
+            
+            ( hashes, datetime_value_range, user_has_edited ) = self._domain_modified_list_ctrl_data_dict[ domain ]
+            
+            with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit datetime' ) as dlg:
+                
+                panel = ClientGUIScrolledPanels.EditSingleCtrlPanel( dlg )
+                
+                control = ClientGUITime.DateTimesCtrl( self, seconds_allowed = True, milliseconds_allowed = True, none_allowed = False, only_past_dates = True )
+                
+                control.SetValue( datetime_value_range )
+                
+                panel.SetControl( control )
+                
+                dlg.SetPanel( panel )
+                
+                if dlg.exec() == QW.QDialog.Accepted and control.HasChanges():
+                    
+                    new_datetime_value_range = control.GetValue()
+                    
+                    if len( hashes ) < len( self._ordered_medias ):
+                        
+                        result = ClientGUIDialogsQuick.GetYesNo( self, 'Not every file this dialog was launched on has a time for this domain. Do you want to apply what you just set to everything, or just the files that started with this domain?', yes_label = 'all files', no_label = 'only edit existing values' )
+                        
+                        if result == QW.QDialog.Accepted:
+                            
+                            hashes = [ m.GetHash() for m in self._ordered_medias ]
+                            
+                            new_datetime_value_range = new_datetime_value_range.DuplicateWithOverwrittenNulls()
+                            
+                        
+                    
+                    user_has_edited = True
+                    
+                    self._domain_modified_list_ctrl_data_dict[ domain ] = ( hashes, new_datetime_value_range, user_has_edited )
+                    
+                    self._domain_modified_list_ctrl.UpdateDatas( ( domain, ) )
+                    
+                    self._domain_modified_list_ctrl.Sort()
+                    
+                
+            
+        
+    
+    def _EditFileServiceTimestamp( self ):
+        
+        selected_file_service_keys_and_timestamp_types = self._file_services_list_ctrl.GetData( only_selected = True )
+        
+        for row in selected_file_service_keys_and_timestamp_types:
+            
+            ( hashes, datetime_value_range, user_has_edited ) = self._file_services_list_ctrl_data_dict[ row ]
+            
+            with ClientGUITopLevelWindowsPanels.DialogEdit( self, 'edit datetime' ) as dlg:
+                
+                panel = ClientGUIScrolledPanels.EditSingleCtrlPanel( dlg )
+                
+                control = ClientGUITime.DateTimesCtrl( self, seconds_allowed = True, milliseconds_allowed = True, none_allowed = False, only_past_dates = True )
+                
+                control.SetValue( datetime_value_range )
+                
+                panel.SetControl( control )
+                
+                dlg.SetPanel( panel )
+                
+                if dlg.exec() == QW.QDialog.Accepted and control.HasChanges():
+                    
+                    new_datetime_value_range = control.GetValue()
+                    
+                    user_has_edited = True
+                    
+                    self._file_services_list_ctrl_data_dict[ row ] = ( hashes, new_datetime_value_range, user_has_edited )
+                    
+                    self._file_services_list_ctrl.UpdateDatas( ( row, ) )
+                    
+                    self._file_services_list_ctrl.Sort()
+                    
+                
+            
+        
+    
+    def _GetValidTimestampDatas( self, only_changes = False ) -> typing.List[ typing.Tuple[ typing.Collection[ bytes ], ClientTime.TimestampData, int ] ]:
+        
+        if not only_changes and len( self._ordered_medias ) != 1:
+            
+            raise HydrusExceptions.VetoException( 'Sorry, cannot get original timestamps when more than one media objects created this dialog! This should not happen, so please let hydev know what created this situation.' )
+            
+        
+        result_tuples = []
+        
+        #
+        
+        if self._file_modified_time.HasChanges() or not only_changes:
+            
+            datetime_value_range = self._file_modified_time.GetValue()
+            
+            if datetime_value_range.HasFixedValue():
+                
+                file_modified_timestamp_ms = datetime_value_range.GetFixedValue().toMSecsSinceEpoch()
+                
+                hashes = [ media.GetHash() for media in self._ordered_medias if media.GetTimesManager().GetFileModifiedTimestampMS() is not None ]
+                
+                result_tuples.append( ( hashes, ClientTime.TimestampData.STATICFileModifiedTime( file_modified_timestamp_ms ), datetime_value_range.GetStepMS() ) )
+                
+            
+        
+        #
+        
+        if self._archived_time.isEnabled() and ( self._archived_time.HasChanges() or not only_changes ):
+            
+            datetime_value_range = self._archived_time.GetValue()
+            
+            if datetime_value_range.HasFixedValue():
+                
+                archive_timestamp_ms = datetime_value_range.GetFixedValue().toMSecsSinceEpoch()
+                
+                hashes = [ media.GetHash() for media in self._ordered_medias if not media.HasInbox() and media.GetTimesManager().GetArchivedTimestampMS() is not None ]
+                
+                result_tuples.append( ( hashes, ClientTime.TimestampData.STATICArchivedTime( archive_timestamp_ms ), datetime_value_range.GetStepMS() ) )
+                
+            
+        
+        #
+        
+        if self._last_viewed_media_viewer_time.isEnabled() and ( self._last_viewed_media_viewer_time.HasChanges() or not only_changes ):
+            
+            datetime_value_range = self._last_viewed_media_viewer_time.GetValue()
+            
+            if datetime_value_range.HasFixedValue():
+                
+                last_viewed_media_viewer_timestamp_ms = datetime_value_range.GetFixedValue().toMSecsSinceEpoch()
+                
+                hashes = [ media.GetHash() for media in self._ordered_medias if media.GetTimesManager().GetLastViewedTimestampMS( CC.CANVAS_MEDIA_VIEWER ) is not None ]
+                
+                result_tuples.append( ( hashes, ClientTime.TimestampData.STATICLastViewedTime( CC.CANVAS_MEDIA_VIEWER, last_viewed_media_viewer_timestamp_ms ), datetime_value_range.GetStepMS() ) )
+                
+            
+        
+        if self._last_viewed_preview_viewer_time.isEnabled() and ( self._last_viewed_preview_viewer_time.HasChanges() or not only_changes ):
+            
+            datetime_value_range = self._last_viewed_preview_viewer_time.GetValue()
+            
+            if datetime_value_range.HasFixedValue():
+                
+                last_viewed_preview_viewer_timestamp_ms = datetime_value_range.GetFixedValue().toMSecsSinceEpoch()
+                
+                hashes = [ media.GetHash() for media in self._ordered_medias if media.GetTimesManager().GetLastViewedTimestampMS( CC.CANVAS_PREVIEW ) is not None ]
+                
+                result_tuples.append( ( hashes, ClientTime.TimestampData.STATICLastViewedTime( CC.CANVAS_PREVIEW, last_viewed_preview_viewer_timestamp_ms ), datetime_value_range.GetStepMS() ) )
+                
+            
+        
+        #
+        
+        current_domains = self._domain_modified_list_ctrl.GetData()
+        
+        for domain in current_domains:
+            
+            ( hashes, datetime_value_range, user_has_edited ) = self._domain_modified_list_ctrl_data_dict[ domain ]
+            
+            if only_changes and not user_has_edited:
+                
+                continue
+                
+            
+            if not datetime_value_range.HasFixedValue():
+                
+                continue
+                
+            
+            qt_datetime = datetime_value_range.GetFixedValue()
+            
+            timestamp_ms = qt_datetime.toMSecsSinceEpoch()
+            
+            result_tuples.append( ( hashes, ClientTime.TimestampData.STATICDomainModifiedTime( domain, timestamp_ms ), datetime_value_range.GetStepMS() ) )
+            
+        
+        deletee_timestamp_domains = [ domain for domain in self._original_domain_modified_domains.difference( current_domains ) ]
+        
+        deletee_result_tuples = [ ( hashes, ClientTime.TimestampData( timestamp_type = HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN, location = domain ) ) for ( domain, ( hashes, datetime_value_range, user_has_edited ) ) in self._domain_modified_list_ctrl_data_dict.items() if domain in deletee_timestamp_domains ]
+        
+        result_tuples.extend( deletee_result_tuples )
+        
+        #
+        
+        file_service_list_tuples = self._file_services_list_ctrl.GetData()
+        
+        for row in file_service_list_tuples:
+            
+            ( file_service_key, timestamp_type ) = row
+            
+            ( hashes, datetime_value_range, user_has_edited ) = self._file_services_list_ctrl_data_dict[ row ]
+            
+            if only_changes and not user_has_edited:
+                
+                continue
+                
+            
+            if not datetime_value_range.HasFixedValue():
+                
+                continue
+                
+            
+            qt_datetime = datetime_value_range.GetFixedValue()
+            
+            timestamp_ms = qt_datetime.toMSecsSinceEpoch()
+            
+            timestamp_data = ClientTime.TimestampData( timestamp_type = timestamp_type, location = file_service_key, timestamp_ms = timestamp_ms )
+            
+            result_tuples.append( ( hashes, timestamp_data, datetime_value_range.GetStepMS() ) )
+            
+        
+        return result_tuples
+        
+    
+    def _Paste( self ):
+        
+        try:
+            
+            raw_text = CG.client_controller.GetClipboardText()
+            
+        except HydrusExceptions.DataMissing as e:
+            
+            ClientGUIDialogsMessage.ShowCritical( self, 'Problem pasting!', str(e) )
+            
+            return
+            
+        
+        try:
+            
+            serialisable_tuple = json.loads( raw_text )
+            
+            list_of_timestamp_data = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_tuple )
+            
+            for item in list_of_timestamp_data:
+                
+                if not isinstance( item, ClientTime.TimestampData ):
+                    
+                    raise Exception( 'Not a timestamp data!' )
+                    
+                
+            
+        except Exception as e:
+            
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'A list of JSON-serialised Timestamp Data objects', e )
+            
+            return
+            
+        
+        self._SetValueTimestampDatas( list_of_timestamp_data, from_user = True )
+        
+    
+    def _SetValueTimestampDatas( self, list_of_timestamp_data: typing.Collection[ ClientTime.TimestampData ], from_user = True ):
+        
+        for timestamp_data in list_of_timestamp_data:
+            
+            if timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_ARCHIVED:
+                
+                if timestamp_data.timestamp_ms is None:
+                    
+                    continue
+                    
+                
+                self._archived_time.SetValue( self._archived_time.GetValue().DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms ), from_user = from_user )
+                
+            elif timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_FILE:
+                
+                if timestamp_data.timestamp_ms is None:
+                    
+                    continue
+                    
+                
+                self._file_modified_time.SetValue( self._file_modified_time.GetValue().DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms ), from_user = from_user )
+                
+            elif timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_LAST_VIEWED:
+                
+                if timestamp_data.location is None or timestamp_data.timestamp_ms is None:
+                    
+                    continue
+                    
+                
+                if timestamp_data.location == CC.CANVAS_MEDIA_VIEWER:
+                    
+                    if self._last_viewed_media_viewer_time.isVisible():
+                        
+                        self._last_viewed_media_viewer_time.SetValue( self._last_viewed_media_viewer_time.GetValue().DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms ), from_user = from_user )
+                        
+                    
+                elif timestamp_data.location == CC.CANVAS_PREVIEW:
+                    
+                    if self._last_viewed_preview_viewer_time.isVisible():
+                        
+                        self._last_viewed_preview_viewer_time.SetValue( self._last_viewed_preview_viewer_time.GetValue().DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms ), from_user = from_user )
+                        
+                    
+                
+            elif timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_DOMAIN:
+                
+                if timestamp_data.location is None:
+                    
+                    continue
+                    
+                
+                domain = timestamp_data.location
+                
+                current_domains = self._domain_modified_list_ctrl.GetData()
+                
+                if domain in current_domains:
+                    
+                    if timestamp_data.timestamp_ms is None:
+                        
+                        del self._domain_modified_list_ctrl_data_dict[ domain ]
+                        
+                        self._domain_modified_list_ctrl.DeleteDatas( ( domain, ) )
+                        
+                    else:
+                        
+                        all_hashes = [ m.GetHash() for m in self._ordered_medias ]
+                        
+                        all_hashes_datetime_value_range = ClientGUITime.DateTimeWidgetValueRange()
+                        
+                        all_hashes_datetime_value_range.AddValueTimestampMS( timestamp_data.timestamp_ms, num_to_add = len( all_hashes ) )
+                        
+                        if domain in self._domain_modified_list_ctrl_data_dict:
+                            
+                            ( hashes, existing_datetime_value_range, user_has_edited ) = self._domain_modified_list_ctrl_data_dict[ domain ]
+                            
+                            datetime_value_range = existing_datetime_value_range.DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms )
+                            
+                            if len( hashes ) < len( self._ordered_medias ):
+                                
+                                result = ClientGUIDialogsQuick.GetYesNo( self, 'Not every file this dialog was launched on has a time for this domain. Do you want to apply what you just set to everything, or just the files that started with this domain?', yes_label = 'all files', no_label = 'only edit existing values' )
+                                
+                                if result == QW.QDialog.Accepted:
+                                    
+                                    hashes = all_hashes
+                                    datetime_value_range = all_hashes_datetime_value_range
+                                    
+                                
+                            
+                            if datetime_value_range == existing_datetime_value_range:
+                                
+                                continue
+                                
+                            
+                        else:
+                            
+                            hashes = all_hashes
+                            datetime_value_range = all_hashes_datetime_value_range
+                            
+                        
+                        user_has_edited = True
+                        
+                        self._domain_modified_list_ctrl_data_dict[ domain ] = ( hashes, datetime_value_range, user_has_edited )
+                        
+                        self._domain_modified_list_ctrl.UpdateDatas( ( domain, ) )
+                        
+                    
+                
+            elif timestamp_data.timestamp_type in ClientTime.FILE_SERVICE_TIMESTAMP_TYPES:
+                
+                if timestamp_data.location is None or timestamp_data.timestamp_ms is None:
+                    
+                    continue
+                    
+                
+                current_file_service_list_tuples = self._file_services_list_ctrl.GetData()
+                
+                for row in current_file_service_list_tuples:
+                    
+                    ( file_service_key, timestamp_type ) = row
+                    
+                    if timestamp_data.location == file_service_key and timestamp_data.timestamp_type == timestamp_type:
+                        
+                        ( hashes, existing_datetime_value_range, user_has_edited ) = self._file_services_list_ctrl_data_dict[ row ]
+                        
+                        datetime_value_range = existing_datetime_value_range.DuplicateWithNewTimestampMS( timestamp_data.timestamp_ms )
+                        
+                        if datetime_value_range != existing_datetime_value_range:
+                            
+                            user_has_edited = True
+                            
+                            self._file_services_list_ctrl_data_dict[ row ] = ( hashes, datetime_value_range, user_has_edited )
+                            
+                            self._file_services_list_ctrl.UpdateDatas( ( row, ) )
+                            
+                        
+                        break
+                        
+                    
+                
+            
+        
+    
+    def _ShowFileModifiedWarning( self ):
+        
+        for ( hashes, timestamp_data, step_ms ) in self._GetValidTimestampDatas( only_changes = True ):
+            
+            if timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_FILE and timestamp_data.timestamp_ms is not None:
+                
+                self._file_modified_time_warning_st.setVisible( True )
+                
+                if HydrusPaths.FileModifiedTimeIsOk( timestamp_data.timestamp_ms / 1000 ):
+                    
+                    self._file_modified_time_warning_st.setText( 'This will also change the modified time of the file on disk!' )
+                    
+                else:
+                    
+                    self._file_modified_time_warning_st.setText( 'File modified time on disk will not be changed--the timestamp is too early.' )
+                    
+                
+                return
+                
+            
+        
+        self._file_modified_time_warning_st.setVisible( False )
+        
+    
+    def GetFileModifiedUpdateData( self ) -> typing.Optional[ typing.Tuple[ typing.Collection[ bytes ], int, int ] ]:
+        
+        for ( hashes, timestamp_data, step_ms ) in self._GetValidTimestampDatas( only_changes = True ):
+            
+            if timestamp_data.timestamp_type == HC.TIMESTAMP_TYPE_MODIFIED_FILE and timestamp_data.timestamp_ms is not None:
+                
+                if HydrusPaths.FileModifiedTimeIsOk( timestamp_data.timestamp_ms / 1000 ):
+                    
+                    return ( hashes, timestamp_data.timestamp_ms, step_ms )
+                    
+                
+            
+        
+        return None
+        
+    
+    def GetContentUpdatePackage( self ) -> ClientContentUpdates.ContentUpdatePackage:
+        
+        content_updates = []
+        
+        for ( hashes, timestamp_data, step_ms ) in self._GetValidTimestampDatas( only_changes = True ):
+            
+            if timestamp_data.timestamp_ms is None:
+                
+                content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_DELETE, ( hashes, timestamp_data ) ) )
+                
+            else:
+                
+                if step_ms == 0:
+                    
+                    content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( hashes, timestamp_data ) ) )
+                    
+                else:
+                    
+                    # let's force sort here to be safe
+                    hashes = set( hashes )
+                    hashes = [ media.GetHash() for media in self._ordered_medias if media.GetHash() in hashes ]
+                    
+                    for ( i, hash ) in enumerate( hashes ):
+                        
+                        sub_timestamp_data = ClientTime.TimestampData( timestamp_type = timestamp_data.timestamp_type, location = timestamp_data.location, timestamp_ms = timestamp_data.timestamp_ms + ( i * step_ms ) )
+                        
+                        content_updates.append( ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_TIMESTAMP, HC.CONTENT_UPDATE_SET, ( ( hash, ), sub_timestamp_data ) ) )
+                        
+                    
+                
+            
+        
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromContentUpdates( CC.COMBINED_LOCAL_FILE_SERVICE_KEY, content_updates )
+        
+        return content_update_package
+        
+    
+    def GetValue( self ):
+        
+        return self.GetContentUpdatePackage()
+        
+    
+    def ProcessApplicationCommand( self, command: CAC.ApplicationCommand ):
+        
+        command_processed = True
+        
+        if command.IsSimpleCommand():
+            
+            action = command.GetSimpleAction()
+            
+            if action == CAC.SIMPLE_MANAGE_FILE_TIMESTAMPS:
+                
+                self._OKParent()
+                
+            else:
+                
+                command_processed = False
+                
+            
+        else:
+            
+            command_processed = False
+            
+        
+        return command_processed
+        
+    
+    def UserIsOKToOK( self ):
+        
+        content_update_package = self.GetContentUpdatePackage()
+        
+        total_changes = 0
+        
+        for ( service_key, content_updates ) in content_update_package.IterateContentUpdates():
+            
+            for content_update in content_updates:
+                
+                total_changes += len( content_update.GetHashes() )
+                
+            
+        
+        if total_changes > 100:
+            
+            message = 'This dialog is about to make more than 100 changes! Are you sure this is all correct?'
+            
+            result = ClientGUIDialogsQuick.GetYesNo( self, message )
+            
+            if result != QW.QDialog.Accepted:
+                
+                return False
+                
+            
+        
+        return True
+        
+    
+
 class EditFrameLocationPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def __init__( self, parent: QW.QWidget, info ):
@@ -2189,6 +3288,7 @@ class EditFrameLocationPanel( ClientGUIScrolledPanels.EditPanel ):
         return ( name, remember_size, remember_position, last_size, last_position, default_gravity, default_position, maximised, fullscreen )
         
     
+
 class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
     
     def __init__( self, parent: QW.QWidget, info ):
@@ -2208,6 +3308,8 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         self._preview_start_paused = QW.QCheckBox( self )
         self._preview_start_with_embed = QW.QCheckBox( self )
         
+        advanced_mode = CG.client_controller.new_options.GetBoolean( 'advanced_mode' )
+        
         for action in possible_show_actions:
             
             if action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV and not ClientGUIMPV.MPV_IS_AVAILABLE:
@@ -2215,11 +3317,20 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
                 continue
                 
             
+            simple_mode = not advanced_mode
+            not_source = not HC.RUNNING_FROM_SOURCE
+            not_qt_6 = not QtInit.WE_ARE_QT6
+            
+            if action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER and ( simple_mode or not_source or not_qt_6 ):
+                
+                continue
+                
+            
             s = CC.media_viewer_action_string_lookup[ action ]
             
-            if action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV and self._mime in ( HC.IMAGE_GIF, HC.GENERAL_ANIMATION ):
+            if action == CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE and self._mime in [ HC.GENERAL_VIDEO ] + list( HC.VIDEO ):
                 
-                s += ' (will show unanimated gifs with native viewer)'
+                s += ' (no audio support)'
                 
             
             self._media_show_action.addItem( s, action )
@@ -2299,6 +3410,8 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         QP.AddToLayout( vbox, ClientGUICommon.BetterStaticText(self,text), CC.FLAGS_EXPAND_PERPENDICULAR )
         
+        # TODO: Yo this layout sucks, figure out some better dynamic presentation of these options based on mime viewing capability, atm doing enable/disable and weird hide/show here is bad
+        
         rows = []
         
         rows.append( ( 'media viewer show action: ', self._media_show_action ) )
@@ -2312,7 +3425,7 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         QP.AddToLayout( vbox, gridbox, CC.FLAGS_EXPAND_SIZER_PERPENDICULAR )
         
-        if set( possible_show_actions ).isdisjoint( { CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV } ):
+        if set( possible_show_actions ).isdisjoint( { CC.MEDIA_VIEWER_ACTION_SHOW_WITH_NATIVE, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_MPV, CC.MEDIA_VIEWER_ACTION_SHOW_WITH_QMEDIAPLAYER } ):
             
             self._media_scale_up.hide()
             self._media_scale_down.hide()
@@ -2330,7 +3443,7 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
             rows.append( ( 'if the media is smaller than the media viewer canvas: ', self._media_scale_up ) )
             rows.append( ( 'if the media is larger than the media viewer canvas: ', self._media_scale_down ) )
-            rows.append( ( 'if the media is smaller than the preview canvas: ', self._preview_scale_up) )
+            rows.append( ( 'if the media is smaller than the preview canvas: ', self._preview_scale_up ) )
             rows.append( ( 'if the media is larger than the preview canvas: ', self._preview_scale_down ) )
             
             gridbox = ClientGUICommon.WrapInGrid( self, rows )
@@ -2411,6 +3524,10 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             
         
         is_application = self._mime == HC.GENERAL_APPLICATION or self._mime in HC.general_mimetypes_to_mime_groups[ HC.GENERAL_APPLICATION ]
+        is_archive = self._mime == HC.GENERAL_APPLICATION_ARCHIVE or self._mime in HC.general_mimetypes_to_mime_groups[ HC.GENERAL_APPLICATION_ARCHIVE ]
+        
+        # this is the one that is likely to get tricky, with SVG and PSD. maybe we'll move to 'renderable image projects' something
+        is_image_project = self._mime == HC.GENERAL_IMAGE_PROJECT or self._mime in HC.general_mimetypes_to_mime_groups[ HC.GENERAL_IMAGE_PROJECT ]
         is_image = self._mime == HC.GENERAL_IMAGE or self._mime in HC.general_mimetypes_to_mime_groups[ HC.GENERAL_IMAGE ]
         is_audio = self._mime == HC.GENERAL_AUDIO or self._mime in HC.general_mimetypes_to_mime_groups[ HC.GENERAL_AUDIO ]
         
@@ -2420,7 +3537,7 @@ class EditMediaViewOptionsPanel( ClientGUIScrolledPanels.EditPanel ):
             self._scale_down_quality.setEnabled( False )
             
         
-        if is_image or is_application:
+        if is_image or is_application or is_archive or is_image_project:
             
             self._media_start_paused.setEnabled( False )
             self._preview_start_paused.setEnabled( False )
@@ -2538,7 +3655,7 @@ class EditRegexFavourites( ClientGUIScrolledPanels.EditPanel ):
                         
                         if row in current_data:
                             
-                            QW.QMessageBox.warning( self, 'Warning', 'That regex and description are already in the list!' )
+                            ClientGUIDialogsMessage.ShowWarning( self, 'That regex and description are already in the list!' )
                             
                             return
                             

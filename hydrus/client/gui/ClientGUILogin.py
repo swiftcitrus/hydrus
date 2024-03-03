@@ -9,12 +9,14 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientDefaults
+from hydrus.client import ClientGlobals as CG
 from hydrus.client import ClientParsing
-from hydrus.client import ClientPaths
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
 from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIScrolledPanels
@@ -316,7 +318,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( self._login_scripts ) == 0:
             
-            QW.QMessageBox.critical( self, 'Error', 'You have no login scripts, so you cannot add a new login!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'You have no login scripts, so you cannot add a new login!' )
             
             return
             
@@ -373,7 +375,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
                     
                     if login_domain in domains_in_use:
                         
-                        QW.QMessageBox.warning( self, 'Warning', 'That domain is already in use!' )
+                        ClientGUIDialogsMessage.ShowWarning( self, 'That domain is already in use!' )
                         
                         return
                         
@@ -393,11 +395,11 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
                     
                     login_access_text = ClientNetworkingLogin.login_access_type_default_description_lookup[ login_access_type ]
                     
-                    with ClientGUIDialogs.DialogTextEntry( self, 'edit the access description, if needed', default = login_access_text, allow_blank = False ) as dlg:
+                    with ClientGUIDialogs.DialogTextEntry( self, 'edit the access description, if needed', default = login_access_text, allow_blank = False ) as dlg_2:
                         
-                        if dlg.exec() == QW.QDialog.Accepted:
+                        if dlg_2.exec() == QW.QDialog.Accepted:
                             
-                            login_access_text = dlg.GetValue()
+                            login_access_text = dlg_2.GetValue()
                             
                         else:
                             
@@ -555,7 +557,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
             
             ( login_domain, login_script_key_and_name, credentials_tuple, login_access_type, login_access_text, active, validity, validity_error_text, no_work_until, no_work_until_reason ) = domain_and_login_info
             
-            if not HydrusData.TimeHasPassed( no_work_until ) or no_work_until_reason != '':
+            if not HydrusTime.TimeHasPassed( no_work_until ) or no_work_until_reason != '':
                 
                 return True
                 
@@ -659,7 +661,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if login_expiry is None:
             
-            sort_login_expiry = HydrusData.GetNow() + 45 * 60
+            sort_login_expiry = HydrusTime.GetNow() + 45 * 60
             
         else:
             
@@ -668,13 +670,13 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         sort_logged_in = ( logged_in, sort_login_expiry )
         
-        if HydrusData.TimeHasPassed( no_work_until ):
+        if HydrusTime.TimeHasPassed( no_work_until ):
             
             pretty_no_work_until = ''
             
         else:
             
-            pretty_no_work_until = '{} - {}'.format( HydrusData.ConvertTimestampToPrettyExpires( no_work_until ), no_work_until_reason )
+            pretty_no_work_until = '{} - {}'.format( HydrusTime.TimestampToPrettyExpires( no_work_until ), no_work_until_reason )
             
         
         pretty_login_domain = login_domain
@@ -699,7 +701,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             else:
                 
-                pretty_login_expiry = HydrusData.ConvertTimestampToPrettyExpires( login_expiry )
+                pretty_login_expiry = HydrusTime.TimestampToPrettyExpires( login_expiry )
                 
             
             pretty_logged_in = 'yes - {}'.format( pretty_login_expiry )
@@ -758,7 +760,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if len( domains_to_login ) == 0:
             
-            QW.QMessageBox.warning( self, 'Warning', 'Unfortunately, none of the selected domains appear able to log in. Do you need to activate or scrub something somewhere?' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Unfortunately, none of the selected domains appear able to log in. Do you need to activate or scrub something somewhere?' )
             
         else:
             
@@ -799,7 +801,7 @@ class EditLoginsPanel( ClientGUIScrolledPanels.EditPanel ):
                 
             except HydrusExceptions.DataMissing:
                 
-                QW.QMessageBox.information( self, 'Information', 'Could not find a login script for "'+login_domain+'"! Please re-add the login script in the other dialog or update the entry here to a new one!' )
+                ClientGUIDialogsMessage.ShowWarning( self, f'Could not find a login script for "{login_domain}"! Please re-add the login script in the other dialog or update the entry here to a new one!' )
                 
                 return
                 
@@ -1284,7 +1286,7 @@ class ReviewTestResultPanel( ClientGUIScrolledPanels.ReviewPanel ):
     
     def _CopyData( self ):
         
-        HG.client_controller.pub( 'clipboard', 'text', self._downloaded_data )
+        CG.client_controller.pub( 'clipboard', 'text', self._downloaded_data )
         
     
 class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
@@ -1304,7 +1306,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
         
         menu_items = []
         
-        page_func = HydrusData.Call( ClientPaths.LaunchPathInWebBrowser, os.path.join( HC.HELP_DIR, 'downloader_login.html' ) )
+        page_func = HydrusData.Call( ClientGUIDialogsQuick.OpenDocumentation, self, HC.DOCUMENTATION_DOWNLOADER_LOGIN )
         
         menu_items.append( ( 'normal', 'open the login scripts help', 'Open the help page for login scripts in your web browser.', page_func ) )
         
@@ -1465,7 +1467,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if domain in existing_domains:
             
-            QW.QMessageBox.critical( self, 'Error', 'That domain already exists!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'That domain already exists!' )
             
             return
             
@@ -1636,7 +1638,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
                 return
                 
             
-            QW.QMessageBox.information( self, 'Information', final_result )
+            ClientGUIDialogsMessage.ShowInformation( self, final_result )
             
             self._final_test_result.setText( final_result )
             
@@ -1656,12 +1658,12 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 bandwidth_manager = ClientNetworkingBandwidth.NetworkBandwidthManager()
                 session_manager = ClientNetworkingSessions.NetworkSessionManager()
-                domain_manager = HG.client_controller.network_engine.domain_manager.Duplicate() # keep custom headers from current domain stuff
+                domain_manager = CG.client_controller.network_engine.domain_manager.Duplicate() # keep custom headers from current domain stuff
                 login_manager = ClientNetworkingLogin.NetworkLoginManager()
                 
-                network_engine = ClientNetworking.NetworkEngine( HG.client_controller, bandwidth_manager, session_manager, domain_manager, login_manager )
+                network_engine = ClientNetworking.NetworkEngine( CG.client_controller, bandwidth_manager, session_manager, domain_manager, login_manager )
                 
-                HG.client_controller.CallToThreadLongRunning( network_engine.MainLoop )
+                CG.client_controller.CallToThreadLongRunning( network_engine.MainLoop )
                 
                 network_context = ClientNetworkingContexts.NetworkContext.STATICGenerateForDomain( domain )
                 
@@ -1671,7 +1673,8 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
                 
                 login_result = str( e )
                 
-                HydrusData.ShowException( e )
+                HydrusData.Print( 'During login test, encountered this halt/error:' )
+                HydrusData.PrintException( e )
                 
             finally:
                 
@@ -1683,7 +1686,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
         
         if self._currently_testing:
             
-            QW.QMessageBox.warning( self, 'Warning', 'Currently testing already! Please cancel current job!' )
+            ClientGUIDialogsMessage.ShowWarning( self, 'Currently testing already! Please cancel current job!' )
             
             return
             
@@ -1752,7 +1755,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
         
         self._currently_testing = True
         
-        HG.client_controller.CallToThread( do_it, login_script, self._test_domain, self._test_credentials, network_job_presentation_context_factory )
+        CG.client_controller.CallToThread( do_it, login_script, self._test_domain, self._test_credentials, network_job_presentation_context_factory )
         
     
     def _EditExampleDomainsInfo( self ):
@@ -1781,7 +1784,7 @@ class EditLoginScriptPanel( ClientGUIScrolledPanels.EditPanel ):
             
             if domain != original_domain and domain in existing_domains:
                 
-                QW.QMessageBox.critical( self, 'Error', 'That domain already exists!' )
+                ClientGUIDialogsMessage.ShowWarning( self, 'That domain already exists!' )
                 
                 break
                 

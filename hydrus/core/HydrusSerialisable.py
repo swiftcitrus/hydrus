@@ -135,6 +135,12 @@ SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_URLS = 117
 SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_URLS = 118
 SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_NOTES = 119
 SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_NOTES = 120
+SERIALISABLE_TYPE_TIMESTAMP_DATA = 121
+SERIALISABLE_TYPE_METADATA_SINGLE_FILE_EXPORTER_MEDIA_TIMESTAMPS = 122
+SERIALISABLE_TYPE_METADATA_SINGLE_FILE_IMPORTER_MEDIA_TIMESTAMPS = 123
+SERIALISABLE_TYPE_PETITION_HEADER = 124
+SERIALISABLE_TYPE_STRING_JOINER = 125
+SERIALISABLE_TYPE_FILE_FILTER = 126
 
 SERIALISABLE_TYPES_TO_OBJECT_TYPES = {}
 
@@ -512,6 +518,11 @@ class SerialisableDictionary( SerialisableBase, dict ):
                 
                 key = ConvertMetaSerialisableTupleToObject( meta_key )
                 
+                if isinstance( key, list ):
+                    
+                    key = tuple( key )
+                    
+                
                 value = ConvertMetaSerialisableTupleToObject( meta_value )
                 
             except HydrusExceptions.SerialisationException as e:
@@ -567,11 +578,11 @@ class SerialisableDictionary( SerialisableBase, dict ):
     
     def GetSerialisableTuple( self ):
         
-        # TODO: delete this around version 537
+        # TODO: delete this around version 563
         # this is a patch to deal with me foolishly updating SerialisableDictionary without thinking that it is used in network comms
         # the server suddenly starts giving version 2 Dicts, and old clients can't handle it!
         # therefore, we are patching this to give a version 1 result if we are the server. we don't transport bytes stuff over network yet, nor store bytes in server services dict, so it is ok
-        # we are doing this for version 511, so let's give lads ~26 weeks to update
+        # we are doing this for version 511, so let's give lads ~52 weeks to update
         
         if HC.RUNNING_SERVER:
             

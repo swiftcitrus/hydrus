@@ -65,34 +65,11 @@ Now:
 *   Play with the system tags more if you like, and the sort-by dropdown. The collect-by dropdown is advanced, so wait until you understand _namespaces_ before expecting it to do anything.
 *   To close a page, middle-click its tab.
 
-### The client can currently import the following mimetypes:
 
-*   **image/bmp** (.bmp - converted to image/png on import)
-*   **image/gif** (.gif)
-*   **image/png** (.png)
-*   **image/apng** (.apng)
-*   **image/jpeg** (.jpg)
-*   **image/tiff** (.tiff)
-*   **image/webp** (.webp)
-*   **video/x-msvideo** (.avi)
-*   **video/x-flv** (.flv)
-*   **video/x-matroska** (.mkv)
-*   **video/quicktime** (.mov)
-*   **video/mp4** (.mp4)
-*   **video/mpeg** (.mpeg)
-*   **video/webm** (.webm)
-*   **video/x-ms-wmv** (.wmv)
-*   **audio/mp3** (.mp3)
-*   **audio/ogg** (.ogg)
-*   **audio/flac** (.flac)
-*   **audio/x-ms-wma** (.wma)
-*   **application/x-shockwave-flash** (.swf)
-*   **application/pdf** (.pdf)
-*   **application/x-photoshop** (.psd)
-*   **application/clip** (.clip)
-*   **application/vnd.rar** (.rar)
-*   **application/zip** (.zip)
-*   **application/x-7z-compressed** (.7z)
+
+### Filetype support
+
+Hydrus supports many filetypes. A full list can be viewed on the [Supported Filetypes](filetypes.md) page.
 
 Although some support is imperfect for the complicated filetypes. For the Windows and Linux built releases, hydrus now embeds an MPV player for video, audio and gifs, which provides smooth playback and audio, but some other environments may not support MPV and so will default when possible to the native hydrus software renderer, which does not support audio. When something does not render how you want, right-clicking on its thumbnail presents the option 'open externally', which will open the file in the appropriate default program (e.g. ACDSee, VLC).
 
@@ -120,7 +97,7 @@ Lets say you just downloaded a good thread, or perhaps you just imported an old 
 
 Select some thumbnails, and either choose _filter->archive/delete_ from the right-click menu or hit F12. You will see them in a special version of the media viewer, with the following default controls:
 
-*   ++left-button++, ++space++, or ++f7++: **keep and archive the file, move on**
+*   ++left-button++ or ++f7++: **keep and archive the file, move on**
 *   ++right-button++ or ++delete++: **delete the file, move on**
 *   ++up++: **Skip this file, move on**
 *   ++middle-button++ or ++backspace++: **I didn't mean that, go back one**

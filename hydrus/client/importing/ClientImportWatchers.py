@@ -1,13 +1,17 @@
 import threading
 import time
 
+from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientConstants as CC
 from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
+from hydrus.client import ClientTime
 from hydrus.client.importing import ClientImportControl
 from hydrus.client.importing import ClientImporting
 from hydrus.client.importing import ClientImportFileSeeds
@@ -39,7 +43,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         self._highlighted_watcher_url = None
         
-        self._checker_options = HG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
+        self._checker_options = CG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
         
         self._file_import_options = FileImportOptions.FileImportOptions()
         self._file_import_options.SetIsDefault( True )
@@ -72,7 +76,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         self._have_started = False
         
-        self._last_time_watchers_changed = HydrusData.GetNowPrecise()
+        self._last_time_watchers_changed = HydrusTime.GetNowPrecise()
         
         self._last_serialisable_change_timestamp = 0
         
@@ -87,12 +91,12 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         self._watchers.append( watcher )
         
-        self._last_time_watchers_changed = HydrusData.GetNowPrecise()
+        self._last_time_watchers_changed = HydrusTime.GetNowPrecise()
         
         watcher_key = watcher.GetWatcherKey()
         
         self._watcher_keys_to_watchers[ watcher_key ] = watcher
-        self._watcher_keys_to_added_timestamps[ watcher_key ] = HydrusData.GetNow()
+        self._watcher_keys_to_added_timestamps[ watcher_key ] = HydrusTime.GetNow()
         
     
     def _CleanAddedTimestamps( self ):
@@ -101,7 +105,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         for key in keys:
             
-            if HydrusData.TimeHasPassed( self._watcher_keys_to_added_timestamps[ key ] + self.ADDED_TIMESTAMP_DURATION ):
+            if HydrusTime.TimeHasPassed( self._watcher_keys_to_added_timestamps[ key ] + self.ADDED_TIMESTAMP_DURATION ):
                 
                 del self._watcher_keys_to_added_timestamps[ key ]
                 
@@ -111,7 +115,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         for key in keys:
             
-            if HydrusData.TimeHasPassed( self._watcher_keys_to_already_in_timestamps[ key ] + self.ADDED_TIMESTAMP_DURATION ):
+            if HydrusTime.TimeHasPassed( self._watcher_keys_to_already_in_timestamps[ key ] + self.ADDED_TIMESTAMP_DURATION ):
                 
                 del self._watcher_keys_to_already_in_timestamps[ key ]
                 
@@ -167,14 +171,14 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
         
         self._watchers.remove( watcher )
         
-        self._last_time_watchers_changed = HydrusData.GetNowPrecise()
+        self._last_time_watchers_changed = HydrusTime.GetNowPrecise()
         
         del self._watcher_keys_to_watchers[ watcher_key ]
         
     
     def _SerialisableChangeMade( self ):
         
-        self._last_serialisable_change_timestamp = HydrusData.GetNow()
+        self._last_serialisable_change_timestamp = HydrusTime.GetNow()
         
     
     def _SetDirty( self ):
@@ -190,7 +194,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
             
             try:
                 
-                checker_options = HG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
+                checker_options = CG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
                 
                 file_import_options = FileImportOptions.FileImportOptions()
                 file_import_options.SetIsDefault( True )
@@ -239,7 +243,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
             return None
             
         
-        url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+        url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
         
         with self._lock:
             
@@ -249,7 +253,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                     watcher_key = watcher.GetWatcherKey()
                     
-                    self._watcher_keys_to_already_in_timestamps[ watcher_key ] = HydrusData.GetNow()
+                    self._watcher_keys_to_already_in_timestamps[ watcher_key ] = HydrusTime.GetNow()
                     
                     return None
                     
@@ -261,12 +265,12 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
             
             if filterable_tags is not None:
                 
-                watcher.SetExternalFilterableTags( filterable_tags )
+                watcher.AddExternalFilterableTags( filterable_tags )
                 
             
             if additional_service_keys_to_tags is not None:
                 
-                watcher.SetExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
+                watcher.AddExternalAdditionalServiceKeysToTags( additional_service_keys_to_tags )
                 
             
             watcher.SetCheckerOptions( self._checker_options )
@@ -471,7 +475,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 added_timestamp = self._watcher_keys_to_added_timestamps[ watcher_key ]
                 
-                if HydrusData.TimeHasPassed( added_timestamp + self.ADDED_TIMESTAMP_DURATION ):
+                if HydrusTime.TimeHasPassed( added_timestamp + self.ADDED_TIMESTAMP_DURATION ):
                     
                     self._CleanAddedTimestamps()
                     
@@ -485,7 +489,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 already_in_timestamp = self._watcher_keys_to_already_in_timestamps[ watcher_key ]
                 
-                if HydrusData.TimeHasPassed( already_in_timestamp + self.ADDED_TIMESTAMP_DURATION ):
+                if HydrusTime.TimeHasPassed( already_in_timestamp + self.ADDED_TIMESTAMP_DURATION ):
                     
                     self._CleanAddedTimestamps()
                     
@@ -611,7 +615,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
             self._page_key = page_key
             
             # set a 2s period so the page value/range is breddy snappy
-            self._watchers_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), 2.0, self.REPEATINGWorkOnWatchers )
+            self._watchers_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), 2.0, self.REPEATINGWorkOnWatchers )
             
             for watcher in self._watchers:
                 
@@ -656,9 +660,9 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
             
         
-        if HydrusData.TimeHasPassed( self._next_pub_value_check_time ):
+        if HydrusTime.TimeHasPassed( self._next_pub_value_check_time ):
             
-            self._next_pub_value_check_time = HydrusData.GetNow() + 5
+            self._next_pub_value_check_time = HydrusTime.GetNow() + 5
             
             current_value_range = self.GetValueRange()
             
@@ -666,7 +670,7 @@ class MultipleWatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 self._last_pubbed_value_range = current_value_range
                 
-                HG.client_controller.pub( 'refresh_page_name', self._page_key )
+                CG.client_controller.pub( 'refresh_page_name', self._page_key )
                 
             
         
@@ -696,7 +700,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         self._external_filterable_tags = set()
         self._external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags()
         
-        self._checker_options = HG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
+        self._checker_options = CG.client_controller.new_options.GetDefaultWatcherCheckerOptions()
         
         self._file_import_options = FileImportOptions.FileImportOptions()
         self._file_import_options.SetIsDefault( True )
@@ -722,7 +726,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         self._no_work_until = 0
         self._no_work_until_reason = ''
         
-        self._creation_time = HydrusData.GetNow()
+        self._creation_time = HydrusTime.GetNow()
         
         self._file_velocity_status = ''
         self._files_status = ''
@@ -743,7 +747,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         
         self._last_serialisable_change_timestamp = 0
         
-        HG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
+        CG.client_controller.sub( self, 'NotifyFileSeedsUpdated', 'file_seed_cache_file_seeds_updated' )
         
     
     def _CheckerNetworkJobPresentationContextFactory( self, network_job ):
@@ -797,8 +801,8 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         
         gallery_seed = ClientImportGallerySeeds.GallerySeed( self._url, can_generate_more_pages = False )
         
-        gallery_seed.SetExternalFilterableTags( self._external_filterable_tags )
-        gallery_seed.SetExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
+        gallery_seed.AddExternalFilterableTags( self._external_filterable_tags )
+        gallery_seed.AddExternalAdditionalServiceKeysToTags( self._external_additional_service_keys_to_tags )
         
         self._gallery_seed_log.AddGallerySeeds( ( gallery_seed, ) )
         
@@ -842,7 +846,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
         except HydrusExceptions.NetworkException as e:
             
-            delay = HG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
+            delay = CG.client_controller.new_options.GetInteger( 'downloader_network_error_delay' )
             
             self._DelayWork( delay, str( e ) )
             
@@ -862,7 +866,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 self._check_now = False
                 
             
-            self._last_check_time = HydrusData.GetNow()
+            self._last_check_time = HydrusTime.GetNow()
             
             self._UpdateFileVelocityStatus()
             
@@ -890,7 +894,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             reason = reason.splitlines()[0]
             
         
-        self._no_work_until = HydrusData.GetNow() + time_delta
+        self._no_work_until = HydrusTime.GetNow() + time_delta
         self._no_work_until_reason = reason
         
     
@@ -997,7 +1001,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
     
     def _SerialisableChangeMade( self ):
         
-        self._last_serialisable_change_timestamp = HydrusData.GetNow()
+        self._last_serialisable_change_timestamp = HydrusTime.GetNow()
         
     
     def _UpdateFileVelocityStatus( self ):
@@ -1013,7 +1017,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
         else:
             
-            if not HydrusData.TimeHasPassed( self._no_work_until ):
+            if not HydrusTime.TimeHasPassed( self._no_work_until ):
                 
                 self._next_check_time = self._no_work_until + 1
                 
@@ -1032,9 +1036,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                     self._checking_paused = True
                     
                 
-                last_next_check_time = self._next_check_time
-                
-                self._next_check_time = self._checker_options.GetNextCheckTime( self._file_seed_cache, self._last_check_time, last_next_check_time )
+                self._next_check_time = self._checker_options.GetNextCheckTime( self._file_seed_cache, self._last_check_time )
                 
             
         
@@ -1085,7 +1087,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             ( url, serialisable_file_seed_cache, urls_to_filenames, urls_to_md5_base64, serialisable_checker_options, serialisable_file_import_options, serialisable_tag_import_options, last_check_time, files_paused, checking_paused, checking_status, subject, no_work_until, no_work_until_reason ) = old_serialisable_info
             
-            creation_time = HydrusData.GetNow()
+            creation_time = HydrusTime.GetNow()
             
             new_serialisable_info = ( url, serialisable_file_seed_cache, urls_to_filenames, urls_to_md5_base64, serialisable_checker_options, serialisable_file_import_options, serialisable_tag_import_options, last_check_time, files_paused, checking_paused, checking_status, subject, no_work_until, no_work_until_reason, creation_time )
             
@@ -1189,6 +1191,36 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         if did_substantial_work:
             
             time.sleep( ClientImporting.DID_SUBSTANTIAL_FILE_WORK_MINIMUM_SLEEP_TIME )
+            
+        
+    
+    def AddExternalAdditionalServiceKeysToTags( self, service_keys_to_tags ):
+        
+        with self._lock:
+            
+            external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags( service_keys_to_tags )
+            
+            if external_additional_service_keys_to_tags.DumpToString() != self._external_additional_service_keys_to_tags.DumpToString():
+                
+                self._external_additional_service_keys_to_tags.update( service_keys_to_tags )
+                
+                self._SerialisableChangeMade()
+                
+            
+        
+    
+    def AddExternalFilterableTags( self, tags ):
+        
+        with self._lock:
+            
+            tags_set = set( tags )
+            
+            if tags_set != self._external_filterable_tags:
+                
+                self._external_filterable_tags.update( tags )
+                
+                self._SerialisableChangeMade()
+                
             
         
     
@@ -1381,10 +1413,12 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             fsc = self._file_seed_cache
             
-            if presentation_import_options is None:
-                
-                presentation_import_options = FileImportOptions.GetRealPresentationImportOptions( self._file_import_options, FileImportOptions.IMPORT_TYPE_LOUD )
-                
+            fio = self._file_import_options
+            
+        
+        if presentation_import_options is None:
+            
+            presentation_import_options = FileImportOptions.GetRealPresentationImportOptions( fio, FileImportOptions.IMPORT_TYPE_LOUD )
             
         
         return fsc.GetPresentedHashes( presentation_import_options )
@@ -1396,20 +1430,20 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             files_work_to_do = self._file_seed_cache.WorkToDo()
             
-            checker_go = HydrusData.TimeHasPassed( self._next_check_time ) and not self._checking_paused
+            checker_go = HydrusTime.TimeHasPassed( self._next_check_time ) and not self._checking_paused
             files_go = files_work_to_do and not self._files_paused
             
             work_is_going_on = self._checker_working_lock.locked() or self._files_working_lock.locked()
             
-            if not HydrusData.TimeHasPassed( self._no_work_until ):
+            if not HydrusTime.TimeHasPassed( self._no_work_until ):
                 
                 if self._next_check_time is None:
                     
-                    text = '{} - working again {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( self._no_work_until ) )
+                    text = '{} - working again {}'.format( self._no_work_until_reason, ClientTime.TimestampToPrettyTimeDelta( self._no_work_until ) )
                     
                 else:
                     
-                    text = '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                    text = '{} - next check {}'.format( self._no_work_until_reason, ClientTime.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
                     
                 
                 return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DEFERRED, text )
@@ -1439,7 +1473,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                     if work_is_going_on:
                         
-                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PAUSING, 'pausing\u2026' )
+                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PAUSING, 'pausing' + HC.UNICODE_ELLIPSIS )
                         
                     else:
                         
@@ -1448,13 +1482,13 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                 else:
                     
-                    if self._next_check_time is None or HydrusData.TimeHasPassed( self._next_check_time ):
+                    if self._next_check_time is None or HydrusTime.TimeHasPassed( self._next_check_time ):
                         
                         return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_PENDING, 'pending' )
                         
                     else:
                         
-                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DEFERRED, ClientData.TimestampToPrettyTimeDelta( self._next_check_time, no_prefix = True ) )
+                        return ( ClientImporting.DOWNLOADER_SIMPLE_STATUS_DEFERRED, ClientTime.TimestampToPrettyTimeDelta( self._next_check_time, no_prefix = True ) )
                         
                     
                 
@@ -1465,15 +1499,15 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
         
         with self._lock:
             
-            if not HydrusData.TimeHasPassed( self._no_work_until ):
+            if not HydrusTime.TimeHasPassed( self._no_work_until ):
                 
                 if self._next_check_time is None:
                     
-                    no_work_text = '{} - working again {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( self._no_work_until ) )
+                    no_work_text = '{} - working again {}'.format( self._no_work_until_reason, ClientTime.TimestampToPrettyTimeDelta( self._no_work_until ) )
                     
                 else:
                     
-                    no_work_text = '{} - next check {}'.format( self._no_work_until_reason, ClientData.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
+                    no_work_text = '{} - next check {}'.format( self._no_work_until_reason, ClientTime.TimestampToPrettyTimeDelta( max( self._no_work_until, self._next_check_time ) ) )
                     
                 
                 files_status = no_work_text
@@ -1483,21 +1517,26 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 
                 files_work_to_do = self._file_seed_cache.WorkToDo()
                 
-                checker_go = HydrusData.TimeHasPassed( self._next_check_time ) and not self._checking_paused
+                checker_go = HydrusTime.TimeHasPassed( self._next_check_time ) and not self._checking_paused
                 files_go = files_work_to_do and not self._files_paused
                 
-                if checker_go and not self._checker_working_lock.locked():
+                if checker_go and not self._checker_working_lock.locked() and self._checker_repeating_job is not None and self._checker_repeating_job.WaitingOnWorkSlot():
                     
                     self._watcher_status = 'waiting for a work slot'
                     
                 
-                if files_go and not self._files_working_lock.locked():
+                if files_go and not self._files_working_lock.locked() and self._files_repeating_job is not None and self._files_repeating_job.WaitingOnWorkSlot():
                     
                     self._files_status = 'waiting for a work slot'
                     
                 
-                files_status = ClientImportControl.GenerateLiveStatusText( self._files_status, self._files_paused, self._no_work_until, self._no_work_until_reason )
-                watcher_status = ClientImportControl.GenerateLiveStatusText( self._watcher_status, self._checking_paused, self._no_work_until, self._no_work_until_reason )
+                currently_working = self._files_repeating_job is not None and self._files_repeating_job.CurrentlyWorking()
+                
+                files_status = ClientImportControl.GenerateLiveStatusText( self._files_status, self._files_paused, currently_working, self._no_work_until, self._no_work_until_reason )
+                
+                currently_working = self._checker_repeating_job is not None and self._checker_repeating_job.CurrentlyWorking()
+                
+                watcher_status = ClientImportControl.GenerateLiveStatusText( self._watcher_status, self._checking_paused, currently_working, self._no_work_until, self._no_work_until_reason )
                 
             
             return ( files_status, self._files_paused, self._file_velocity_status, self._next_check_time, watcher_status, self._subject, self._checking_status, self._check_now, self._checking_paused )
@@ -1686,36 +1725,6 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def SetExternalAdditionalServiceKeysToTags( self, service_keys_to_tags ):
-        
-        with self._lock:
-            
-            external_additional_service_keys_to_tags = ClientTags.ServiceKeysToTags( service_keys_to_tags )
-            
-            if external_additional_service_keys_to_tags.DumpToString() != self._external_additional_service_keys_to_tags.DumpToString():
-                
-                self._external_additional_service_keys_to_tags = external_additional_service_keys_to_tags
-                
-                self._SerialisableChangeMade()
-                
-            
-        
-    
-    def SetExternalFilterableTags( self, tags ):
-        
-        with self._lock:
-            
-            tags_set = set( tags )
-            
-            if tags_set != self._external_filterable_tags:
-                
-                self._external_filterable_tags = tags_set
-                
-                self._SerialisableChangeMade()
-                
-            
-        
-    
     def SetNoteImportOptions( self, note_import_options: NoteImportOptions.NoteImportOptions ):
         
         with self._lock:
@@ -1753,7 +1762,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             try:
                 
-                url = HG.client_controller.network_engine.domain_manager.NormaliseURL( url )
+                url = CG.client_controller.network_engine.domain_manager.NormaliseURL( url )
                 
             except HydrusExceptions.URLClassException:
                 
@@ -1787,8 +1796,8 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
             
             self._UpdateFileVelocityStatus()
             
-            self._files_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
-            self._checker_repeating_job = HG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnChecker )
+            self._files_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnFiles )
+            self._checker_repeating_job = CG.client_controller.CallRepeating( ClientImporting.GetRepeatingJobInitialDelay(), ClientImporting.REPEATING_JOB_TYPICAL_PERIOD, self.REPEATINGWorkOnChecker )
             
             self._files_repeating_job.SetThreadSlotType( 'watcher_files' )
             self._checker_repeating_job.SetThreadSlotType( 'watcher_check' )
@@ -1863,7 +1872,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                     
                     self._WorkOnFiles()
                     
-                    HG.client_controller.WaitUntilViewFree()
+                    CG.client_controller.WaitUntilViewFree()
                     
                     self._SerialisableChangeMade()
                     
@@ -1912,9 +1921,9 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 raise HydrusExceptions.VetoException( 'paused' )
                 
             
-            if HG.client_controller.new_options.GetBoolean( 'pause_all_watcher_checkers' ):
+            if CG.client_controller.new_options.GetBoolean( 'pause_all_watcher_checkers' ):
                 
-                raise HydrusExceptions.VetoException( 'all checkers are paused!' )
+                raise HydrusExceptions.VetoException( 'all checkers are paused! network->pause to resume!' )
                 
             
             if not self._HasURL():
@@ -1931,7 +1940,7 @@ class WatcherImport( HydrusSerialisable.SerialisableBase ):
                 raise HydrusExceptions.VetoException( 'URL DEAD' )
                 
             
-            check_due = HydrusData.TimeHasPassed( self._next_check_time )
+            check_due = HydrusTime.TimeHasPassed( self._next_check_time )
             
             if not check_due:
                 

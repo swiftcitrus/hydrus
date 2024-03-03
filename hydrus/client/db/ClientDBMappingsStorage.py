@@ -3,6 +3,8 @@ import typing
 
 from hydrus.core import HydrusConstants as HC
 
+from hydrus.client import ClientLocation
+from hydrus.client.db import ClientDBMaintenance
 from hydrus.client.db import ClientDBModule
 from hydrus.client.db import ClientDBServices
 
@@ -22,6 +24,7 @@ def DoingAFileJoinTagSearchIsFaster( estimated_file_row_count, estimated_tag_row
     
     return estimated_file_row_count * ( file_lookup_speed_ratio + temp_table_overhead ) < estimated_tag_row_count
     
+
 def GenerateMappingsTableNames( service_id: int ) -> typing.Tuple[ str, str, str, str ]:
     
     suffix = str( service_id )
@@ -36,6 +39,7 @@ def GenerateMappingsTableNames( service_id: int ) -> typing.Tuple[ str, str, str
     
     return ( current_mappings_table_name, deleted_mappings_table_name, pending_mappings_table_name, petitioned_mappings_table_name )
     
+
 def GenerateSpecificDisplayMappingsCacheTableNames( file_service_id, tag_service_id ):
     
     suffix = '{}_{}'.format( file_service_id, tag_service_id )
@@ -46,6 +50,7 @@ def GenerateSpecificDisplayMappingsCacheTableNames( file_service_id, tag_service
     
     return ( cache_display_current_mappings_table_name, cache_display_pending_mappings_table_name )
     
+
 def GenerateSpecificMappingsCacheTableNames( file_service_id, tag_service_id ):
     
     suffix = '{}_{}'.format( file_service_id, tag_service_id )
@@ -58,10 +63,12 @@ def GenerateSpecificMappingsCacheTableNames( file_service_id, tag_service_id ):
     
     return ( cache_current_mappings_table_name, cache_deleted_mappings_table_name, cache_pending_mappings_table_name )
     
+
 class ClientDBMappingsStorage( ClientDBModule.ClientDBModule ):
     
-    def __init__( self, cursor: sqlite3.Cursor, modules_services: ClientDBServices.ClientDBMasterServices ):
+    def __init__( self, cursor: sqlite3.Cursor, modules_db_maintenance: ClientDBMaintenance.ClientDBMaintenance, modules_services: ClientDBServices.ClientDBMasterServices ):
         
+        self.modules_db_maintenance = modules_db_maintenance
         self.modules_services = modules_services
         
         ClientDBModule.ClientDBModule.__init__( self, 'client mappings storage', cursor )
@@ -123,10 +130,10 @@ class ClientDBMappingsStorage( ClientDBModule.ClientDBModule ):
         
         ( current_mappings_table_name, deleted_mappings_table_name, pending_mappings_table_name, petitioned_mappings_table_name ) = GenerateMappingsTableNames( service_id )
         
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( current_mappings_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( deleted_mappings_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( pending_mappings_table_name ) )
-        self._Execute( 'DROP TABLE IF EXISTS {};'.format( petitioned_mappings_table_name ) )
+        self.modules_db_maintenance.DeferredDropTable( current_mappings_table_name )
+        self.modules_db_maintenance.DeferredDropTable( deleted_mappings_table_name )
+        self.modules_db_maintenance.DeferredDropTable( pending_mappings_table_name )
+        self.modules_db_maintenance.DeferredDropTable( petitioned_mappings_table_name )
         
     
     def FilterExistingUpdateMappings( self, tag_service_id, mappings_ids, action ):
@@ -372,6 +379,28 @@ class ClientDBMappingsStorage( ClientDBModule.ClientDBModule ):
             
         
         return statuses_to_table_names
+        
+    
+    def GetFastestStorageMappingTableNamesFromLocationContext( self, location_context: ClientLocation.LocationContext, tag_service_id: int ):
+        
+        # TODO: this can probably work better, e.g. if we have multiple local domains we can return all local files or whatever
+        
+        if location_context.IncludesDeleted() and not location_context.IncludesCurrent():
+            
+            known_fast_covering_file_service_id = self.modules_services.combined_deleted_file_service_id
+            
+        elif location_context.IsOneDomain():
+            
+            file_service_key = list( location_context.current_service_keys )[0]
+            
+            known_fast_covering_file_service_id = self.modules_services.GetServiceId( file_service_key )
+            
+        else:
+            
+            known_fast_covering_file_service_id = self.modules_services.combined_file_service_id 
+            
+        
+        return self.GetFastestStorageMappingTableNames( known_fast_covering_file_service_id, tag_service_id )
         
     
     def GetPendingMappingsCount( self, service_id: int ) -> int:

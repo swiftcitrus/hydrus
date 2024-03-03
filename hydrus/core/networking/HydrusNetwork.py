@@ -7,8 +7,10 @@ from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusLists
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusTime
 from hydrus.core.networking import HydrusNetworking
 
 UPDATE_CHECKING_PERIOD = 240
@@ -46,7 +48,7 @@ def GenerateDefaultServiceDictionary( service_type ):
             
             metadata = Metadata()
             
-            now = HydrusData.GetNow()
+            now = HydrusTime.GetNow()
             
             update_hashes = []
             begin = 0
@@ -223,13 +225,13 @@ class Account( object ):
             
             ( reason, created, expires ) = self._banned_info
             
-            return 'banned ' + HydrusData.TimestampToPrettyTimeDelta( created ) + ', ' + HydrusData.ConvertTimestampToPrettyExpires( expires ) + ' because: ' + reason
+            return 'banned ' + HydrusTime.TimestampToPrettyTimeDelta( created ) + ', ' + HydrusTime.TimestampToPrettyExpires( expires ) + ' because: ' + reason
             
         
     
     def _GetExpiresString( self ):
         
-        return HydrusData.ConvertTimestampToPrettyExpires( self._expires )
+        return HydrusTime.TimestampToPrettyExpires( self._expires )
         
     
     def _IsAdmin( self ):
@@ -253,7 +255,7 @@ class Account( object ):
                 
             else:
                 
-                if HydrusData.TimeHasPassed( expires ):
+                if HydrusTime.TimeHasPassed( expires ):
                     
                     self._banned_info = None
                     
@@ -275,7 +277,7 @@ class Account( object ):
             
         else:
             
-            return HydrusData.TimeHasPassed( self._expires )
+            return HydrusTime.TimeHasPassed( self._expires )
             
         
     
@@ -607,7 +609,7 @@ class Account( object ):
         
         with self._lock:
             
-            return self._account_type.GetTitle() + ' -- created ' + HydrusData.TimestampToPrettyTimeDelta( self._created )
+            return self._account_type.GetTitle() + ' -- created ' + HydrusTime.TimestampToPrettyTimeDelta( self._created )
             
         
     
@@ -1231,26 +1233,6 @@ class ClientToServerUpdate( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetClientsideContentUpdates( self ):
-        
-        content_updates = []
-        
-        for ( action, clientside_action ) in ( ( HC.CONTENT_UPDATE_PEND, HC.CONTENT_UPDATE_ADD ), ( HC.CONTENT_UPDATE_PETITION, HC.CONTENT_UPDATE_DELETE ) ):
-            
-            for ( content, reason ) in self._actions_to_contents_and_reasons[ action ]:
-                
-                content_type = content.GetContentType()
-                content_data = content.GetContentData()
-                
-                content_update = HydrusData.ContentUpdate( content_type, clientside_action, content_data )
-                
-                content_updates.append( content_update )
-                
-            
-        
-        return content_updates
-        
-    
     def GetContentDataIterator( self, content_type, action ):
         
         contents_and_reasons = self._actions_to_contents_and_reasons[ action ]
@@ -1284,6 +1266,18 @@ class ClientToServerUpdate( HydrusSerialisable.SerialisableBase ):
         return len( self._actions_to_contents_and_reasons ) > 0
         
     
+    def IterateAllActionsAndContentsAndReasons( self ):
+        
+        for ( action, contents_and_reasons ) in self._actions_to_contents_and_reasons.items():
+            
+            for ( content, reason ) in contents_and_reasons:
+                
+                yield ( action, content, reason )
+                
+            
+        
+    
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_CLIENT_TO_SERVER_UPDATE ] = ClientToServerUpdate
 
 class Content( HydrusSerialisable.SerialisableBase ):
@@ -1418,6 +1412,18 @@ class Content( HydrusSerialisable.SerialisableBase ):
         return hashes
         
     
+    def GetActualWeight( self ):
+        
+        if self._content_type in ( HC.CONTENT_TYPE_FILES, HC.CONTENT_TYPE_MAPPINGS ):
+            
+            return len( self.GetHashes() )
+            
+        else:
+            
+            return 1
+            
+        
+    
     def GetVirtualWeight( self ):
         
         if self._content_type in ( HC.CONTENT_TYPE_FILES, HC.CONTENT_TYPE_MAPPINGS ):
@@ -1449,7 +1455,7 @@ class Content( HydrusSerialisable.SerialisableBase ):
             
             hashes = self._content_data
             
-            for chunk_of_hashes in HydrusData.SplitListIntoChunks( hashes, 100 ):
+            for chunk_of_hashes in HydrusLists.SplitListIntoChunks( hashes, 100 ):
                 
                 content = Content( content_type = self._content_type, content_data = chunk_of_hashes )
                 
@@ -1460,7 +1466,7 @@ class Content( HydrusSerialisable.SerialisableBase ):
             
             ( tag, hashes ) = self._content_data
             
-            for chunk_of_hashes in HydrusData.SplitListIntoChunks( hashes, 100 ):
+            for chunk_of_hashes in HydrusLists.SplitListIntoChunks( hashes, 500 ):
                 
                 content = Content( content_type = self._content_type, content_data = ( tag, chunk_of_hashes ) )
                 
@@ -1960,7 +1966,7 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
         
         self._lock = threading.Lock()
         
-        now = HydrusData.GetNow()
+        now = HydrusTime.GetNow()
         
         self._metadata = metadata
         self._next_update_due = next_update_due
@@ -2117,7 +2123,7 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
             if self._biggest_end is None:
                 
-                return HydrusData.GetNow()
+                return HydrusTime.GetNow()
                 
             else:
                 
@@ -2142,16 +2148,16 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
                 
                 update_due = self._GetNextUpdateDueTime( from_client )
                 
-                if HydrusData.TimeHasPassed( update_due ):
+                if HydrusTime.TimeHasPassed( update_due ):
                     
                     s = 'checking for updates imminently'
                     
                 else:
                     
-                    s = 'checking for updates {}'.format( HydrusData.TimestampToPrettyTimeDelta( update_due ) )
+                    s = 'checking for updates {}'.format( HydrusTime.TimestampToPrettyTimeDelta( update_due ) )
                     
                 
-                return 'metadata synced up to {}, {}'.format( HydrusData.TimestampToPrettyTimeDelta( self._biggest_end ), s )
+                return 'metadata synced up to {}, {}'.format( HydrusTime.TimestampToPrettyTimeDelta( self._biggest_end ), s )
                 
             
         
@@ -2277,7 +2283,7 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
             next_update_due_time = self._GetNextUpdateDueTime( from_client )
             
-            return HydrusData.TimeHasPassed( next_update_due_time )
+            return HydrusTime.TimeHasPassed( next_update_due_time )
             
         
     
@@ -2289,9 +2295,9 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
             new_next_update_due = metadata_slice._next_update_due
             
-            if HydrusData.TimeHasPassed( new_next_update_due ):
+            if HydrusTime.TimeHasPassed( new_next_update_due ):
                 
-                new_next_update_due = HydrusData.GetNow() + 100000
+                new_next_update_due = HydrusTime.GetNow() + 100000
                 
             
             self._next_update_due = new_next_update_due
@@ -2309,15 +2315,16 @@ class Metadata( HydrusSerialisable.SerialisableBase ):
             
         
     
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_METADATA ] = Metadata
 
 class Petition( HydrusSerialisable.SerialisableBase ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_PETITION
     SERIALISABLE_NAME = 'Petition'
-    SERIALISABLE_VERSION = 2
+    SERIALISABLE_VERSION = 3
     
-    def __init__( self, petitioner_account = None, reason = None, actions_and_contents = None ):
+    def __init__( self, petitioner_account = None, petition_header = None, actions_and_contents = None ):
         
         if actions_and_contents is None:
             
@@ -2327,23 +2334,42 @@ class Petition( HydrusSerialisable.SerialisableBase ):
         HydrusSerialisable.SerialisableBase.__init__( self )
         
         self._petitioner_account = petitioner_account
-        self._reason = reason
+        self._petition_header = petition_header
         self._actions_and_contents = [ ( action, HydrusSerialisable.SerialisableList( contents ) ) for ( action, contents ) in actions_and_contents ]
+        
+        self._completed_actions_to_contents = collections.defaultdict( list )
+        
+    
+    def __eq__( self, other ):
+        
+        if isinstance( other, Petition ):
+            
+            return self.__hash__() == other.__hash__()
+            
+        
+        return NotImplemented
+        
+    
+    def __hash__( self ):
+        
+        return self._petition_header.__hash__()
         
     
     def _GetSerialisableInfo( self ):
         
         serialisable_petitioner_account = Account.GenerateSerialisableTupleFromAccount( self._petitioner_account )
+        serialisable_petition_header = self._petition_header.GetSerialisableTuple()
         serialisable_actions_and_contents = [ ( action, contents.GetSerialisableTuple() ) for ( action, contents ) in self._actions_and_contents ]
         
-        return ( serialisable_petitioner_account, self._reason, serialisable_actions_and_contents )
+        return ( serialisable_petitioner_account, serialisable_petition_header, serialisable_actions_and_contents )
         
     
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
-        ( serialisable_petitioner_account, self._reason, serialisable_actions_and_contents ) = serialisable_info
+        ( serialisable_petitioner_account, serialisable_petition_header, serialisable_actions_and_contents ) = serialisable_info
         
         self._petitioner_account = Account.GenerateAccountFromSerialisableTuple( serialisable_petitioner_account )
+        self._petition_header = HydrusSerialisable.CreateFromSerialisableTuple( serialisable_petition_header )
         self._actions_and_contents = [ ( action, HydrusSerialisable.CreateFromSerialisableTuple( serialisable_contents ) ) for ( action, serialisable_contents ) in serialisable_actions_and_contents ]
         
     
@@ -2364,6 +2390,126 @@ class Petition( HydrusSerialisable.SerialisableBase ):
             return ( 2, new_serialisable_info )
             
         
+        if version == 3:
+            
+            # we'll dump out, since this code should never be reached. a new client won't be receiving old petitions since an old server won't have the calls
+            # it is appropriate to update the version though--that lets an old client talking to a new server get a nicer 'version from the future' error
+            
+            raise NotImplementedError()
+            
+        
+    
+    def Approve( self, action, content ):
+        
+        self._completed_actions_to_contents[ action ].append( content )
+        
+    
+    def ApproveAll( self ):
+        
+        for ( action, contents ) in self._actions_and_contents:
+            
+            for content in contents:
+                
+                self.Approve( action, content )
+                
+            
+        
+    
+    def Deny( self, action, content ):
+        
+        if action == HC.CONTENT_UPDATE_PEND:
+            
+            denial_action = HC.CONTENT_UPDATE_DENY_PEND
+            
+        elif action == HC.CONTENT_UPDATE_PETITION:
+            
+            denial_action = HC.CONTENT_UPDATE_DENY_PETITION
+            
+        else:
+            
+            raise Exception( 'Petition came with unexpected action: {}'.format( action ) )
+            
+        
+        self._completed_actions_to_contents[ denial_action ].append( content )
+        
+    
+    def DenyAll( self ):
+        
+        for ( action, contents ) in self._actions_and_contents:
+            
+            for content in contents:
+                
+                self.Deny( action, content )
+                
+            
+        
+    
+    def GetCompletedUploadableClientToServerUpdates( self ):
+        
+        def break_contents_into_chunks( some_contents ):
+            
+            chunks_of_some_contents = []
+            chunk_of_some_contents = []
+            
+            weight_of_current_chunk = 0
+            
+            for content in some_contents:
+                
+                for content_chunk in content.IterateUploadableChunks(): # break 20K-strong mappings petitions into smaller bits to POST back
+                    
+                    chunk_of_some_contents.append( content_chunk )
+                    
+                    weight_of_current_chunk += content.GetVirtualWeight()
+                    
+                    if weight_of_current_chunk > 50:
+                        
+                        chunks_of_some_contents.append( chunk_of_some_contents )
+                        
+                        chunk_of_some_contents = []
+                        
+                        weight_of_current_chunk = 0
+                        
+                    
+                
+            
+            if len( chunk_of_some_contents ) > 0:
+                
+                chunks_of_some_contents.append( chunk_of_some_contents )
+                
+            
+            return chunks_of_some_contents
+            
+        
+        updates = []
+        
+        # make sure you delete before you add
+        for action in ( HC.CONTENT_UPDATE_DENY_PETITION, HC.CONTENT_UPDATE_DENY_PEND, HC.CONTENT_UPDATE_PETITION, HC.CONTENT_UPDATE_PEND ):
+            
+            contents = self._completed_actions_to_contents[ action ]
+            
+            if len( contents ) == 0:
+                
+                continue
+                
+            
+            chunks_of_contents = break_contents_into_chunks( contents )
+            
+            for chunk_of_contents in chunks_of_contents:
+                
+                update = ClientToServerUpdate()
+                
+                for content in chunk_of_contents:
+                    
+                    update.AddContent( action, content, self._petition_header.reason )
+                    
+                
+                updates.append( update )
+                
+            
+        
+        return updates
+        
+    
     def GetContents( self, action ):
         
         actions_to_contents = dict( self._actions_and_contents )
@@ -2388,73 +2534,115 @@ class Petition( HydrusSerialisable.SerialisableBase ):
         return self._petitioner_account
         
     
+    def GetPetitionHeader( self ) -> "PetitionHeader":
+        
+        return self._petition_header
+        
+    
     def GetReason( self ):
         
-        return self._reason
+        return self._petition_header.reason
         
     
-    @staticmethod
-    def GetApproval( action, contents, reason ):
+    def GetActualContentWeight( self ) -> int:
         
-        update = ClientToServerUpdate()
-        content_updates = []
+        total_weight = 0
         
-        if action == HC.CONTENT_UPDATE_PEND:
+        for ( action, contents ) in self._actions_and_contents:
             
-            content_update_action = HC.CONTENT_UPDATE_ADD
+            for content in contents:
+                
+                total_weight += content.GetActualWeight()
+                
             
-        elif action == HC.CONTENT_UPDATE_PETITION:
+        
+        return total_weight
+        
+    
+    def GetContentSummary( self ) -> str:
+        
+        num_sub_petitions = sum( ( len( contents ) for ( action, contents ) in self._actions_and_contents ) )
+        
+        if self._petition_header.content_type == HC.CONTENT_TYPE_MAPPINGS and num_sub_petitions > 1:
             
-            content_update_action = HC.CONTENT_UPDATE_DELETE
+            return '{} mappings in {} petitions'.format( HydrusData.ToHumanInt( self.GetActualContentWeight() ), HydrusData.ToHumanInt( num_sub_petitions ) )
             
         else:
             
-            raise Exception( 'Petition came with unexpected action: {}'.format( action ) )
+            return '{} {}'.format( HydrusData.ToHumanInt( self.GetActualContentWeight() ), HC.content_type_string_lookup[ self._petition_header.content_type ] )
             
-        
-        for content in contents:
-            
-            update.AddContent( action, content, reason )
-            
-            content_type = content.GetContentType()
-            
-            row = content.GetContentData()
-            
-            content_update = HydrusData.ContentUpdate( content_type, content_update_action, row )
-            
-            content_updates.append( content_update )
-            
-        
-        return ( update, content_updates )
         
     
-    @staticmethod
-    def GetDenial( action, contents, reason ):
-        
-        update = ClientToServerUpdate()
-        
-        if action == HC.CONTENT_UPDATE_PEND:
-            
-            denial_action = HC.CONTENT_UPDATE_DENY_PEND
-            
-        elif action == HC.CONTENT_UPDATE_PETITION:
-            
-            denial_action = HC.CONTENT_UPDATE_DENY_PETITION
-            
-        else:
-            
-            raise Exception( 'Petition came with unexpected action: {}'.format( action ) )
-            
-        
-        for content in contents:
-            
-            update.AddContent( denial_action, content, reason )
-            
-        
-        return update
-        
-    
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_PETITION ] = Petition
+
+class PetitionHeader( HydrusSerialisable.SerialisableBase ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_PETITION_HEADER
+    SERIALISABLE_NAME = 'Petitions Header'
+    SERIALISABLE_VERSION = 1
+    
+    def __init__( self, content_type = None, status = None, account_key = None, reason = None ):
+        
+        if content_type is None:
+            
+            content_type = HC.CONTENT_TYPE_MAPPINGS
+            
+        
+        if status is None:
+            
+            status = HC.CONTENT_STATUS_PETITIONED
+            
+        
+        if account_key is None:
+            
+            account_key = b''
+            
+        
+        if reason is None:
+            
+            reason = ''
+            
+        
+        HydrusSerialisable.SerialisableBase.__init__( self )
+        
+        self.content_type = content_type
+        self.status = status
+        self.account_key = account_key
+        self.reason = reason
+        
+    
+    def __eq__( self, other ):
+        
+        if isinstance( other, PetitionHeader ):
+            
+            return self.__hash__() == other.__hash__()
+            
+        
+        return NotImplemented
+        
+    
+    def __hash__( self ):
+        
+        return ( self.content_type, self.status, self.account_key, self.reason ).__hash__()
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        serialisable_account_key = self.account_key.hex()
+        
+        return ( self.content_type, self.status, serialisable_account_key, self.reason )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( self.content_type, self.status, serialisable_account_key, self.reason ) = serialisable_info
+        
+        self.account_key = bytes.fromhex( serialisable_account_key )
+        
+    
+
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_PETITION_HEADER ] = PetitionHeader
 
 class ServerService( object ):
     
@@ -2799,7 +2987,7 @@ class ServerServiceRepository( ServerServiceRestricted ):
         
         MAX_WAIT_TIME_WHEN_HEAVY_UPDATES = 120
         
-        time_started_nullifying = HydrusData.GetNow()
+        time_started_nullifying = HydrusTime.GetNow()
         time_to_stop_nullifying = time_started_nullifying + 3600
         
         while not HG.started_shutdown:
@@ -2819,7 +3007,7 @@ class ServerServiceRepository( ServerServiceRestricted ):
                 nullification_period = self._service_options[ 'nullification_period' ]
                 
                 # it isn't time to do the next yet!
-                if not HydrusData.TimeHasPassed( nullification_end + nullification_period ):
+                if not HydrusTime.TimeHasPassed( nullification_end + nullification_period ):
                     
                     return
                     
@@ -2849,15 +3037,15 @@ class ServerServiceRepository( ServerServiceRestricted ):
                 
                 HydrusData.Print( 'Nullifying account history for "{}" update {}.'.format( self._name, self._next_nullification_update_index ) )
                 
-                update_started = HydrusData.GetNowFloat()
+                update_started = HydrusTime.GetNowFloat()
                 
                 HG.server_controller.WriteSynchronous( 'nullify_history', service_key, nullification_begin, nullification_end )
                 
-                update_took = HydrusData.GetNowFloat() - update_started
+                update_took = HydrusTime.GetNowFloat() - update_started
                 
                 with self._lock:
                     
-                    HydrusData.Print( 'Account history for "{}" update {} was anonymised in {}.'.format( self._name, self._next_nullification_update_index, HydrusData.TimeDeltaToPrettyTimeDelta( update_took ) ) )
+                    HydrusData.Print( 'Account history for "{}" update {} was anonymised in {}.'.format( self._name, self._next_nullification_update_index, HydrusTime.TimeDeltaToPrettyTimeDelta( update_took ) ) )
                     
                     self._next_nullification_update_index += 1
                     
@@ -2869,7 +3057,7 @@ class ServerServiceRepository( ServerServiceRestricted ):
                 HG.server_busy.release()
                 
             
-            if HydrusData.TimeHasPassed( time_to_stop_nullifying ):
+            if HydrusTime.TimeHasPassed( time_to_stop_nullifying ):
                 
                 return
                 
@@ -2881,9 +3069,9 @@ class ServerServiceRepository( ServerServiceRestricted ):
             
             time_to_wait = min( update_took, MAX_WAIT_TIME_WHEN_HEAVY_UPDATES )
             
-            resume_timestamp = HydrusData.GetNowFloat() + time_to_wait
+            resume_timestamp = HydrusTime.GetNowFloat() + time_to_wait
             
-            while not HG.started_shutdown and not HydrusData.TimeHasPassedFloat( resume_timestamp ):
+            while not HG.started_shutdown and not HydrusTime.TimeHasPassedFloat( resume_timestamp ):
                 
                 time.sleep( 1 )
                 

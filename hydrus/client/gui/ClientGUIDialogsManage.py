@@ -9,23 +9,28 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core.networking import HydrusNATPunch
+from hydrus.core import HydrusTime
 
 from hydrus.client import ClientApplicationCommand as CAC
 from hydrus.client import ClientConstants as CC
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import ClientGUIAsync
 from hydrus.client.gui import ClientGUIDialogs
+from hydrus.client.gui import ClientGUIDialogsMessage
 from hydrus.client.gui import ClientGUIDialogsQuick
+from hydrus.client.gui import ClientGUIFunctions
 from hydrus.client.gui import ClientGUIRatings
 from hydrus.client.gui import ClientGUIShortcuts
 from hydrus.client.gui import QtPorting as QP
 from hydrus.client.gui.lists import ClientGUIListConstants as CGLC
 from hydrus.client.gui.lists import ClientGUIListCtrl
 from hydrus.client.gui.widgets import ClientGUICommon
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientRatings
 
 # Option Enums
 
-class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProcessorMixin ):
+class DialogManageRatings( CAC.ApplicationCommandProcessorMixin, ClientGUIDialogs.Dialog ):
     
     def __init__( self, parent, media ):
         
@@ -36,14 +41,14 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
             self._hashes.update( m.GetHashes() )
             
         
-        CAC.ApplicationCommandProcessorMixin.__init__( self )
         ClientGUIDialogs.Dialog.__init__( self, parent, 'manage ratings for ' + HydrusData.ToHumanInt( len( self._hashes ) ) + ' files', position = 'topleft' )
+        CAC.ApplicationCommandProcessorMixin.__init__( self )
         
         #
         
-        like_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
-        numerical_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
-        incdec_services = HG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_INCDEC, ) )
+        like_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_LIKE, ) )
+        numerical_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_NUMERICAL, ) )
+        incdec_services = CG.client_controller.services_manager.GetServices( ( HC.LOCAL_RATING_INCDEC, ) )
         
         self._panels = []
         
@@ -121,18 +126,18 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
         
         text = json.dumps( [ ( service_key.hex(), rating ) for ( service_key, rating ) in rating_clipboard_pairs ] )
         
-        HG.client_controller.pub( 'clipboard', 'text', text )
+        CG.client_controller.pub( 'clipboard', 'text', text )
         
     
     def _Paste( self ):
         
         try:
             
-            raw_text = HG.client_controller.GetClipboardText()
+            raw_text = CG.client_controller.GetClipboardText()
             
         except HydrusExceptions.DataMissing as e:
             
-            QW.QMessageBox.critical( self, 'Error', str(e) )
+            ClientGUIDialogsMessage.ShowCritical( self, 'Error', str( e ) )
             
             return
             
@@ -143,9 +148,9 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
             
             rating_clipboard_pairs = [ ( bytes.fromhex( service_key_encoded ), rating ) for ( service_key_encoded, rating ) in rating_clipboard_pairs_encoded ]
             
-        except:
+        except Exception as e:
             
-            QW.QMessageBox.critical( self, 'Error', 'Did not understand what was in the clipboard!' )
+            ClientGUIFunctions.PresentClipboardParseError( self, raw_text, 'JSON pairs of service keys and rating values', e )
             
             return
             
@@ -160,18 +165,16 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
         
         try:
             
-            service_keys_to_content_updates = {}
+            content_update_package = ClientContentUpdates.ContentUpdatePackage()
             
             for panel in self._panels:
                 
-                sub_service_keys_to_content_updates = panel.GetContentUpdates()
-                
-                service_keys_to_content_updates.update( sub_service_keys_to_content_updates )
+                content_update_package.AddContentUpdatePackage( panel.GetContentUpdatePackage() )
                 
             
-            if len( service_keys_to_content_updates ) > 0:
+            if content_update_package.HasContent():
                 
-                HG.client_controller.Write( 'content_updates', service_keys_to_content_updates )
+                CG.client_controller.Write( 'content_updates', content_update_package )
                 
             
         finally:
@@ -250,9 +253,9 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
             self.setLayout( gridbox )
             
         
-        def GetContentUpdates( self ):
+        def GetContentUpdatePackage( self ):
             
-            service_keys_to_content_updates = {}
+            content_update_package = ClientContentUpdates.ContentUpdatePackage()
             
             hashes = { hash for hash in itertools.chain.from_iterable( ( media.GetHashes() for media in self._media ) ) }
             
@@ -273,13 +276,13 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
                 
                 if rating != original_rating:
                     
-                    content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
                     
-                    service_keys_to_content_updates[ service_key ] = ( content_update, )
+                    content_update_package.AddContentUpdate( service_key, content_update )
                     
                 
             
-            return service_keys_to_content_updates
+            return content_update_package
             
         
         def GetRatingClipboardPairs( self ):
@@ -360,9 +363,9 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
             self.setLayout( gridbox )
             
         
-        def GetContentUpdates( self ):
+        def GetContentUpdatePackage( self ):
             
-            service_keys_to_content_updates = {}
+            content_update_package = ClientContentUpdates.ContentUpdatePackage()
             
             hashes = { hash for hash in itertools.chain.from_iterable( ( media.GetHashes() for media in self._media ) ) }
             
@@ -391,13 +394,13 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
                         rating = None
                         
                     
-                    content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
                     
-                    service_keys_to_content_updates[ service_key ] = ( content_update, )
+                    content_update_package.AddContentUpdate( service_key, content_update )
                     
                 
             
-            return service_keys_to_content_updates
+            return content_update_package
             
         
         def GetRatingClipboardPairs( self ):
@@ -507,9 +510,9 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
             self.setLayout( gridbox )
             
         
-        def GetContentUpdates( self ):
+        def GetContentUpdatePackage( self ):
             
-            service_keys_to_content_updates = {}
+            content_update_package = ClientContentUpdates.ContentUpdatePackage()
             
             hashes = { hash for hash in itertools.chain.from_iterable( ( media.GetHashes() for media in self._media ) ) }
             
@@ -534,13 +537,13 @@ class DialogManageRatings( ClientGUIDialogs.Dialog, CAC.ApplicationCommandProces
                 
                 if rating != original_rating:
                     
-                    content_update = HydrusData.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
+                    content_update = ClientContentUpdates.ContentUpdate( HC.CONTENT_TYPE_RATINGS, HC.CONTENT_UPDATE_ADD, ( rating, hashes ) )
                     
-                    service_keys_to_content_updates[ service_key ] = ( content_update, )
+                    content_update_package.AddContentUpdate( service_key, content_update )
                     
                 
             
-            return service_keys_to_content_updates
+            return content_update_package
             
         
         def GetRatingClipboardPairs( self ):
@@ -714,7 +717,7 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
             
         else:
             
-            pretty_duration = HydrusData.TimeDeltaToPrettyTimeDelta( duration )
+            pretty_duration = HydrusTime.TimeDeltaToPrettyTimeDelta( duration )
             
         
         display_tuple = ( description, internal_ip, str( internal_port ), str( external_port ), protocol, pretty_duration )
@@ -808,7 +811,7 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
             self._status_st.setText( self._external_ip )
             
         
-        self._status_st.setText( 'Loading external IP\u2026' )
+        self._status_st.setText( 'Loading external IP' + HC.UNICODE_ELLIPSIS )
         
         async_job = ClientGUIAsync.AsyncQtJob( self, work_callable, publish_callable )
         
@@ -839,7 +842,7 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
                 
                 e = result
                 
-                QP.CallAfter( QW.QMessageBox.critical, self, 'Error', 'Could not load mappings:'+os.linesep*2+str(e) )
+                ClientGUIDialogsMessage.ShowCritical( self, 'Error', 'Could not load mappings:' + '\n' * 2 + str(e) )
                 
                 self._status_st.setText( str( e ) )
                 
@@ -868,7 +871,7 @@ class DialogManageUPnP( ClientGUIDialogs.Dialog ):
                 
             
         
-        self._status_st.setText( 'Refreshing mappings--please wait\u2026' )
+        self._status_st.setText( 'Refreshing mappings--please wait' + HC.UNICODE_ELLIPSIS )
         
         self._mappings_list.SetData( [] )
         

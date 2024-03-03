@@ -5,18 +5,20 @@ import typing
 
 from hydrus.core import HydrusConstants as HC
 from hydrus.core import HydrusData
-from hydrus.core import HydrusGlobals as HG
+from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusThreading
+from hydrus.core import HydrusTime
 
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.gui import QtPorting as QP
 
-class JobKey( object ):
+class JobStatus( object ):
     
     def __init__( self, pausable = False, cancellable = False, maintenance_mode = HC.MAINTENANCE_FORCED, only_start_if_unbusy = False, stop_time = None, cancel_on_shutdown = True ):
         
         self._key = HydrusData.GenerateKey()
         
-        self._creation_time = HydrusData.GetNowFloat()
+        self._creation_time = HydrusTime.GetNowFloat()
         
         self._pausable = pausable
         self._cancellable = cancellable
@@ -25,25 +27,30 @@ class JobKey( object ):
         self._stop_time = stop_time
         self._cancel_on_shutdown = cancel_on_shutdown and maintenance_mode != HC.MAINTENANCE_SHUTDOWN
         
-        self._start_time = HydrusData.GetNow()
+        self._cancelled = False
+        self._paused = False
+        self._dismissed = False
+        self._finish_and_dismiss_time = None
         
-        self._deleted = threading.Event()
-        self._deletion_time = None
-        self._done = threading.Event()
-        self._cancelled = threading.Event()
-        self._paused = threading.Event()
+        self._i_am_an_ongoing_job = self._pausable or self._cancellable
         
-        self._ui_update_pause_period = 0.1
-        self._next_ui_update_pause = HydrusData.GetNowFloat() + self._ui_update_pause_period
+        self._done_event = threading.Event()
         
-        self._yield_pause_period = 10
-        self._next_yield_pause = HydrusData.GetNow() + self._yield_pause_period
+        if self._i_am_an_ongoing_job:
+            
+            self._job_finish_time = None
+            
+        else:
+            
+            self._done_event.set()
+            self._job_finish_time = HydrusTime.GetNowFloat()
+            
         
-        self._bigger_pause_period = 100
-        self._next_bigger_pause = HydrusData.GetNow() + self._bigger_pause_period
+        self._ui_update_pauser = HydrusThreading.BigJobPauser( 0.1, 0.00001 )
         
-        self._longer_pause_period = 1000
-        self._next_longer_pause = HydrusData.GetNow() + self._longer_pause_period
+        self._yield_pauser = HydrusThreading.BigJobPauser()
+        
+        self._cancel_tests_regular_checker = HydrusThreading.RegularJobChecker( 1.0 )
         
         self._exception = None
         
@@ -54,7 +61,7 @@ class JobKey( object ):
     
     def __eq__( self, other ):
         
-        if isinstance( other, JobKey ):
+        if isinstance( other, JobStatus ):
             
             return self.__hash__() == other.__hash__()
             
@@ -69,35 +76,33 @@ class JobKey( object ):
     
     def _CheckCancelTests( self ):
         
-        if not self._cancelled.is_set():
+        if self._cancel_tests_regular_checker.Due():
             
-            should_cancel = False
-            
-            if self._cancel_on_shutdown and HydrusThreading.IsThreadShuttingDown():
+            if not self._done_event.is_set():
                 
-                should_cancel = True
-                
-            
-            if HG.client_controller.ShouldStopThisWork( self._maintenance_mode, self._stop_time ):
-                
-                should_cancel = True
-                
-            
-            if should_cancel:
-                
-                self.Cancel()
-                
-            
-        
-        if not self._deleted.is_set():
-            
-            if self._deletion_time is not None:
-                
-                if HydrusData.TimeHasPassed( self._deletion_time ):
+                if self._cancel_on_shutdown and HydrusThreading.IsThreadShuttingDown():
                     
-                    self.Finish()
+                    self.Cancel()
                     
-                    self._deleted.set()
+                    return
+                    
+                
+                if CG.client_controller.ShouldStopThisWork( self._maintenance_mode, self._stop_time ):
+                    
+                    self.Cancel()
+                    
+                    return
+                    
+                
+            
+            if not self._dismissed:
+                
+                if self._finish_and_dismiss_time is not None:
+                    
+                    if HydrusTime.TimeHasPassed( self._finish_and_dismiss_time ):
+                        
+                        self.FinishAndDismiss()
+                        
                     
                 
             
@@ -111,30 +116,11 @@ class JobKey( object ):
             
         
     
-    def Cancel( self, seconds = None ):
+    def Cancel( self ):
         
-        if seconds is None:
-            
-            self._cancelled.set()
-            
-            self.Finish()
-            
-        else:
-            
-            HG.client_controller.CallLater( seconds, self.Cancel )
-            
+        self._cancelled = True
         
-    
-    def Delete( self, seconds = None ):
-        
-        if seconds is None:
-            
-            self._deletion_time = HydrusData.GetNow()
-            
-        else:
-            
-            self._deletion_time = HydrusData.GetNow() + seconds
-            
+        self.Finish()
         
     
     def DeleteFiles( self ):
@@ -152,6 +138,11 @@ class JobKey( object ):
         self.DeleteVariable( 'status_text_{}'.format( level ) )
         
     
+    def DeleteStatusTitle( self ):
+        
+        self.DeleteVariable( 'status_title' )
+        
+
     def DeleteVariable( self, name ):
         
         with self._variable_lock:
@@ -162,29 +153,43 @@ class JobKey( object ):
                 
             
         
-        if HydrusData.TimeHasPassedFloat( self._next_ui_update_pause ):
-            
-            time.sleep( 0.00001 )
-            
-            self._next_ui_update_pause = HydrusData.GetNowFloat() + self._ui_update_pause_period
-            
+        self._ui_update_pauser.Pause()
         
     
-    def Finish( self, seconds = None ):
+    def Finish( self ):
+        
+        self._job_finish_time = HydrusTime.GetNowFloat()
+        
+        self._paused = False
+        
+        self._pausable = False
+        self._cancellable = False
+        
+        self._done_event.set()
+        
+    
+    def FinishAndDismiss( self, seconds = None ):
+        
+        self.Finish()
         
         if seconds is None:
             
-            self._done.set()
+            self._dismissed = True
             
         else:
             
-            HG.client_controller.CallLater( seconds, self.Finish )
+            self._finish_and_dismiss_time = HydrusTime.GetNow() + seconds
             
         
     
     def GetCreationTime( self ):
         
         return self._creation_time
+        
+    
+    def GetDoneEvent( self ) -> threading.Event:
+        
+        return self._done_event
         
     
     def GetErrorException( self ) -> Exception:
@@ -269,62 +274,43 @@ class JobKey( object ):
     
     def IsCancellable( self ):
         
-        self._CheckCancelTests()
-        
-        return self._cancellable and not self.IsDone()
+        return self._cancellable
         
     
     def IsCancelled( self ):
         
         self._CheckCancelTests()
         
-        return self._cancelled.is_set()
+        return self._cancelled
         
     
-    def IsDeleted( self ):
+    def IsDismissed( self ):
         
         self._CheckCancelTests()
         
-        return self._deleted.is_set()
+        return self._dismissed
         
     
     def IsDone( self ):
         
         self._CheckCancelTests()
         
-        return self._done.is_set()
+        return self._done_event.is_set()
         
     
     def IsPausable( self ):
         
-        self._CheckCancelTests()
-        
-        return self._pausable and not self.IsDone()
+        return self._pausable
         
     
     def IsPaused( self ):
         
-        self._CheckCancelTests()
-        
-        return self._paused.is_set() and not self.IsDone()
-        
-    
-    def IsWorking( self ):
-        
-        self._CheckCancelTests()
-        
-        return not self.IsDone()
+        return self._paused
         
     
     def PausePlay( self ):
         
-        if self._paused.is_set(): self._paused.clear()
-        else: self._paused.set()
-        
-    
-    def SetCancellable( self, value ):
-        
-        self._cancellable = value
+        self._paused = not self._paused
         
     
     def SetErrorException( self, e: Exception ):
@@ -334,17 +320,24 @@ class JobKey( object ):
         self.Cancel()
         
     
-    def SetFiles( self, hashes, label ):
+    def SetFiles( self, hashes: typing.List[ bytes ], label: str ):
         
-        self.SetVariable( 'attached_files', ( list( hashes ), label ) )
+        if len( hashes ) == 0:
+            
+            self.DeleteFiles()
+            
+        else:
+            
+            hashes = HydrusData.DedupeList( list( hashes ) )
+            
+            self.SetVariable( 'attached_files', ( hashes, label ) )
+            
         
     
     def SetNetworkJob( self, network_job ):
         
         self.SetVariable( 'network_job', network_job )
         
-    
-    def SetPausable( self, value ): self._pausable = value
     
     def SetStatusText( self, text: str, level = 1 ):
         
@@ -370,17 +363,19 @@ class JobKey( object ):
         
         with self._variable_lock: self._variables[ name ] = value
         
-        if HydrusData.TimeHasPassed( self._next_ui_update_pause ):
-            
-            time.sleep( 0.00001 )
-            
-            self._next_ui_update_pause = HydrusData.GetNow() + self._ui_update_pause_period
-            
+        self._ui_update_pauser.Pause()
         
     
     def TimeRunning( self ):
         
-        return HydrusData.GetNow() - self._start_time
+        if self._job_finish_time is None:
+            
+            return HydrusTime.GetNowFloat() - self._creation_time
+            
+        else:
+            
+            return self._job_finish_time - self._creation_time
+            
         
     
     def ToString( self ):
@@ -429,26 +424,7 @@ class JobKey( object ):
     
     def WaitIfNeeded( self ):
         
-        if HydrusData.TimeHasPassed( self._next_yield_pause ):
-            
-            time.sleep( 0.1 )
-            
-            self._next_yield_pause = HydrusData.GetNow() + self._yield_pause_period
-            
-            if HydrusData.TimeHasPassed( self._next_bigger_pause ):
-                
-                time.sleep( 1 )
-                
-                self._next_bigger_pause = HydrusData.GetNow() + self._bigger_pause_period
-                
-                if HydrusData.TimeHasPassed( self._longer_pause_period ):
-                    
-                    time.sleep( 10 )
-                    
-                    self._next_longer_pause = HydrusData.GetNow() + self._longer_pause_period
-                    
-                
-            
+        self._yield_pauser.Pause()
         
         i_paused = False
         should_quit = False
@@ -473,6 +449,7 @@ class JobKey( object ):
         return ( i_paused, should_quit )
         
     
+
 class FileRWLock( object ):
     
     class RLock( object ):
@@ -623,6 +600,14 @@ class FileRWLock( object ):
             
         
     
+
+# TODO: a FileSystemRWLock, which will offer locks on a prefix basis. I had a think and some playing around, and I think best answer is to copy the FileRWLock here and just make it more complicated
+# The RLock and WLock will be asked for either global or prefix based lock
+# if grabbing global lock, work as normal
+# if grabbing a prefix lock, they first get the global read lock, to block global writes
+# only track the 'largest' (i.e. shortest) prefix we have in the file system. access to 'f333' will need '33' lock, if we are in transition and 'f33' (or, say, 'f27') still exists
+# think and plan more, write some good unit tests, make sure we aren't deadlocking by being stupid somehow
+
 class QtAwareJob( HydrusThreading.SingleJob ):
     
     PRETTY_CLASS_NAME = 'single UI job'

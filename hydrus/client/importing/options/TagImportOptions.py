@@ -3,16 +3,16 @@ import re
 import typing
 
 from hydrus.core import HydrusConstants as HC
-from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusGlobals as HG
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
 
 from hydrus.client import ClientConstants as CC
-from hydrus.client import ClientData
+from hydrus.client import ClientGlobals as CG
 from hydrus.client.importing.options import ClientImportOptions
 from hydrus.client.media import ClientMediaResult
+from hydrus.client.metadata import ClientContentUpdates
 from hydrus.client.metadata import ClientMetadataMigrationImporters
 from hydrus.client.metadata import ClientTags
 
@@ -224,7 +224,7 @@ class FilenameTaggingOptions( HydrusSerialisable.SerialisableBase ):
         
         tags = HydrusTags.CleanTags( tags )
         
-        tags = HG.client_controller.tag_display_manager.FilterTags( ClientTags.TAG_DISPLAY_STORAGE, service_key, tags )
+        tags = CG.client_controller.tag_display_manager.FilterTags( ClientTags.TAG_DISPLAY_STORAGE, service_key, tags )
         
         return tags
         
@@ -278,9 +278,9 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
     
     def _GetSerialisableInfo( self ):
         
-        if HG.client_controller.IsBooted():
+        if CG.client_controller.IsBooted():
             
-            services_manager = HG.client_controller.services_manager
+            services_manager = CG.client_controller.services_manager
             
             test_func = services_manager.ServiceExists
             
@@ -477,7 +477,7 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
             
         
     
-    def GetServiceKeysToContentUpdates( self, status: int, media_result: ClientMediaResult.MediaResult, filterable_tags: typing.Iterable[ str ], external_filterable_tags = None, external_additional_service_keys_to_tags = None ):
+    def GetContentUpdatePackage( self, status: int, media_result: ClientMediaResult.MediaResult, filterable_tags: typing.Iterable[ str ], external_filterable_tags = None, external_additional_service_keys_to_tags = None ) -> ClientContentUpdates.ContentUpdatePackage:
         
         if external_filterable_tags is None:
             
@@ -493,7 +493,7 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
         
         service_keys_to_tags = ClientTags.ServiceKeysToTags()
         
-        for service_key in HG.client_controller.services_manager.GetServiceKeys( HC.REAL_TAG_SERVICES ):
+        for service_key in CG.client_controller.services_manager.GetServiceKeys( HC.REAL_TAG_SERVICES ):
             
             service_additional_tags = set()
             
@@ -525,9 +525,9 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
         
         hash = media_result.GetHash()
         
-        service_keys_to_content_updates = ClientData.ConvertServiceKeysToTagsToServiceKeysToContentUpdates( { hash }, service_keys_to_tags )
+        content_update_package = ClientContentUpdates.ContentUpdatePackage.STATICCreateFromServiceKeysToTags( { hash }, service_keys_to_tags )
         
-        return service_keys_to_content_updates
+        return content_update_package
         
     
     def GetServiceTagImportOptions( self, service_key ):
@@ -557,7 +557,7 @@ class TagImportOptions( HydrusSerialisable.SerialisableBase ):
                 
                 try:
                     
-                    name = HG.client_controller.services_manager.GetName( service_key )
+                    name = CG.client_controller.services_manager.GetName( service_key )
                     
                 except HydrusExceptions.DataMissing:
                     
@@ -857,7 +857,7 @@ class ServiceTagImportOptions( HydrusSerialisable.SerialisableBase ):
                 
                 tags.difference_update( applicable_tags )
                 
-                existing_applicable_tags = HG.client_controller.Read( 'filter_existing_tags', service_key, applicable_tags )
+                existing_applicable_tags = CG.client_controller.Read( 'filter_existing_tags', service_key, applicable_tags )
                 
                 tags.update( existing_applicable_tags )
                 

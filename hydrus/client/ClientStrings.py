@@ -1,10 +1,9 @@
 import base64
-import calendar
+import datetime
 import hashlib
 import html
 import re
 import typing
-import time
 import urllib.parse
 
 from hydrus.core import HydrusConstants as HC
@@ -12,6 +11,10 @@ from hydrus.core import HydrusData
 from hydrus.core import HydrusExceptions
 from hydrus.core import HydrusSerialisable
 from hydrus.core import HydrusTags
+from hydrus.core import HydrusText
+from hydrus.core import HydrusTime
+
+from hydrus.client import ClientTime
 
 STRING_CONVERSION_REMOVE_TEXT_FROM_BEGINNING = 0
 STRING_CONVERSION_REMOVE_TEXT_FROM_END = 1
@@ -27,6 +30,7 @@ STRING_CONVERSION_DATE_DECODE = 10
 STRING_CONVERSION_INTEGER_ADDITION = 11
 STRING_CONVERSION_DATE_ENCODE = 12
 STRING_CONVERSION_HASH_FUNCTION = 13
+STRING_CONVERSION_DATEPARSER_DECODE = 14
 
 conversion_type_str_lookup = {}
 
@@ -40,7 +44,8 @@ conversion_type_str_lookup[ STRING_CONVERSION_CLIP_TEXT_FROM_BEGINNING ] = 'take
 conversion_type_str_lookup[ STRING_CONVERSION_CLIP_TEXT_FROM_END ] = 'take the end of the string'
 conversion_type_str_lookup[ STRING_CONVERSION_REVERSE ] = 'reverse text'
 conversion_type_str_lookup[ STRING_CONVERSION_REGEX_SUB ] = 'regex substitution'
-conversion_type_str_lookup[ STRING_CONVERSION_DATE_DECODE ] = 'datestring to timestamp'
+conversion_type_str_lookup[ STRING_CONVERSION_DATE_DECODE ] = 'datestring to timestamp (advanced)'
+conversion_type_str_lookup[ STRING_CONVERSION_DATEPARSER_DECODE ] = 'datestring to timestamp (easy)'
 conversion_type_str_lookup[ STRING_CONVERSION_INTEGER_ADDITION ] = 'integer addition'
 conversion_type_str_lookup[ STRING_CONVERSION_DATE_ENCODE ] = 'timestamp to datestring'
 conversion_type_str_lookup[ STRING_CONVERSION_HASH_FUNCTION ] = 'get hash of string'
@@ -67,6 +72,7 @@ class StringProcessingStep( HydrusSerialisable.SerialisableBase ):
         raise NotImplementedError()
         
     
+
 class StringConverter( StringProcessingStep ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_CONVERTER
@@ -245,34 +251,33 @@ class StringConverter( StringProcessingStep ):
                     
                     ( phrase, timezone, timezone_offset ) = data
                     
-                    struct_time = time.strptime( s, phrase )
+                    dt = datetime.datetime.strptime( s, phrase )
                     
-                    if timezone == HC.TIMEZONE_GMT:
+                    if timezone in ( HC.TIMEZONE_UTC, HC.TIMEZONE_OFFSET ):
                         
-                        # the given struct is in GMT, so calendar.timegm is appropriate here
+                        dt = datetime.datetime(
+                            dt.year,
+                            dt.month,
+                            dt.day,
+                            dt.hour,
+                            dt.minute,
+                            dt.second,
+                            tzinfo = datetime.timezone.utc
+                        )
                         
-                        timestamp = int( calendar.timegm( struct_time ) )
-                        
-                    elif timezone == HC.TIMEZONE_LOCAL:
-                        
-                        # the given struct is in local time, so time.mktime is correct
-                        
-                        try:
+                        if timezone == HC.TIMEZONE_OFFSET:
                             
-                            timestamp = int( time.mktime( struct_time ) )
-                            
-                        except:
-                            
-                            timestamp = HydrusData.GetNow()
+                            dt = dt - datetime.timedelta( seconds = timezone_offset )
                             
                         
-                    elif timezone == HC.TIMEZONE_OFFSET:
-                        
-                        # the given struct is in server time, which is the same as GMT minus an offset
-                        # if we are 7200 seconds ahead, the correct GMT timestamp needs to be 7200 smaller
-                        
-                        timestamp = int( calendar.timegm( struct_time ) ) - timezone_offset
-                        
+                    
+                    timestamp = HydrusTime.DateTimeToTimestamp( dt )
+                    
+                    s = str( timestamp )
+                    
+                elif conversion_type == STRING_CONVERSION_DATEPARSER_DECODE:
+                    
+                    timestamp = ClientTime.ParseDate( s )
                     
                     s = str( timestamp )
                     
@@ -289,20 +294,9 @@ class StringConverter( StringProcessingStep ):
                         raise Exception( '"{}" was not an integer!'.format( s ) )
                         
                     
-                    if timezone == HC.TIMEZONE_GMT:
-                        
-                        # user wants a UTC string, so we need UTC struct
-                        
-                        struct_time = time.gmtime( timestamp )
-                        
-                    elif timezone == HC.TIMEZONE_LOCAL:
-                        
-                        # user wants a local string, so we need localtime
-                        
-                        struct_time = time.localtime( timestamp )
-                        
+                    dt = HydrusTime.TimestampToDateTime( timestamp, timezone )
                     
-                    s = time.strftime( phrase, struct_time )
+                    s = dt.strftime( phrase )
                     
                 elif conversion_type == STRING_CONVERSION_INTEGER_ADDITION:
                     
@@ -449,6 +443,10 @@ class StringConverter( StringProcessingStep ):
             
             return 'datestring to timestamp: ' + repr( data )
             
+        elif conversion_type == STRING_CONVERSION_DATEPARSER_DECODE:
+            
+            return 'datestring to timestamp: automatic'
+            
         elif conversion_type == STRING_CONVERSION_DATE_ENCODE:
             
             return 'timestamp to datestring: ' + repr( data )
@@ -467,7 +465,135 @@ class StringConverter( StringProcessingStep ):
             
         
     
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_CONVERTER ] = StringConverter
+
+class StringJoiner( StringProcessingStep ):
+    
+    SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_JOINER
+    SERIALISABLE_NAME = 'String Concatenator'
+    SERIALISABLE_VERSION = 2
+    
+    def __init__( self, joiner: str = '', join_tuple_size: typing.Optional[ int ] = None ):
+        
+        StringProcessingStep.__init__( self )
+        
+        self._joiner = joiner
+        self._join_tuple_size = join_tuple_size
+        
+    
+    def _GetSerialisableInfo( self ):
+        
+        return ( self._joiner, self._join_tuple_size )
+        
+    
+    def _InitialiseFromSerialisableInfo( self, serialisable_info ):
+        
+        ( self._joiner, self._join_tuple_size ) = serialisable_info
+        
+    
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( joiner, join_tuple_size )  = old_serialisable_info
+            
+            joiner = joiner.replace( '\\', '\\\\' )
+            
+            new_serialisable_info = ( joiner, self._join_tuple_size )
+            
+            return ( 2, new_serialisable_info )
+            
+        
+    
+    def GetJoiner( self ):
+        
+        return self._joiner
+        
+    
+    def GetJoinTupleSize( self ):
+        
+        return self._join_tuple_size
+        
+    
+    def MakesChanges( self ) -> bool:
+        
+        return True
+        
+    
+    def Join( self, texts: typing.Collection[ str ] ) -> typing.List[ str ]:
+        
+        for text in texts:
+            
+            if isinstance( text, bytes ):
+                
+                raise HydrusExceptions.StringJoinerException( 'Got a bytes value in a string joiner!' )
+                
+            
+        
+        try:
+            
+            # \\n -> \n
+            joiner = self._joiner.encode( 'latin-1', 'backslashreplace' ).decode( 'unicode-escape' )
+            
+        except Exception as e:
+            
+            raise HydrusExceptions.StringJoinerException( 'Could not escape the joiner string. Wrong number of backslashes?' )
+            
+        
+        try:
+            
+            joined_texts = []
+            
+            if self._join_tuple_size is None:
+                
+                joined_texts.append( joiner.join( texts ) )
+                
+            else:
+                
+                for chunk_of_texts in HydrusData.SplitIteratorIntoChunks( texts, self._join_tuple_size ):
+                    
+                    if len( chunk_of_texts ) == self._join_tuple_size:
+                        
+                        joined_texts.append( joiner.join( chunk_of_texts ) )
+                        
+                    
+                
+            
+        except Exception as e:
+            
+            raise HydrusExceptions.StringJoinerException( 'Problem when joining text: {}'.format( e ) )
+            
+        
+        return joined_texts
+        
+    
+    def ToString( self, simple = False, with_type = False ) -> str:
+        
+        if simple:
+            
+            return 'joiner'
+            
+        
+        if self._join_tuple_size is None:
+            
+            result = f'joining all strings using "{self._joiner}"'
+            
+        else:
+            
+            result = f'joining every {self._join_tuple_size} strings using "{self._joiner}"'
+            
+        
+        if with_type:
+            
+            result = 'JOIN: {}'.format( result )
+            
+        
+        return result
+        
+    
+
+HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_JOINER ] = StringJoiner
 
 STRING_MATCH_FIXED = 0
 STRING_MATCH_FLEXIBLE = 1
@@ -608,7 +734,9 @@ class StringMatch( StringProcessingStep ):
             
             try:
                 
-                result = re.search( r, text )
+                text_to_test = ''.join( text.splitlines() ).strip()
+                
+                result = re.search( r, text_to_test )
                 
             except Exception as e:
                 
@@ -1021,7 +1149,7 @@ class StringSplitter( StringProcessingStep ):
     
     SERIALISABLE_TYPE = HydrusSerialisable.SERIALISABLE_TYPE_STRING_SPLITTER
     SERIALISABLE_NAME = 'String Splitter'
-    SERIALISABLE_VERSION = 1
+    SERIALISABLE_VERSION = 2
     
     def __init__( self, separator: str = ',', max_splits: typing.Optional[ int ] = None ):
         
@@ -1039,6 +1167,20 @@ class StringSplitter( StringProcessingStep ):
     def _InitialiseFromSerialisableInfo( self, serialisable_info ):
         
         ( self._separator, self._max_splits ) = serialisable_info
+        
+    
+    def _UpdateSerialisableInfo( self, version, old_serialisable_info ):
+        
+        if version == 1:
+            
+            ( separator, max_splits ) = old_serialisable_info
+            
+            separator = separator.replace( '\\', '\\\\' )
+            
+            new_serialisable_info = ( separator, max_splits )
+            
+            return ( 2, new_serialisable_info )
+            
         
     
     def GetMaxSplits( self ):
@@ -1065,13 +1207,22 @@ class StringSplitter( StringProcessingStep ):
         
         try:
             
+            separator = self._separator.encode( 'latin-1', 'backslashreplace' ).decode( 'unicode-escape' )
+            
+        except:
+            
+            raise HydrusExceptions.StringSplitterException( 'Could not escape the splitter string. Wrong number of backslashes?' )
+            
+        
+        try:
+            
             if self._max_splits is None:
                 
-                results = text.split( self._separator )
+                results = text.split( separator )
                 
             else:
                 
-                results = text.split( self._separator, self._max_splits )
+                results = text.split( separator, self._max_splits )
                 
             
         except Exception as e:
@@ -1104,6 +1255,7 @@ class StringSplitter( StringProcessingStep ):
         return result
         
     
+
 HydrusSerialisable.SERIALISABLE_TYPES_TO_OBJECT_TYPES[ HydrusSerialisable.SERIALISABLE_TYPE_STRING_SPLITTER ] = StringSplitter
 
 class StringTagFilter( StringProcessingStep ):
@@ -1339,6 +1491,17 @@ class StringProcessor( StringProcessingStep ):
                     next_strings = current_strings
                     
                 
+            elif isinstance( processing_step, StringJoiner ):
+                
+                try:
+                    
+                    next_strings = processing_step.Join( current_strings )
+                    
+                except:
+                    
+                    next_strings = current_strings
+                    
+                
             else:
                 
                 next_strings = []
@@ -1422,6 +1585,11 @@ class StringProcessor( StringProcessingStep ):
             if True in ( isinstance( ps, StringConverter ) for ps in self._processing_steps ):
                 
                 components.append( 'conversion' )
+                
+            
+            if True in ( isinstance( ps, StringJoiner ) for ps in self._processing_steps ):
+                
+                components.append( 'joining' )
                 
             
             if True in ( isinstance( ps, StringMatch ) for ps in self._processing_steps ):
